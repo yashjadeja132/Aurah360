@@ -1,0 +1,180 @@
+{
+  "app": {
+    "name": "Aurah 360",
+    "tagline": "Your skin, hair & laser care, in one place."
+  },
+  "onboarding": {
+    "mobile": "Mobile number",
+    "sendCode": "Send code",
+    "enterCode": "Enter the 6-digit code",
+    "codeSentTo": "Code sent to {{mobile}}",
+    "verify": "Verify & continue",
+    "resend": "Resend code",
+    "notRegistered": "This number isn't registered for app access yet — please contact your clinic."
+  },
+  "nav": {
+    "home": "Home",
+    "appointments": "Appointments",
+    "timeline": "Timeline",
+    "treatments": "Treatments",
+    "bills": "Bills",
+    "more": "More"
+  },
+  "home": {
+    "welcome": "Hello, {{name}}",
+    "nextAppointment": "Next appointment",
+    "noUpcoming": "No upcoming appointments",
+    "outstanding": "Outstanding balance",
+    "quickActions": "Quick actions",
+    "viewingDependent": "Viewing: {{name}}"
+  },
+  "common": {
+    "loading": "Loading…",
+    "retry": "Retry",
+    "noResults": "Nothing here yet",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "logout": "Log out",
+    "close": "Close"
+  },
+  "appointments": {
+    "book": "Book appointment",
+    "cancel": "Cancel appointment",
+    "reschedule": "Reschedule",
+    "status": "Status",
+    "pendingApproval": "Waiting for clinic to confirm",
+    "selectDoctor": "Select a doctor",
+    "selectDate": "Select a date",
+    "selectSlot": "Select a time",
+    "noSlots": "No slots available for this day",
+    "noDoctors": "No doctors on file yet — please call your clinic to book your first visit",
+    "confirmBooking": "Confirm booking",
+    "bookingConfirmed": "Your appointment is booked",
+    "rescheduleConfirmed": "Your appointment has been moved",
+    "currentAppointment": "Current appointment",
+    "newTime": "New time",
+    "with": "with",
+    "morning": "Morning",
+    "afternoon": "Afternoon",
+    "evening": "Evening",
+    "chooseDoctorFirst": "Choose a doctor to see available times",
+    "title": "Appointments",
+    "subtitle": "Upcoming visits, booking & rescheduling"
+  },
+  "documents": {
+    "title": "Documents",
+    "download": "View",
+    "subtitle": "Reports, prescriptions & released files",
+    "downloadErrorTitle": "Couldn't open document",
+    "downloadError": "We couldn't open this document. Please try again in a moment."
+  },
+  "bills": {
+    "title": "Bills & receipts",
+    "due": "Due",
+    "paid": "Paid",
+    "subtitle": "Invoices, payments & outstanding dues",
+    "viewInvoice": "View invoice",
+    "invoiceSummary": "Invoice summary",
+    "viewErrorTitle": "Couldn't load invoice",
+    "viewError": "We couldn't load this invoice's details. Please try again in a moment.",
+    "noPdfNotice": "A printable PDF isn't available yet — this is a summary of your invoice."
+  },
+  "notifications": {
+    "title": "Inbox",
+    "markRead": "Mark read",
+    "subtitle": "Updates from your clinic"
+  },
+  "offers": {
+    "title": "Offers",
+    "subtitle": "Current promotions for you",
+    "validUntil": "Valid until {{date}}"
+  },
+  "profile": {
+    "title": "Profile",
+    "language": "Language",
+    "support": "Privacy & support",
+    "requestData": "Request my data / correction / deletion",
+    "switchProfile": "Switch profile",
+    "myself": "Myself",
+    "appLock": "App lock",
+    "setupPin": "Set up PIN lock",
+    "pinLockOn": "PIN lock is on",
+    "turnOff": "Turn off"
+  },
+  "pin": {
+    "setupTitle": "Set up your PIN",
+    "setupSubtitle": "You'll need this PIN to open the app after it's been in the background.",
+    "enterPin": "Enter PIN",
+    "confirmPin": "Confirm PIN",
+    "lockedTitle": "App locked",
+    "wrongPin": "That PIN doesn't match. Try again.",
+    "mismatch": "PINs don't match. Try again.",
+    "tooShort": "PIN must be at least 4 digits.",
+    "tooManyAttempts": "Too many attempts. Try again in {{seconds}}s."
+  },
+  "treatments": {
+    "title": "Treatments",
+    "subtitle": "Your active plans & session progress"
+  },
+  "more": {
+    "subtitle": "Documents, inbox, offers & profile"
+  },
+  "timeline": {
+    "title": "Health timeline",
+    "subtitle": "Consultation summaries & prescriptions",
+    "with": "Dr. {{name}}",
+    "prescriptionLabel": "Prescription {{number}}",
+    "filter": {
+      "all": "All",
+      "consultations": "Consultations",
+      "prescriptions": "Prescriptions"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Language, app lock & privacy"
+  },
+  "rewards": {
+    "title": "Rewards",
+    "subtitle": "Your loyalty points balance & history",
+    "viewRewards": "View rewards",
+    "pointsBalance": "Points balance",
+    "redeemable": "Redeemable points",
+    "lifetimeEarned": "Lifetime earned",
+    "lifetimeRedeemed": "Lifetime redeemed",
+    "nextExpiring": "{{points}} points expire on {{date}}",
+    "noExpiring": "No points expiring soon",
+    "tier": "Tier",
+    "howToEarn": "How to earn points",
+    "viewStatement": "View statement",
+    "programDisabled": "The rewards program isn't active for your clinic yet.",
+    "earnRules": {
+      "VISIT_COMPLETED": "Complete a visit",
+      "SPEND_BASED": "Spend on treatments & products",
+      "TREATMENT_SESSION_COMPLETED": "Complete a treatment session",
+      "PACKAGE_PURCHASE": "Purchase a treatment package",
+      "REFERRAL_REFERRER": "Refer a friend who visits",
+      "REFERRAL_REFEREE": "Visit after being referred",
+      "ON_TIME_FOLLOW_UP": "Keep your follow-up appointments",
+      "APP_REGISTRATION": "Register on the app",
+      "REVIEW_SUBMITTED": "Share feedback about your visit",
+      "BIRTHDAY_BONUS": "Celebrate your birthday with us",
+      "PROFILE_COMPLETION": "Complete your profile"
+    }
+  },
+  "statement": {
+    "title": "Points statement",
+    "subtitle": "Every credit & debit to your points balance",
+    "loadMore": "Load more",
+    "entryTypes": {
+      "CREDIT": "Points earned",
+      "DEBIT_REDEEM": "Points redeemed",
+      "DEBIT_EXPIRY": "Points expired",
+      "DEBIT_CLAWBACK": "Points reversed",
+      "CREDIT_REVERSAL": "Points restored",
+      "MANUAL_CREDIT": "Bonus points",
+      "MANUAL_DEBIT": "Points adjusted"
+    }
+  }
+}

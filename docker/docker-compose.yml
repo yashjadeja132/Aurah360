@@ -1,0 +1,25 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: aurah360-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - aurah360_mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: aurah360_clinicos
+
+  redis:
+    image: redis:7-alpine
+    container_name: aurah360-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - aurah360_redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  aurah360_mongo_data:
+  aurah360_redis_data:

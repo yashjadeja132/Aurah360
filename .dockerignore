@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/logs
+**/uploads
+**/.env
+**/.git
+**/coverage
+**/*.log
+frontend/node_modules
+backend/node_modules
+backend/logs
+backend/uploads

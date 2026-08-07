@@ -1,0 +1,101 @@
+# Production stack — Aurah 360 ClinicOS
+# Usage: docker compose -f docker/docker-compose.prod.yml --env-file backend/.env up -d --build
+#
+# TLS: this stack terminates plain HTTP on the `web` service. Put a TLS-terminating reverse
+# proxy or load balancer (managed LB, Caddy, or nginx+certbot) in front of it in production —
+# COOKIE_SECURE=true below requires HTTPS end-to-end or cookies will not be sent by browsers.
+
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - aurah360_mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: aurah360_clinicos
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - clinicos
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
+    volumes:
+      - aurah360_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - clinicos
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - ../backend/.env
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongodb:27017/aurah360_clinicos
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://clinic.example.com}
+      COOKIE_SECURE: "true"
+      ENABLE_SWAGGER: "false"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/api/v1/health/livez"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - clinicos
+    expose:
+      - "5000"
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    ports:
+      - "${WEB_PORT:-80}:80"
+    networks:
+      - clinicos
+
+volumes:
+  aurah360_mongo_data:
+  aurah360_redis_data:
+
+networks:
+  clinicos:
+    driver: bridge

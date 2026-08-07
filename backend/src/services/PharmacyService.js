@@ -1,0 +1,341 @@
+import ApiError from '../libs/ApiError.js';
+import {
+  DispenseRepository,
+  InventoryItemRepository,
+} from '../repositories/InventoryRepository.js';
+import PrescriptionRepository from '../repositories/PrescriptionRepository.js';
+import InventoryService from './InventoryService.js';
+import AuditService from './AuditService.js';
+import { eventBus } from '../events/eventBus.js';
+import { emitQueueEvent, SOCKET_EVENTS } from '../socket/index.js';
+import { generateDispenseNumber } from '../helpers/inventoryNumber.helper.js';
+import {
+  DISPENSE_ITEM_STATUS,
+  DISPENSE_STATUS,
+  INVENTORY_EVENTS,
+  STOCK_TX_TYPE,
+} from '../enums/inventory.js';
+import { PRESCRIPTION_STATUS } from '../enums/prescription.js';
+import { AUDIT_ACTIONS } from '../enums/auditAction.js';
+
+class PharmacyService {
+  constructor() {
+    this.dispenseRepo = new DispenseRepository();
+    this.itemRepo = new InventoryItemRepository();
+    this.prescriptionRepo = new PrescriptionRepository();
+    this.inventoryService = new InventoryService();
+    this.auditService = new AuditService();
+  }
+
+  #mapDispense(doc) {
+    if (!doc) return null;
+    const extra = {};
+    if (doc.patientId?.firstName) {
+      extra.patient = {
+        id: doc.patientId._id.toString(),
+        mrn: doc.patientId.mrn,
+        fullName: `${doc.patientId.firstName} ${doc.patientId.lastName || ''}`.trim(),
+      };
+      extra.patientId = doc.patientId._id.toString();
+    }
+    if (doc.pharmacistId?.firstName) {
+      extra.pharmacist = {
+        id: doc.pharmacistId._id.toString(),
+        fullName: `${doc.pharmacistId.firstName} ${doc.pharmacistId.lastName || ''}`.trim(),
+      };
+      extra.pharmacistId = doc.pharmacistId._id.toString();
+    }
+    if (doc.prescriptionId?.prescriptionNumber) {
+      extra.prescription = {
+        id: doc.prescriptionId._id.toString(),
+        prescriptionNumber: doc.prescriptionId.prescriptionNumber,
+        status: doc.prescriptionId.status,
+        items: doc.prescriptionId.items,
+      };
+      extra.prescriptionId = doc.prescriptionId._id.toString();
+    }
+    return doc.toSafeObject(extra);
+  }
+
+  async prescriptionQueue({ branchId, limit = 50 } = {}) {
+    const prescriptions = await this.prescriptionRepo.findMany(
+      {
+        deletedAt: null,
+        status: PRESCRIPTION_STATUS.FINALIZED,
+        ...(branchId ? { branchId } : {}),
+      },
+      { sort: { finalizedAt: -1 }, limit: Number(limit) || 50 }
+    );
+
+    const result = [];
+    for (const rx of prescriptions) {
+      const active = await this.dispenseRepo.findActiveByPrescription(rx._id);
+      const completed = await this.dispenseRepo.findOne({
+        prescriptionId: rx._id,
+        status: DISPENSE_STATUS.COMPLETED,
+        deletedAt: null,
+      });
+      let dispenseStatus = 'READY';
+      if (completed) dispenseStatus = 'DISPENSED';
+      else if (active?.status === DISPENSE_STATUS.PARTIAL) dispenseStatus = 'PARTIAL';
+      else if (active) dispenseStatus = 'IN_PROGRESS';
+
+      if (dispenseStatus === 'DISPENSED') continue;
+
+      result.push({
+        prescriptionId: rx._id.toString(),
+        prescriptionNumber: rx.prescriptionNumber,
+        patientId: rx.patientId?.toString?.() || rx.patientId,
+        branchId: rx.branchId?.toString?.() || rx.branchId,
+        finalizedAt: rx.finalizedAt,
+        itemCount: (rx.items || []).length,
+        dispenseStatus,
+        activeDispenseId: active?._id?.toString() || null,
+      });
+    }
+    return { items: result };
+  }
+
+  async dashboard(branchId = null) {
+    const queue = await this.prescriptionQueue({ branchId, limit: 100 });
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const dispensedToday = await this.dispenseRepo.count({
+      deletedAt: null,
+      status: DISPENSE_STATUS.COMPLETED,
+      dispensedAt: { $gte: todayStart },
+      ...(branchId ? { branchId } : {}),
+    });
+    const partial = await this.dispenseRepo.count({
+      deletedAt: null,
+      status: DISPENSE_STATUS.PARTIAL,
+      ...(branchId ? { branchId } : {}),
+    });
+    return {
+      summary: {
+        queue: queue.items.length,
+        dispensedToday,
+        partial,
+      },
+      recentQueue: queue.items.slice(0, 10),
+    };
+  }
+
+  async getDispense(id) {
+    const doc = await this.dispenseRepo.findByIdPopulated(id);
+    if (!doc) throw ApiError.notFound('Dispense not found');
+    return this.#mapDispense(doc);
+  }
+
+  async listDispenses(query = {}) {
+    const limit = Math.min(Number(query.limit) || 50, 100);
+    const page = Math.max(Number(query.page) || 1, 1);
+    const { items, total } = await this.dispenseRepo.list({
+      branchId: query.branchId || null,
+      status: query.status || null,
+      patientId: query.patientId || null,
+      limit,
+      skip: (page - 1) * limit,
+    });
+    return {
+      items: items.map((d) => this.#mapDispense(d)),
+      meta: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    };
+  }
+
+  async startDispense(payload, actorId, req = null) {
+    const rx = await this.prescriptionRepo.findByIdNotDeleted(payload.prescriptionId);
+    if (!rx) throw ApiError.notFound('Prescription not found');
+    if (rx.status !== PRESCRIPTION_STATUS.FINALIZED) {
+      throw ApiError.forbidden('Only finalized prescriptions can be dispensed');
+    }
+
+    const existing = await this.dispenseRepo.findActiveByPrescription(rx._id);
+    if (existing) return this.getDispense(existing._id.toString());
+
+    const completed = await this.dispenseRepo.findOne({
+      prescriptionId: rx._id,
+      status: DISPENSE_STATUS.COMPLETED,
+      deletedAt: null,
+    });
+    if (completed) throw ApiError.forbidden('Prescription already fully dispensed');
+
+    const items = (rx.items || []).map((it, index) => ({
+      prescriptionItemIndex: index,
+      medicineId: it.medicineId || null,
+      medicineName: it.medicineName,
+      inventoryItemId: null,
+      batchNumber: null,
+      quantityRequested: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
+      quantityDispensed: 0,
+      status: DISPENSE_ITEM_STATUS.PENDING,
+      sellingPrice: 0,
+    }));
+
+    const doc = await this.dispenseRepo.create({
+      dispenseNumber: await generateDispenseNumber(),
+      prescriptionId: rx._id,
+      patientId: rx.patientId,
+      pharmacistId: actorId,
+      branchId: payload.branchId || rx.branchId,
+      items,
+      status: DISPENSE_STATUS.PENDING,
+      notes: payload.notes || null,
+      createdBy: actorId,
+      updatedBy: actorId,
+    });
+
+    return this.getDispense(doc._id.toString());
+  }
+
+  /**
+   * Dispense items — full or partial.
+   * items: [{ itemId|prescriptionItemIndex, inventoryItemId, batchNumber, quantity }]
+   */
+  async dispenseItems(id, payload, actorId, req = null) {
+    const dispense = await this.dispenseRepo.findById(id);
+    if (!dispense || dispense.deletedAt) throw ApiError.notFound('Dispense not found');
+    if (dispense.status === DISPENSE_STATUS.COMPLETED) {
+      throw ApiError.forbidden('Cannot edit completed dispense');
+    }
+    if (dispense.status === DISPENSE_STATUS.CANCELLED) {
+      throw ApiError.forbidden('Dispense is cancelled');
+    }
+
+    const lines = Array.isArray(payload.items) ? payload.items : [];
+    if (!lines.length) throw ApiError.badRequest('items are required');
+
+    const updatedItems = [...(dispense.items || []).map((i) => i.toObject?.() || { ...i })];
+
+    for (const line of lines) {
+      const idx =
+        line.prescriptionItemIndex != null
+          ? Number(line.prescriptionItemIndex)
+          : updatedItems.findIndex((i) => String(i._id) === String(line.itemId));
+      if (idx < 0 || !updatedItems[idx]) {
+        throw ApiError.badRequest('Invalid dispense item');
+      }
+      const target = updatedItems[idx];
+      const remaining = (target.quantityRequested || 0) - (target.quantityDispensed || 0);
+      const qty = Number(line.quantity);
+      if (!qty || qty <= 0) throw ApiError.badRequest('quantity must be positive');
+      if (qty > remaining) {
+        throw ApiError.forbidden(
+          `Cannot dispense beyond remaining quantity for ${target.medicineName} (remaining ${remaining})`
+        );
+      }
+
+      let inventoryItemId = line.inventoryItemId || target.inventoryItemId;
+      if (!inventoryItemId && target.medicineId) {
+        const linked = await this.itemRepo.findByMedicine(
+          target.medicineId,
+          dispense.branchId
+        );
+        inventoryItemId = linked?._id;
+      }
+      if (!inventoryItemId) {
+        throw ApiError.badRequest(
+          `No inventory item for ${target.medicineName} — select inventoryItemId`
+        );
+      }
+
+      const item = await this.itemRepo.findByIdNotDeleted(inventoryItemId);
+      if (!item) throw ApiError.notFound('Inventory item not found');
+
+      const batchNumber =
+        line.batchNumber ||
+        this.inventoryService.selectBatch(item)?.batchNumber ||
+        null;
+      if (!batchNumber) {
+        throw ApiError.forbidden(`No usable (non-expired) batch for ${item.name}`);
+      }
+
+      await this.inventoryService.deductStock({
+        inventoryItemId,
+        quantity: qty,
+        batchNumber,
+        type: STOCK_TX_TYPE.DISPENSE,
+        referenceType: 'Dispense',
+        referenceId: dispense._id,
+        reason: `Dispense ${dispense.dispenseNumber}`,
+        actorId,
+        req,
+      });
+
+      target.inventoryItemId = inventoryItemId;
+      target.batchNumber = batchNumber;
+      target.quantityDispensed = (target.quantityDispensed || 0) + qty;
+      target.sellingPrice = item.sellingPrice || item.mrp || 0;
+      if (target.quantityDispensed >= target.quantityRequested) {
+        target.status = DISPENSE_ITEM_STATUS.DISPENSED;
+      } else if (target.quantityDispensed > 0) {
+        target.status = DISPENSE_ITEM_STATUS.PARTIAL;
+      }
+    }
+
+    const allDone = updatedItems.every(
+      (i) => i.status === DISPENSE_ITEM_STATUS.DISPENSED
+    );
+    const anyDone = updatedItems.some((i) => (i.quantityDispensed || 0) > 0);
+    const status = allDone
+      ? DISPENSE_STATUS.COMPLETED
+      : anyDone
+        ? DISPENSE_STATUS.PARTIAL
+        : DISPENSE_STATUS.PENDING;
+
+    await this.dispenseRepo.updateById(id, {
+      items: updatedItems,
+      status,
+      dispensedAt: allDone ? new Date() : dispense.dispensedAt,
+      pharmacistId: actorId,
+      updatedBy: actorId,
+      notes: payload.notes ?? dispense.notes,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.MEDICINE_DISPENSED, {
+      actorId,
+      metadata: {
+        dispenseId: id,
+        dispenseNumber: dispense.dispenseNumber,
+        status,
+        lines: lines.length,
+      },
+      req,
+    });
+
+    const eventPayload = {
+      dispenseId: id,
+      dispenseNumber: dispense.dispenseNumber,
+      prescriptionId: dispense.prescriptionId.toString(),
+      patientId: dispense.patientId.toString(),
+      status,
+      branchId: dispense.branchId.toString(),
+    };
+    eventBus.emitDomain(INVENTORY_EVENTS.MEDICINE_DISPENSED, eventPayload);
+    emitQueueEvent(SOCKET_EVENTS.MEDICINE_DISPENSED, eventPayload);
+
+    return this.getDispense(id);
+  }
+
+  async cancelDispense(id, actorId, req = null) {
+    const dispense = await this.dispenseRepo.findById(id);
+    if (!dispense || dispense.deletedAt) throw ApiError.notFound('Dispense not found');
+    if (dispense.status === DISPENSE_STATUS.COMPLETED) {
+      throw ApiError.forbidden('Cannot cancel completed dispense');
+    }
+    if ((dispense.items || []).some((i) => (i.quantityDispensed || 0) > 0)) {
+      throw ApiError.forbidden('Cannot cancel after stock has been dispensed — use return');
+    }
+    await this.dispenseRepo.updateById(id, {
+      status: DISPENSE_STATUS.CANCELLED,
+      updatedBy: actorId,
+    });
+    return this.getDispense(id);
+  }
+
+  async dispenseReport(query = {}) {
+    return this.listDispenses({ ...query, status: query.status || DISPENSE_STATUS.COMPLETED });
+  }
+}
+
+export default PharmacyService;

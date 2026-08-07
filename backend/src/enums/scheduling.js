@@ -1,0 +1,11 @@
+export const BLOCKED_SLOT_REASON = Object.freeze({
+  MEETING: 'MEETING',
+  EMERGENCY: 'EMERGENCY',
+  MAINTENANCE: 'MAINTENANCE',
+  TRAINING: 'TRAINING',
+  OTHER: 'OTHER',
+});
+
+export const BLOCKED_SLOT_REASON_LIST = Object.freeze(Object.values(BLOCKED_SLOT_REASON));
+
+export default { BLOCKED_SLOT_REASON };

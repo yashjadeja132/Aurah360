@@ -1,0 +1,220 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { QUERY_KEYS } from '@/constants/queryKeys';
+import { treatmentPlansApi } from '../api/treatmentPlansApi';
+
+function errMsg(e, fallback) {
+  return e?.response?.data?.message || fallback;
+}
+
+function invalidateAll(qc) {
+  qc.invalidateQueries({ queryKey: ['treatment-plans'] });
+}
+
+export function useTreatmentPlan(id) {
+  return useQuery({
+    queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id),
+    queryFn: async () => {
+      const res = await treatmentPlansApi.getById(id);
+      return res.data.plan;
+    },
+    enabled: Boolean(id),
+  });
+}
+
+export function useDoctorTreatmentPlans(doctorId, params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.TREATMENT_PLAN_DOCTOR_LIST(doctorId, params),
+    queryFn: async () => {
+      const res = await treatmentPlansApi.listByDoctor({ doctorId, ...params });
+      return res.data || [];
+    },
+    enabled: Boolean(doctorId),
+  });
+}
+
+export function useProtocols(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.TREATMENT_PROTOCOLS(params),
+    queryFn: async () => {
+      const res = await treatmentPlansApi.listProtocols(params);
+      return res.data || [];
+    },
+  });
+}
+
+export function usePackages(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.TREATMENT_PACKAGES(params),
+    queryFn: async () => {
+      const res = await treatmentPlansApi.listPackages(params);
+      return res.data || [];
+    },
+  });
+}
+
+export function useCreateTreatmentPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => treatmentPlansApi.create(payload),
+    onSuccess: () => {
+      toast.success('Treatment plan created');
+      invalidateAll(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Create failed')),
+  });
+}
+
+export function useUpdateTreatmentPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => treatmentPlansApi.update(id, payload),
+    onSuccess: () => {
+      toast.success('Plan saved');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Save failed')),
+  });
+}
+
+export function useApplyProtocol(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (protocolId) => treatmentPlansApi.applyProtocol(id, protocolId),
+    onSuccess: () => {
+      toast.success('Protocol applied');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Protocol apply failed')),
+  });
+}
+
+export function useApplyPackage(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (packageId) => treatmentPlansApi.applyPackage(id, packageId),
+    onSuccess: () => {
+      toast.success('Package added');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Package apply failed')),
+  });
+}
+
+export function useRecommendPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => treatmentPlansApi.recommend(id),
+    onSuccess: () => {
+      toast.success('Marked recommended');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Action failed')),
+  });
+}
+
+export function useApprovePlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => treatmentPlansApi.approve(id),
+    onSuccess: () => {
+      toast.success('Plan approved');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Approve failed')),
+  });
+}
+
+export function useAcceptPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => treatmentPlansApi.accept(id),
+    onSuccess: () => {
+      toast.success('Plan accepted');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Accept failed')),
+  });
+}
+
+export function useRejectPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reason) => treatmentPlansApi.reject(id, reason),
+    onSuccess: () => {
+      toast.success('Plan rejected');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Reject failed')),
+  });
+}
+
+export function useCancelPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => treatmentPlansApi.cancel(id),
+    onSuccess: () => {
+      toast.success('Plan cancelled');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Cancel failed')),
+  });
+}
+
+export function useAcceptConsent(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ consentId, ...payload }) =>
+      treatmentPlansApi.acceptConsent(id, consentId, payload),
+    onSuccess: () => {
+      toast.success('Consent accepted');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Consent failed')),
+  });
+}
+
+export function useDeleteTreatmentPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (planId) => treatmentPlansApi.remove(planId),
+    onSuccess: () => {
+      toast.success('Draft deleted');
+      invalidateAll(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Delete failed')),
+  });
+}
+
+export function useCreateProtocol() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => treatmentPlansApi.createProtocol(payload),
+    onSuccess: () => {
+      toast.success('Protocol created');
+      qc.invalidateQueries({ queryKey: ['treatment-plans', 'protocols'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Protocol create failed')),
+  });
+}
+
+export function useCreatePackage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => treatmentPlansApi.createPackage(payload),
+    onSuccess: () => {
+      toast.success('Package created');
+      qc.invalidateQueries({ queryKey: ['treatment-plans', 'packages'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Package create failed')),
+  });
+}

@@ -1,0 +1,5 @@
+<resources>
+    <!-- Matches theme.js colors.primaryDark — used as the native cold-start window background
+         so the very first frame (before any JS/React tree mounts) is branded, not a white flash. -->
+    <color name="splashBackground">#123D2A</color>
+</resources>

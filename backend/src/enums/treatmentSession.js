@@ -1,0 +1,89 @@
+export const TREATMENT_SESSION_STATUS = Object.freeze({
+  SCHEDULED: 'SCHEDULED',
+  CHECKED_IN: 'CHECKED_IN',
+  IN_PROGRESS: 'IN_PROGRESS',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  SKIPPED: 'SKIPPED',
+});
+
+export const TREATMENT_SESSION_STATUS_LIST = Object.freeze(
+  Object.values(TREATMENT_SESSION_STATUS)
+);
+
+/** Statuses that count toward session usage / remaining limit. */
+export const ACTIVE_OR_DONE_SESSION_STATUSES = Object.freeze([
+  TREATMENT_SESSION_STATUS.SCHEDULED,
+  TREATMENT_SESSION_STATUS.CHECKED_IN,
+  TREATMENT_SESSION_STATUS.IN_PROGRESS,
+  TREATMENT_SESSION_STATUS.COMPLETED,
+]);
+
+/** Configurable payment gate — Paid or Partial allowed by default. */
+export const SESSION_ALLOWED_PAYMENT_STATUSES = Object.freeze([
+  'PAID',
+  'PARTIALLY_PAID',
+]);
+
+export const TREATMENT_SESSION_EVENTS = Object.freeze({
+  STARTED: 'TreatmentSessionStarted',
+  COMPLETED: 'TreatmentSessionCompleted',
+  PLAN_COMPLETED: 'TreatmentPlanCompleted',
+  ADVERSE_EVENT_REPORTED: 'AdverseEventReported',
+  ADVERSE_EVENT_CLOSED: 'AdverseEventClosed',
+});
+
+/** Patch test validity/result (TRT-006) */
+export const PATCH_TEST_RESULT = Object.freeze({
+  PENDING: 'PENDING',
+  NEGATIVE: 'NEGATIVE',
+  POSITIVE: 'POSITIVE',
+  INCONCLUSIVE: 'INCONCLUSIVE',
+});
+
+export const PATCH_TEST_RESULT_LIST = Object.freeze(Object.values(PATCH_TEST_RESULT));
+
+/** Adverse event severity/status (§10.3, §16.10) */
+export const ADVERSE_EVENT_SEVERITY = Object.freeze({
+  MILD: 'MILD',
+  MODERATE: 'MODERATE',
+  SEVERE: 'SEVERE',
+  LIFE_THREATENING: 'LIFE_THREATENING',
+});
+
+export const ADVERSE_EVENT_SEVERITY_LIST = Object.freeze(Object.values(ADVERSE_EVENT_SEVERITY));
+
+export const ADVERSE_EVENT_STATUS = Object.freeze({
+  OPEN: 'OPEN',
+  ESCALATED: 'ESCALATED',
+  UNDER_REVIEW: 'UNDER_REVIEW',
+  RESOLVED: 'RESOLVED',
+  CLOSED: 'CLOSED',
+});
+
+export const ADVERSE_EVENT_STATUS_LIST = Object.freeze(Object.values(ADVERSE_EVENT_STATUS));
+
+/** Hard-stop preflight checks before a treatment session can start (§10.3, §16.10) */
+export const HARD_STOP_TYPE = Object.freeze({
+  CONSENT_MISSING: 'CONSENT_MISSING',
+  PATCH_TEST_MISSING: 'PATCH_TEST_MISSING',
+  PATCH_TEST_POSITIVE: 'PATCH_TEST_POSITIVE',
+  DEVICE_UNAVAILABLE: 'DEVICE_UNAVAILABLE',
+  ROOM_UNAVAILABLE: 'ROOM_UNAVAILABLE',
+  OPERATOR_SKILL_MISSING: 'OPERATOR_SKILL_MISSING',
+  OPERATOR_SKILL_EXPIRED: 'OPERATOR_SKILL_EXPIRED',
+  CONTRAINDICATION: 'CONTRAINDICATION',
+  PACKAGE_BALANCE_EXHAUSTED: 'PACKAGE_BALANCE_EXHAUSTED',
+});
+
+export const HARD_STOP_TYPE_LIST = Object.freeze(Object.values(HARD_STOP_TYPE));
+
+export default {
+  TREATMENT_SESSION_STATUS,
+  SESSION_ALLOWED_PAYMENT_STATUSES,
+  TREATMENT_SESSION_EVENTS,
+  PATCH_TEST_RESULT,
+  ADVERSE_EVENT_SEVERITY,
+  ADVERSE_EVENT_STATUS,
+  HARD_STOP_TYPE,
+};

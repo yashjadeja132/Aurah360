@@ -1,0 +1,8 @@
+export const TOKEN_TYPE = Object.freeze({
+  ACCESS: 'ACCESS',
+  REFRESH: 'REFRESH',
+  PATIENT_ACCESS: 'PATIENT_ACCESS',
+  PATIENT_REFRESH: 'PATIENT_REFRESH',
+});
+
+export default TOKEN_TYPE;
