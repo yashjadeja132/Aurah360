@@ -151,7 +151,13 @@ function BreakGlassTab() {
             {!isLoading && grants.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">{t('settings.privacy.breakglass.empty', 'No break-glass access has been used.')}</TableCell></TableRow>}
             {grants.map((g) => (
               <TableRow key={g.id}>
-                <TableCell>{g.resourceType}{g.resourceId ? ` #${g.resourceId}` : ''}</TableCell>
+                {/* MRN + name, never the raw ObjectId — an auditor still needs to know exactly
+                    whose record was opened under emergency access. */}
+                <TableCell>
+                  {g.resourceType}
+                  {g.patientMrn ? ` · ${g.patientMrn}` : ''}
+                  {g.patientName ? ` (${g.patientName})` : ''}
+                </TableCell>
                 <TableCell className="max-w-xs truncate">{g.reason}</TableCell>
                 <TableCell>{new Date(g.grantedAt).toLocaleString()}</TableCell>
                 <TableCell>{new Date(g.expiresAt).toLocaleString()}</TableCell>

@@ -27,9 +27,11 @@ class PrescriptionRepository extends BaseRepository {
       .exec();
   }
 
-  async findByDoctor(doctorId, { status = null, limit = 50 } = {}) {
+  async findByDoctor(doctorId, { status = null, limit = 50, branchId = null } = {}) {
     const filter = { doctorId, deletedAt: null };
     if (status) filter.status = status;
+    // SEC-030 — branchId comes from the caller's resolved scope (see helpers/scope.helper.js).
+    if (branchId) filter.branchId = branchId;
     return this.model.find(filter).sort({ createdAt: -1 }).limit(limit).exec();
   }
 

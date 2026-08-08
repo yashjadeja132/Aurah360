@@ -36,6 +36,37 @@ class InventoryService {
     return doc ? doc.toSafeObject() : null;
   }
 
+  /**
+   * SEC-030 (row scoping) — single-record gate for stock held BY a branch.
+   *
+   * `branchId` is the caller's resolved branch scope, or null for OWNER/ADMIN (unrestricted).
+   * An item belonging to a different branch is reported as NOT FOUND, never 403: a 403 would
+   * confirm to an enumerating caller that the id exists and tell them whose it is.
+   */
+  #assertItemInScope(item, branchId) {
+    if (!branchId || !item) return item;
+    if (String(item.branchId) !== String(branchId)) {
+      throw ApiError.notFound('Inventory item not found');
+    }
+    return item;
+  }
+
+  /**
+   * A stock transfer is inherently CROSS-branch: it has a source and a destination, and both
+   * branches must be able to see and act on it (the destination has to receive what the source
+   * dispatched). Scoping it to `fromBranchId === mine` would hide every INBOUND transfer from the
+   * branch that is waiting for it — an outage, not a fix. A caller in scope is therefore one whose
+   * branch is a PARTY to the transfer, on either end.
+   */
+  #assertTransferInScope(transfer, branchId) {
+    if (!branchId || !transfer) return transfer;
+    const parties = [transfer.fromBranchId, transfer.toBranchId].map((b) => String(b));
+    if (!parties.includes(String(branchId))) {
+      throw ApiError.notFound('Transfer request not found');
+    }
+    return transfer;
+  }
+
   #round(n) {
     return Math.round((Number(n) || 0) * 100) / 100;
   }
@@ -55,15 +86,29 @@ class InventoryService {
     return exp <= limit && !this.#isExpired(expiryDate);
   }
 
+  /**
+   * `reorderLevel` and `minimumStock` are two different thresholds and both now fire.
+   *
+   *  - `reorderLevel` — "time to raise a purchase order". The normal, planned signal.
+   *  - `minimumStock` — the safety floor. Dropping to or below it is not a reminder, it is a
+   *    stockout risk on a clinic's consumables, so it is reported as CRITICAL.
+   *
+   * `minimumStock` previously had no read site at all: an item could sit below its configured
+   * floor indefinitely without anyone being told, as long as it was above the reorder level.
+   */
   async #emitLowStockIfNeeded(item) {
     const available = Math.max(0, (item.currentStock || 0) - (item.reservedStock || 0));
-    if (available <= (item.reorderLevel || 0)) {
+    const reorderLevel = item.reorderLevel || 0;
+    const minimumStock = item.minimumStock || 0;
+    if (available <= Math.max(reorderLevel, minimumStock)) {
       const payload = {
         inventoryItemId: item._id.toString(),
         itemCode: item.itemCode,
         name: item.name,
         currentStock: item.currentStock,
-        reorderLevel: item.reorderLevel,
+        reorderLevel,
+        minimumStock,
+        severity: available <= minimumStock ? 'CRITICAL' : 'LOW',
         branchId: item.branchId.toString(),
       };
       eventBus.emitDomain(INVENTORY_EVENTS.LOW_STOCK_DETECTED, payload);
@@ -182,6 +227,18 @@ class InventoryService {
         `Insufficient stock for ${item.name} (have ${item.currentStock}, delta ${quantityDelta})`
       );
     }
+    // `maximumStock` is the configured storage//holding ceiling. Enforced on every INCREASE
+    // (receipt, return, transfer-in, opening stock) — this is the single choke point all stock
+    // movements pass through. Previously the setting was persisted and read by nobody, so a
+    // clinic could over-order expiring stock past its own stated limit without a word.
+    // A `maximumStock` of 0 means "no ceiling configured".
+    const maximumStock = item.maximumStock || 0;
+    if (quantityDelta > 0 && maximumStock > 0 && newStock > maximumStock) {
+      throw ApiError.forbidden(
+        `Receiving ${quantityDelta} would take ${item.name} to ${newStock}, above its maximum `
+          + `stock level of ${maximumStock} (currently ${item.currentStock || 0}).`
+      );
+    }
 
     batches = batches.filter((b) => (b.quantity || 0) > 0 || quantityDelta > 0);
 
@@ -218,13 +275,45 @@ class InventoryService {
     return { item: refreshed, transaction: tx };
   }
 
-  async createItem(payload, actorId) {
+  /**
+   * The three stock thresholds have to be orderable for any of them to mean anything:
+   * minimumStock (safety floor) <= reorderLevel (order trigger) <= maximumStock (ceiling).
+   * A reorder level below the safety floor would alert only after the floor was breached; a
+   * maximum below the reorder level makes the item impossible to restock.
+   */
+  #assertStockThresholds({ minimumStock, reorderLevel, maximumStock }) {
+    const min = Number(minimumStock) || 0;
+    const reorder = Number(reorderLevel) || 0;
+    const max = Number(maximumStock) || 0;
+    if (min > reorder) {
+      throw ApiError.badRequest(
+        `minimumStock (${min}) cannot exceed reorderLevel (${reorder}).`
+      );
+    }
+    if (max > 0 && reorder > max) {
+      throw ApiError.badRequest(
+        `reorderLevel (${reorder}) cannot exceed maximumStock (${max}).`
+      );
+    }
+  }
+
+  async createItem(payload, actorId, { branchId = null } = {}) {
     if (!payload.name) throw ApiError.badRequest('name is required');
     if (!payload.branchId) throw ApiError.badRequest('branchId is required');
+    // A write naming an explicit foreign branch is a 403, not a 404: nothing is being enumerated
+    // here, the caller told us which branch they meant and it is outside their scope.
+    if (branchId && String(payload.branchId) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
     if (!payload.itemType) throw ApiError.badRequest('itemType is required');
     if (!Object.values(INVENTORY_ITEM_TYPE).includes(payload.itemType)) {
       throw ApiError.badRequest('Invalid itemType');
     }
+    this.#assertStockThresholds({
+      minimumStock: payload.minimumStock ?? 10,
+      reorderLevel: payload.reorderLevel ?? 20,
+      maximumStock: payload.maximumStock ?? 1000,
+    });
 
     const item = await this.itemRepo.create({
       itemCode: await generateItemCode(),
@@ -255,9 +344,10 @@ class InventoryService {
     return this.#mapItem(item);
   }
 
-  async updateItem(id, payload, actorId) {
+  async updateItem(id, payload, actorId, { branchId = null } = {}) {
     const item = await this.itemRepo.findByIdNotDeleted(id);
     if (!item) throw ApiError.notFound('Inventory item not found');
+    this.#assertItemInScope(item, branchId);
 
     const updates = { updatedBy: actorId };
     for (const f of [
@@ -279,14 +369,22 @@ class InventoryService {
     ]) {
       if (payload[f] !== undefined) updates[f] = payload[f];
     }
+    // Validate the thresholds as they will be AFTER the edit, so changing one of the three
+    // cannot quietly invert the ordering against the two that were left alone.
+    this.#assertStockThresholds({
+      minimumStock: updates.minimumStock ?? item.minimumStock,
+      reorderLevel: updates.reorderLevel ?? item.reorderLevel,
+      maximumStock: updates.maximumStock ?? item.maximumStock,
+    });
     // Never allow direct currentStock / reservedStock / batches updates here
     await this.itemRepo.updateById(id, updates);
     return this.#mapItem(await this.itemRepo.findByIdNotDeleted(id));
   }
 
-  async getItem(id) {
+  async getItem(id, { branchId = null } = {}) {
     const item = await this.itemRepo.findByIdNotDeleted(id);
     if (!item) throw ApiError.notFound('Inventory item not found');
+    this.#assertItemInScope(item, branchId);
     return this.#mapItem(item);
   }
 
@@ -327,9 +425,10 @@ class InventoryService {
     };
   }
 
-  async openingStock(payload, actorId, req = null) {
+  async openingStock(payload, actorId, req = null, { branchId = null } = {}) {
     const item = await this.itemRepo.findByIdNotDeleted(payload.inventoryItemId);
     if (!item) throw ApiError.notFound('Inventory item not found');
+    this.#assertItemInScope(item, branchId);
     if (!payload.quantity || payload.quantity <= 0) {
       throw ApiError.badRequest('quantity must be positive');
     }
@@ -367,9 +466,10 @@ class InventoryService {
     };
   }
 
-  async adjust(payload, actorId, req = null) {
+  async adjust(payload, actorId, req = null, { branchId = null } = {}) {
     const item = await this.itemRepo.findByIdNotDeleted(payload.inventoryItemId);
     if (!item) throw ApiError.notFound('Inventory item not found');
+    this.#assertItemInScope(item, branchId);
     const qty = Number(payload.quantity);
     if (!qty || qty === 0) throw ApiError.badRequest('quantity must be non-zero');
 
@@ -459,7 +559,13 @@ class InventoryService {
     treatmentSessionId = null,
     actorId,
     req = null,
+    scopeBranchId = null,
   }) {
+    if (scopeBranchId) {
+      const target = await this.itemRepo.findByIdNotDeleted(inventoryItemId);
+      if (!target) throw ApiError.notFound('Inventory item not found');
+      this.#assertItemInScope(target, scopeBranchId);
+    }
     const result = await this.deductStock({
       inventoryItemId,
       quantity,
@@ -524,9 +630,10 @@ class InventoryService {
     };
   }
 
-  async returnStock(payload, actorId, req = null) {
+  async returnStock(payload, actorId, req = null, { branchId = null } = {}) {
     const item = await this.itemRepo.findByIdNotDeleted(payload.inventoryItemId);
     if (!item) throw ApiError.notFound('Inventory item not found');
+    this.#assertItemInScope(item, branchId);
     const qty = Number(payload.quantity);
     if (!qty || qty <= 0) throw ApiError.badRequest('quantity must be positive');
 
@@ -551,9 +658,14 @@ class InventoryService {
     };
   }
 
-  async transfer(payload, actorId, req = null) {
+  async transfer(payload, actorId, req = null, { branchId = null } = {}) {
     const from = await this.itemRepo.findByIdNotDeleted(payload.fromItemId);
     if (!from) throw ApiError.notFound('Source inventory item not found');
+    // The immediate (non-workflow) transfer DEDUCTS from the source, so the caller must own the
+    // source branch. Pulling stock out of someone else's branch is not a read, it is a theft.
+    if (branchId && String(from.branchId) !== String(branchId)) {
+      throw ApiError.notFound('Source inventory item not found');
+    }
     let to = payload.toItemId
       ? await this.itemRepo.findByIdNotDeleted(payload.toItemId)
       : null;
@@ -622,9 +734,10 @@ class InventoryService {
     };
   }
 
-  async stockCount(payload, actorId, req = null) {
+  async stockCount(payload, actorId, req = null, { branchId = null } = {}) {
     const item = await this.itemRepo.findByIdNotDeleted(payload.inventoryItemId);
     if (!item) throw ApiError.notFound('Inventory item not found');
+    this.#assertItemInScope(item, branchId);
     const counted = Number(payload.countedQuantity);
     if (Number.isNaN(counted) || counted < 0) {
       throw ApiError.badRequest('countedQuantity must be >= 0');
@@ -642,7 +755,8 @@ class InventoryService {
         notes: payload.notes,
       },
       actorId,
-      req
+      req,
+      { branchId }
     );
   }
 
@@ -656,8 +770,26 @@ class InventoryService {
       limit,
       skip: (page - 1) * limit,
     });
+    /**
+     * Resolve item names in one query so the ledger can name the stock it moved.
+     * Without this the only identifier on the row is `inventoryItemId`, and the UI had nothing to
+     * render but the raw ObjectId — which is meaningless to a storekeeper reading the ledger.
+     */
+    const rows = items.map((t) => t.toSafeObject());
+    const itemIds = [...new Set(rows.map((r) => r.inventoryItemId).filter(Boolean))];
+    const nameById = new Map();
+    if (itemIds.length) {
+      const referenced = await this.itemRepo.findMany({ _id: { $in: itemIds } }, { lean: true });
+      for (const item of referenced) {
+        nameById.set(item._id.toString(), { name: item.name, sku: item.sku || null });
+      }
+    }
+
     return {
-      items: items.map((t) => t.toSafeObject()),
+      items: rows.map((r) => {
+        const item = nameById.get(r.inventoryItemId) || null;
+        return { ...r, itemName: item?.name || null, itemSku: item?.sku || null };
+      }),
       meta: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
     };
   }
@@ -766,9 +898,21 @@ class InventoryService {
   // Request → approve → dispatch → in transit → receive, both branches reconciling.
   // The immutable stock ledger is written only at dispatch (deduct source) and receive (add destination).
 
-  async requestTransfer(payload, actorId, req = null) {
+  async requestTransfer(payload, actorId, req = null, { branchId = null } = {}) {
     const from = await this.itemRepo.findByIdNotDeleted(payload.fromItemId);
     if (!from) throw ApiError.notFound('Source inventory item not found');
+    // Either end may raise the request — a source branch pushing surplus out, or a destination
+    // branch pulling stock in — so the caller need only be a party to it.
+    // (A create, so an explicit 403 — there is no existing id to leak the existence of.)
+    if (
+      branchId
+      && ![payload.fromBranchId, payload.toBranchId].map(String).includes(String(branchId))
+    ) {
+      throw ApiError.forbidden(
+        'A transfer must involve your own branch as either source or destination',
+        'BRANCH_SCOPE_VIOLATION'
+      );
+    }
 
     const seq = await getNextSequence('stock_transfer_number');
     const transfer = await StockTransferRequest.create({
@@ -785,9 +929,10 @@ class InventoryService {
     return transfer.toSafeObject();
   }
 
-  async approveTransfer(id, actorId, req = null) {
+  async approveTransfer(id, actorId, req = null, { branchId = null } = {}) {
     const transfer = await StockTransferRequest.findById(id);
     if (!transfer) throw ApiError.notFound('Transfer request not found');
+    this.#assertTransferInScope(transfer, branchId);
     if (transfer.status !== 'REQUESTED') throw ApiError.badRequest('Only a requested transfer can be approved');
 
     transfer.status = 'APPROVED';
@@ -803,9 +948,10 @@ class InventoryService {
     return transfer.toSafeObject();
   }
 
-  async rejectTransfer(id, { reason }, actorId, req = null) {
+  async rejectTransfer(id, { reason }, actorId, req = null, { branchId = null } = {}) {
     const transfer = await StockTransferRequest.findById(id);
     if (!transfer) throw ApiError.notFound('Transfer request not found');
+    this.#assertTransferInScope(transfer, branchId);
     if (!['REQUESTED', 'APPROVED'].includes(transfer.status)) {
       throw ApiError.badRequest('Transfer cannot be rejected from its current status');
     }
@@ -815,9 +961,17 @@ class InventoryService {
     return transfer.toSafeObject();
   }
 
-  async dispatchTransfer(id, { quantityDispatched, batchNumber }, actorId, req = null) {
+  async dispatchTransfer(id, { quantityDispatched, batchNumber }, actorId, req = null, { branchId = null } = {}) {
     const transfer = await StockTransferRequest.findById(id);
     if (!transfer) throw ApiError.notFound('Transfer request not found');
+    this.#assertTransferInScope(transfer, branchId);
+    // Dispatch DEDUCTS from the source, so only the source branch (or a global role) may do it.
+    if (branchId && String(transfer.fromBranchId) !== String(branchId)) {
+      throw ApiError.forbidden(
+        'Only the source branch can dispatch this transfer',
+        'BRANCH_SCOPE_VIOLATION'
+      );
+    }
     if (transfer.status !== 'APPROVED') throw ApiError.badRequest('Transfer must be approved before dispatch');
 
     const from = await this.itemRepo.findByIdNotDeleted(transfer.fromItemId);
@@ -854,9 +1008,17 @@ class InventoryService {
     return transfer.toSafeObject();
   }
 
-  async receiveTransfer(id, { quantityReceived, toItemId, varianceNotes }, actorId, req = null) {
+  async receiveTransfer(id, { quantityReceived, toItemId, varianceNotes }, actorId, req = null, { branchId = null } = {}) {
     const transfer = await StockTransferRequest.findById(id);
     if (!transfer) throw ApiError.notFound('Transfer request not found');
+    this.#assertTransferInScope(transfer, branchId);
+    // Receipt ADDS to the destination, so only the destination branch (or a global role) may do it.
+    if (branchId && String(transfer.toBranchId) !== String(branchId)) {
+      throw ApiError.forbidden(
+        'Only the destination branch can receive this transfer',
+        'BRANCH_SCOPE_VIOLATION'
+      );
+    }
     if (transfer.status !== 'IN_TRANSIT') throw ApiError.badRequest('Transfer must be in transit before receiving');
 
     const from = await this.itemRepo.findByIdNotDeleted(transfer.fromItemId);
@@ -938,9 +1100,10 @@ class InventoryService {
     return rows.map((r) => r.toSafeObject());
   }
 
-  async getTransfer(id) {
+  async getTransfer(id, { branchId = null } = {}) {
     const transfer = await StockTransferRequest.findById(id);
     if (!transfer) throw ApiError.notFound('Transfer request not found');
+    this.#assertTransferInScope(transfer, branchId);
     return transfer.toSafeObject();
   }
 }

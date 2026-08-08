@@ -36,6 +36,29 @@ const followUpSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * TRT-006 — recorded answers to TreatmentProtocol.contraindicationQuestions. Without a place to
+ * store the answers the configured questions could never be evaluated, which is exactly why the
+ * setting was dead. `answer: true` means the contraindication IS present (a hard stop).
+ */
+const contraindicationScreeningSchema = new mongoose.Schema(
+  {
+    screenedAt: { type: Date, default: null },
+    screenedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    answers: {
+      type: [
+        {
+          question: { type: String, required: true },
+          answer: { type: Boolean, default: null },
+          note: { type: String, default: null },
+        },
+      ],
+      default: [],
+    },
+  },
+  { _id: false }
+);
+
 const treatmentSessionSchema = new mongoose.Schema(
   {
     sessionNumber: {
@@ -124,6 +147,7 @@ const treatmentSessionSchema = new mongoose.Schema(
       default: [],
     },
     deviceUsage: { type: deviceUsageSchema, default: () => ({}) },
+    contraindicationScreening: { type: contraindicationScreeningSchema, default: null },
     remarks: { type: String, default: null },
     photosBefore: { type: [photoRefSchema], default: [] },
     photosAfter: { type: [photoRefSchema], default: [] },
@@ -189,6 +213,19 @@ treatmentSessionSchema.methods.toSafeObject = function toSafeObject(extra = {}) 
       laserHead: this.deviceUsage?.laserHead ?? null,
       settings: this.deviceUsage?.settings || {},
     },
+    contraindicationScreening: this.contraindicationScreening
+      ? {
+          screenedAt: this.contraindicationScreening.screenedAt ?? null,
+          screenedBy: this.contraindicationScreening.screenedBy
+            ? this.contraindicationScreening.screenedBy.toString()
+            : null,
+          answers: (this.contraindicationScreening.answers || []).map((a) => ({
+            question: a.question,
+            answer: a.answer ?? null,
+            note: a.note ?? null,
+          })),
+        }
+      : null,
     remarks: this.remarks,
     photosBefore: (this.photosBefore || []).map(mapPhoto),
     photosAfter: (this.photosAfter || []).map(mapPhoto),

@@ -23,3 +23,17 @@ export const APPOINTMENT_STATUS_VARIANT = Object.freeze({
 });
 
 export const STATUS_OPTIONS = Object.keys(APPOINTMENT_STATUS_LABELS);
+
+/** A13 — controlled cancellation reasons (mirrors backend CANCELLATION_REASON enum). */
+export const CANCELLATION_REASON_LABELS = Object.freeze({
+  PATIENT_REQUEST: 'Patient request',
+  PATIENT_NO_SHOW: 'Patient no-show',
+  DOCTOR_UNAVAILABLE: 'Doctor unavailable',
+  RESCHEDULED: 'Rescheduled',
+  DUPLICATE_BOOKING: 'Duplicate booking',
+  CLINIC_CLOSURE: 'Clinic closure',
+  MEDICAL_REASON: 'Medical reason',
+  OTHER: 'Other',
+});
+
+export const CANCELLATION_REASON_OPTIONS = Object.keys(CANCELLATION_REASON_LABELS);

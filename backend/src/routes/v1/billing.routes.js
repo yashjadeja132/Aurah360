@@ -4,6 +4,9 @@ import { validate } from '../../middlewares/validate.middleware.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import { requirePermission } from '../../middlewares/permission.middleware.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
+import { ROLES } from '../../constants/roles.js';
+import { hasAnyPermission } from '../../helpers/permission.helper.js';
+import ApiError from '../../libs/ApiError.js';
 import {
   createInvoiceSchema,
   updateInvoiceSchema,
@@ -15,7 +18,9 @@ import {
   refundSchema,
   applyCreditNoteSchema,
   creditNoteIdParamSchema,
-  approveDiscountSchema,
+  discountDecisionSchema,
+  discountApprovalQueueQuerySchema,
+  duePaymentsQuerySchema,
   voidDraftSchema,
   applyLoyaltyRedemptionSchema,
 } from '../../validators/billing.validator.js';
@@ -52,10 +57,30 @@ router.get(
   controller.paymentReceipt
 );
 
+/**
+ * A.8 — refunding needs billing.refund; settling the refund AS A CREDIT NOTE additionally needs
+ * billing.credit_note, because that mints a new instrument redeemable against future invoices
+ * rather than returning money. Body-dependent, so it cannot be a plain requirePermission.
+ */
+const requireCreditNoteWhenCreditNoteRefund = (req, _res, next) => {
+  try {
+    if (req.body?.method !== 'CREDIT_NOTE') return next();
+    if (req.auth?.role === ROLES.OWNER) return next();
+    const granted = req.auth?.permissions || [];
+    if (!hasAnyPermission(granted, [PERMISSIONS.BILLING_CREDIT_NOTE, PERMISSIONS.BILLING_ALL])) {
+      throw ApiError.forbidden('Issuing a credit note requires billing.credit_note');
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 router.post(
   '/payments/:paymentId/refund',
   requirePermission(...refund),
   validate({ params: paymentIdParamSchema, body: refundSchema }),
+  requireCreditNoteWhenCreditNoteRefund,
   controller.refund
 );
 
@@ -64,6 +89,22 @@ router.post(
   requirePermission(PERMISSIONS.BILLING_CREDIT_NOTE, PERMISSIONS.BILLING_ALL),
   validate({ params: creditNoteIdParamSchema, body: applyCreditNoteSchema }),
   controller.applyCreditNote
+);
+
+// A.4 — must stay above '/:id' so 'due-payments' is not swallowed as an invoice id.
+router.get(
+  '/due-payments',
+  requirePermission(...view),
+  validate({ query: duePaymentsQuerySchema }),
+  controller.duePayments
+);
+
+// A.5 — must stay above '/:id' so 'discount-approvals' is not swallowed as an invoice id.
+router.get(
+  '/discount-approvals',
+  requirePermission(...discountApprove),
+  validate({ query: discountApprovalQueueQuerySchema }),
+  controller.discountApprovalQueue
 );
 
 router.get(
@@ -93,8 +134,14 @@ router.post(
 router.post(
   '/:id/approve-discount',
   requirePermission(...discountApprove),
-  validate({ params: invoiceIdParamSchema, body: approveDiscountSchema }),
+  validate({ params: invoiceIdParamSchema, body: discountDecisionSchema }),
   controller.approveDiscount
+);
+router.post(
+  '/:id/reject-discount',
+  requirePermission(...discountApprove),
+  validate({ params: invoiceIdParamSchema, body: discountDecisionSchema }),
+  controller.rejectDiscount
 );
 router.post(
   '/:id/apply-loyalty-redemption',

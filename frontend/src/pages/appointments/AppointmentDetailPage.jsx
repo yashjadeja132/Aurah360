@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import {
@@ -16,6 +17,8 @@ import {
 import {
   APPOINTMENT_STATUS_LABELS,
   APPOINTMENT_STATUS_VARIANT,
+  CANCELLATION_REASON_LABELS,
+  CANCELLATION_REASON_OPTIONS,
 } from '@/modules/appointments/constants';
 import {
   APP_ROUTES,
@@ -32,6 +35,9 @@ export default function AppointmentDetailPage() {
   const { confirm, cancel, noShow, complete, reschedule, followUp, remove } =
     useAppointmentMutations();
 
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReasonCode, setCancelReasonCode] = useState('');
+  const [cancelNote, setCancelNote] = useState('');
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [rsDate, setRsDate] = useState('');
   const [rsSlot, setRsSlot] = useState(null);
@@ -91,15 +97,7 @@ export default function AppointmentDetailPage() {
             </Button>
           </PermissionGuard>
           <PermissionGuard permissions={[PERMISSIONS.APPOINTMENTS_CANCEL, PERMISSIONS.APPOINTMENTS_ALL]}>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={async () => {
-                const reason = window.prompt(t('appointments.detail.cancelReasonPrompt', 'Cancellation reason')) || '';
-                await cancel.mutateAsync({ id, reason });
-                toast.success(t('appointments.detail.toastCancelled', 'Cancelled'));
-              }}
-            >
+            <Button size="sm" variant="destructive" onClick={() => setCancelOpen(true)}>
               {t('common.cancel', 'Cancel')}
             </Button>
           </PermissionGuard>
@@ -183,6 +181,66 @@ export default function AppointmentDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {cancelOpen && (
+        <Card>
+          <CardHeader><CardTitle>{t('appointments.detail.cancelTitle', 'Cancel appointment')}</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {t('appointments.detail.cancelReasonRequired', 'A cancellation reason is mandatory.')}
+            </p>
+            <Select
+              value={cancelReasonCode}
+              onChange={(e) => setCancelReasonCode(e.target.value)}
+            >
+              <option value="">{t('appointments.detail.cancelReasonSelect', 'Select a reason…')}</option>
+              {CANCELLATION_REASON_OPTIONS.map((code) => (
+                <option key={code} value={code}>
+                  {t(`appointments.cancelReason.${code}`, CANCELLATION_REASON_LABELS[code])}
+                </option>
+              ))}
+            </Select>
+            {cancelReasonCode === 'OTHER' && (
+              <Input
+                placeholder={t('appointments.detail.cancelNotePlaceholder', 'Describe the reason (required)')}
+                value={cancelNote}
+                onChange={(e) => setCancelNote(e.target.value)}
+              />
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCancelOpen(false)}>
+                {t('common.close', 'Close')}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={
+                  !cancelReasonCode ||
+                  (cancelReasonCode === 'OTHER' && cancelNote.trim().length < 3) ||
+                  cancel.isPending
+                }
+                onClick={async () => {
+                  try {
+                    await cancel.mutateAsync({
+                      id,
+                      reasonCode: cancelReasonCode,
+                      reason: cancelNote.trim() || undefined,
+                    });
+                    toast.success(t('appointments.detail.toastCancelled', 'Cancelled'));
+                    setCancelOpen(false);
+                    setCancelReasonCode('');
+                    setCancelNote('');
+                  } catch (err) {
+                    toast.error(err?.response?.data?.message || t('appointments.detail.cancelFailed', 'Cancel failed'));
+                  }
+                }}
+              >
+                {t('appointments.detail.confirmCancel', 'Confirm cancellation')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {rescheduleOpen && (
         <Card>

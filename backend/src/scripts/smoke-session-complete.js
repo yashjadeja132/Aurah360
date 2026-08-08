@@ -15,13 +15,14 @@ import InventoryService from '../services/InventoryService.js';
 import { TREATMENT_PLAN_STATUS } from '../enums/treatmentPlan.js';
 import { PAYMENT_STATUS, INVOICE_STATUS } from '../enums/billing.js';
 import { STOCK_TX_TYPE } from '../enums/inventory.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_session_complete'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_session_complete'));
   await mongoose.connection.dropDatabase();
 
   const branchId = new mongoose.Types.ObjectId();

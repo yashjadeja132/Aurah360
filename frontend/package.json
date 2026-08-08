@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "echo \"Add ESLint when ready\""
+    "lint": "echo \"Add ESLint when ready\"",
+    "i18n:check": "node scripts/check-i18n-keys.cjs"
   },
   "engines": {
     "node": ">=20.0.0"

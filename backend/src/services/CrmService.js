@@ -143,9 +143,31 @@ class CrmService {
     }
   }
 
-  async create(payload, actorId, req = null) {
+  /**
+   * SEC-030 — the branch filter is folded into the LOOKUP so an out-of-branch lead is
+   * indistinguishable from a non-existent one (404, never 403).
+   */
+  async #findScoped(id, branchId) {
+    const filter = { _id: id, deletedAt: null };
+    if (branchId) filter.branchId = branchId;
+    return this.leadRepo.model.findOne(filter).exec();
+  }
+
+  async #assertScoped(id, branchId) {
+    const lead = await this.#findScoped(id, branchId);
+    if (!lead) throw ApiError.notFound('Lead not found');
+    return lead;
+  }
+
+  async create(payload, actorId, req = null, { branchId = null } = {}) {
     if (!payload.firstName) throw ApiError.badRequest('firstName is required');
     if (!payload.phone) throw ApiError.badRequest('phone is required');
+    // A branch-scoped user creates leads in their OWN branch. 403 rather than 404: the caller
+    // named a branch id, not a record id, and branch ids are already visible to them.
+    if (branchId && payload.branchId && String(payload.branchId) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
+    if (branchId) payload = { ...payload, branchId };
     if (!payload.branchId) throw ApiError.badRequest('branchId is required');
 
     const branch = await this.branchRepo.findByIdNotDeleted(payload.branchId);
@@ -207,8 +229,8 @@ class CrmService {
     return this.getById(lead._id.toString());
   }
 
-  async getById(id) {
-    const doc = await this.leadRepo.findByIdPopulated(id);
+  async getById(id, { branchId = null } = {}) {
+    const doc = await this.leadRepo.findByIdPopulated(id, { branchId });
     if (!doc) throw ApiError.notFound('Lead not found');
     const followUps = await this.followUpRepo.listByLead(doc._id);
     const tasks = await this.taskRepo.list({ leadId: doc._id, limit: 50 });
@@ -239,9 +261,8 @@ class CrmService {
     };
   }
 
-  async update(id, payload, actorId) {
-    const lead = await this.leadRepo.findByIdNotDeleted(id);
-    if (!lead) throw ApiError.notFound('Lead not found');
+  async update(id, payload, actorId, { branchId = null } = {}) {
+    const lead = await this.#assertScoped(id, branchId);
     if ([LEAD_STATUS.WON, LEAD_STATUS.JUNK].includes(lead.status) && !payload.force) {
       throw ApiError.forbidden('Cannot edit won/junk leads');
     }
@@ -281,9 +302,8 @@ class CrmService {
     return this.getById(id);
   }
 
-  async assign(id, { assignedTo }, actorId, req = null) {
-    const lead = await this.leadRepo.findByIdNotDeleted(id);
-    if (!lead) throw ApiError.notFound('Lead not found');
+  async assign(id, { assignedTo }, actorId, req = null, { branchId = null } = {}) {
+    const lead = await this.#assertScoped(id, branchId);
     if (!assignedTo) throw ApiError.badRequest('assignedTo is required');
 
     const updates = {
@@ -314,9 +334,8 @@ class CrmService {
     return this.getById(id);
   }
 
-  async changeStatus(id, { status, lostReason }, actorId, req = null) {
-    const lead = await this.leadRepo.findByIdNotDeleted(id);
-    if (!lead) throw ApiError.notFound('Lead not found');
+  async changeStatus(id, { status, lostReason }, actorId, req = null, { branchId = null } = {}) {
+    const lead = await this.#assertScoped(id, branchId);
     if (!status) throw ApiError.badRequest('status is required');
     this.#assertTransition(lead.status, status);
 
@@ -352,9 +371,8 @@ class CrmService {
     return { columns };
   }
 
-  async addFollowUp(leadId, payload, actorId, req = null) {
-    const lead = await this.leadRepo.findByIdNotDeleted(leadId);
-    if (!lead) throw ApiError.notFound('Lead not found');
+  async addFollowUp(leadId, payload, actorId, req = null, { branchId = null } = {}) {
+    const lead = await this.#assertScoped(leadId, branchId);
     if (!payload.type) throw ApiError.badRequest('type is required');
 
     const followUp = await this.followUpRepo.create({
@@ -396,9 +414,8 @@ class CrmService {
   /**
    * Convert lead → Patient via PatientService.create (no duplicated registration).
    */
-  async convert(id, payload = {}, actorId, req = null) {
-    const lead = await this.leadRepo.findByIdNotDeleted(id);
-    if (!lead) throw ApiError.notFound('Lead not found');
+  async convert(id, payload = {}, actorId, req = null, { branchId = null } = {}) {
+    const lead = await this.#assertScoped(id, branchId);
     if (lead.convertedPatientId) {
       throw ApiError.forbidden('Lead already converted');
     }
@@ -418,6 +435,7 @@ class CrmService {
       address: { city: payload.city || lead.city || null },
       dateOfBirth: payload.dateOfBirth || null,
       notes: payload.notes || `Converted from ${lead.leadNumber}`,
+      allowDuplicate: payload.allowDuplicate === true,
     };
 
     const patient = await this.patientService.create(patientPayload, actorId, req);
@@ -458,11 +476,22 @@ class CrmService {
   }
 
   // —— Tasks ——
-  async createTask(payload, actorId) {
+  /**
+   * SEC-030 — `LeadTask` carries no branch column of its own; a task belongs to a lead and
+   * inherits that lead's branch. So the caller's branch is translated into the set of lead ids
+   * they may see, and the task query is filtered to those. Resolving ids rather than adding a
+   * denormalised `branchId` to LeadTask keeps one source of truth for a task's branch (moving a
+   * lead cannot leave its tasks pointing at the old site).
+   */
+  async #leadIdsInBranch(branchId) {
+    return this.leadRepo.model.distinct('_id', { branchId, deletedAt: null });
+  }
+
+  async createTask(payload, actorId, { branchId = null } = {}) {
     if (!payload.leadId) throw ApiError.badRequest('leadId is required');
     if (!payload.title) throw ApiError.badRequest('title is required');
-    const lead = await this.leadRepo.findByIdNotDeleted(payload.leadId);
-    if (!lead) throw ApiError.notFound('Lead not found');
+    // 404, not 403: an out-of-branch lead must not be confirmed to exist.
+    await this.#assertScoped(payload.leadId, branchId);
 
     const task = await this.taskRepo.create({
       leadId: payload.leadId,
@@ -486,9 +515,13 @@ class CrmService {
     );
   }
 
-  async updateTask(id, payload, actorId) {
+  async updateTask(id, payload, actorId, { branchId = null } = {}) {
     const task = await this.taskRepo.findByIdNotDeleted(id);
+    // The task's branch is its lead's branch; an out-of-branch task reads as "not found".
     if (!task) throw ApiError.notFound('Task not found');
+    if (branchId && !(await this.#findScoped(task.leadId, branchId))) {
+      throw ApiError.notFound('Task not found');
+    }
     const updates = { updatedBy: actorId };
     for (const f of ['title', 'description', 'assigneeRole', 'assignedTo', 'status']) {
       if (payload[f] !== undefined) updates[f] = payload[f];
@@ -513,6 +546,8 @@ class CrmService {
     const limit = Math.min(Number(query.limit) || 50, 100);
     const page = Math.max(Number(query.page) || 1, 1);
     const { items, total } = await this.taskRepo.list({
+      // null = no branch restriction (OWNER/ADMIN); otherwise only this branch's leads' tasks.
+      leadIdsIn: query.branchId ? await this.#leadIdsInBranch(query.branchId) : null,
       leadId: query.leadId || null,
       assignedTo: query.assignedTo || null,
       status: query.status || null,
@@ -526,7 +561,13 @@ class CrmService {
   }
 
   /** Placeholder communication log — no external integrations */
-  async logCommunication(leadId, { channel, notes, direction = 'OUTBOUND' }, actorId, req = null) {
+  async logCommunication(
+    leadId,
+    { channel, notes, direction = 'OUTBOUND' },
+    actorId,
+    req = null,
+    scope = {}
+  ) {
     const typeMap = {
       WHATSAPP: 'WHATSAPP',
       SMS: 'SMS',
@@ -543,7 +584,8 @@ class CrmService {
         date: new Date(),
       },
       actorId,
-      req
+      req,
+      scope
     );
   }
 

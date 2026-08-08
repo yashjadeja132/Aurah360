@@ -5,7 +5,11 @@ import NotificationService from './NotificationService.js';
 import AuditService from './AuditService.js';
 import { eventBus } from '../events/eventBus.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
-import { APPOINTMENT_STATUS, APPOINTMENT_TYPE } from '../enums/appointment.js';
+import {
+  APPOINTMENT_STATUS,
+  APPOINTMENT_TYPE,
+  CANCELLATION_REASON,
+} from '../enums/appointment.js';
 
 /**
  * Status transitions & reschedule/follow-up — keeps AppointmentService under size limit.
@@ -44,14 +48,24 @@ class AppointmentLifecycleService {
     return this.appointmentService.getById(id);
   }
 
-  async cancel(id, { reason } = {}, actorId, req = null) {
+  async cancel(id, { reasonCode = null, reason } = {}, actorId, req = null) {
     const doc = await this.#get(id);
     if ([APPOINTMENT_STATUS.CANCELLED, APPOINTMENT_STATUS.COMPLETED].includes(doc.status)) {
       throw ApiError.badRequest('Appointment already closed');
     }
+    /** A13 — a bare cancel is blocked: either a controlled code or a free-text reason. */
+    const note = typeof reason === 'string' ? reason.trim() : '';
+    const code = reasonCode || null;
+    if (!code && note.length < 3) {
+      throw ApiError.badRequest('Cancellation reason is required');
+    }
+    if (code === CANCELLATION_REASON.OTHER && note.length < 3) {
+      throw ApiError.badRequest('A note is required when the cancellation reason is OTHER');
+    }
     await this.appointmentRepository.updateById(id, {
       status: APPOINTMENT_STATUS.CANCELLED,
-      cancellationReason: reason || null,
+      cancellationReasonCode: code,
+      cancellationReason: note || code,
       cancelledAt: new Date(),
       updatedBy: actorId,
     });
@@ -59,7 +73,7 @@ class AppointmentLifecycleService {
     await this.notificationService.sendAppointmentCancelled(mapped);
     await this.auditService.record(AUDIT_ACTIONS.APPOINTMENT_CANCELLED, {
       actorId,
-      metadata: { appointmentId: id },
+      metadata: { appointmentId: id, reasonCode: code, reason: note || null },
       branchId: doc.branchId,
       resourceType: 'Appointment',
       resourceId: id,

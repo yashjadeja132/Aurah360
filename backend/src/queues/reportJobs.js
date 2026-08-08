@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
+import { getQueue, getBullConnection, enqueueJob, QUEUE_NAMES } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 
@@ -10,23 +10,20 @@ export const REPORT_JOBS = Object.freeze({
   MONTHLY_SCHEDULED: 'monthly-scheduled-reports',
 });
 
+/** Called from the reports request path — must not block the response. */
 export async function enqueueReportGeneration(runId) {
-  try {
-    const queue = getQueue(QUEUE_NAMES.REPORTS);
-    await queue.add(
-      REPORT_JOBS.GENERATE,
-      { runId },
-      {
-        jobId: `report-run-${runId}`,
-        removeOnComplete: 50,
-        removeOnFail: 100,
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 3000 },
-      }
-    );
-  } catch (err) {
-    logger.warn('Report generation not enqueued (Redis?)', { message: err.message, runId });
-  }
+  await enqueueJob(
+    QUEUE_NAMES.REPORTS,
+    REPORT_JOBS.GENERATE,
+    { runId },
+    {
+      jobId: `report-run-${runId}`,
+      removeOnComplete: 50,
+      removeOnFail: 100,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 3000 },
+    }
+  );
 }
 
 export async function ensureScheduledReportJobs() {

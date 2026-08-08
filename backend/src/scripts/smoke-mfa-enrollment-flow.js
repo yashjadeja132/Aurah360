@@ -1,3 +1,4 @@
+import { smokeDbUri } from './smokeDbUri.js';
 /**
  * Ad-hoc smoke test for the mfa-setup-required enrollment flow (SEC-021, not part of Vitest).
  *
@@ -33,7 +34,7 @@ const tokenService = new TokenService();
 const app = new App().getExpressApp();
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_mfa_enrollment'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_mfa_enrollment'));
   await mongoose.connection.dropDatabase();
 
   const email = 'mfa-enrollment-owner@example.com';

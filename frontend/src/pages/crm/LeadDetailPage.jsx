@@ -36,7 +36,8 @@ export default function LeadDetailPage() {
     <section className="mx-auto max-w-4xl space-y-6">
       <div>
         <Button asChild variant="ghost" size="sm" className="-ml-2">
-          <Link to={APP_ROUTES.CRM_LEADS}>
+          {/* Back to the hub's Leads tab — the standalone /crm/leads route is retired. */}
+          <Link to={`${APP_ROUTES.CRM}?tab=leads`}>
             <ArrowLeft className="h-4 w-4" />
             {t('crm.leadDetail.backToLeads')}
           </Link>

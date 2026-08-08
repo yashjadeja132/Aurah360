@@ -6,6 +6,19 @@ import { MASTER_SLUG_TO_TYPE } from '../constants/masterTypes.js';
 
 /**
  * Generic master controller — type resolved from route slug.
+ *
+ * SEC-030 — masters are ORG-WIDE REFERENCE DATA and are deliberately left unscoped.
+ *
+ * `Master` has no branch dimension at all: the schema is type + name + code + sortOrder, plus
+ * the SERVICE-only fields (categoryId, durationMinutes, price). There is no `branchId` or
+ * `branches` to pin, and adding one would not be a scoping fix but a product change — a service
+ * catalogue, department list, lead-source list or diagnosis list is a single organisation-wide
+ * catalogue by design, and every branch books against the same service ids. Forcing a branchId
+ * onto these queries would return nothing at all and break every picker in the app.
+ *
+ * Writes need no scope either: MASTERS_CREATE / MASTERS_EDIT / MASTERS_DELETE are held only via
+ * MASTERS_ALL, i.e. by OWNER and ADMIN, both of which are global-scope roles. Branch roles get
+ * at most MASTERS_VIEW (or the narrower MASTERS_LOOKUP for pickers), which is read-only.
  */
 class MasterController {
   constructor() {

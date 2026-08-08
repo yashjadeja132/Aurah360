@@ -452,9 +452,18 @@ class NotificationService {
     };
   }
 
-  async getById(id) {
+  /**
+   * SEC-030 — `viewerUserId` (when non-null) restricts the read to notifications that are not
+   * addressed to a specific member of staff, or are addressed to this one. A staff-addressed
+   * notification belonging to somebody else answers 404, not 403: a 403 would confirm the id
+   * exists and is someone's, which is the fact being protected.
+   */
+  async getById(id, { viewerUserId = null } = {}) {
     const doc = await this.notificationRepo.findById(id);
     if (!doc) throw ApiError.notFound('Notification not found');
+    if (viewerUserId && doc.userId && String(doc.userId) !== String(viewerUserId)) {
+      throw ApiError.notFound('Notification not found');
+    }
     return this.#map(doc);
   }
 

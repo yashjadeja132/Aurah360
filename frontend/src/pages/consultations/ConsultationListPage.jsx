@@ -14,6 +14,9 @@ import {
 import { ConsultationStatusBadge } from '@/modules/consultations/components/StatusBadges';
 import { consultationWorkspacePath } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
+// 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
+// and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
+import { todayKey } from '@/utils/date';
 
 export default function ConsultationListPage() {
   const { t } = useTranslation();
@@ -23,7 +26,7 @@ export default function ConsultationListPage() {
   const [doctorId, setDoctorId] = useState('');
   const effectiveDoctorId = doctorId || doctors[0]?.id || '';
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey();
   const { data: apptData } = useAppointmentList({
     doctorId: effectiveDoctorId || undefined,
     from: today,

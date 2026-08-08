@@ -30,6 +30,8 @@ export function QueueBoard({ entries = [], doctors = [] }) {
   const [transferId, setTransferId] = useState(null);
   const [transferDoctorId, setTransferDoctorId] = useState('');
   const [transferReason, setTransferReason] = useState('');
+  const [moveUpId, setMoveUpId] = useState(null);
+  const [moveUpReason, setMoveUpReason] = useState('');
 
   const waiting = entries.filter((e) => e.queueStatus === 'WAITING');
 
@@ -85,12 +87,7 @@ export function QueueBoard({ entries = [], doctors = [] }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        reorder.mutate({
-                          id: entry.id,
-                          payload: { beforeId: waiting[0]?.id },
-                        })
-                      }
+                      onClick={() => setMoveUpId(entry.id)}
                     >
                       {t('reception.actions.moveUp')}
                     </Button>
@@ -127,6 +124,40 @@ export function QueueBoard({ entries = [], doctors = [] }) {
           </PermissionGuard>
         </div>
       ))}
+
+      {moveUpId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md space-y-3 rounded-xl border bg-card p-5 shadow-lg">
+            <h3 className="font-semibold">{t('reception.moveUp.title', 'Move up in queue')}</h3>
+            <p className="text-sm text-muted-foreground">
+              {t('reception.moveUp.reasonRequired', 'A reason is required for a priority jump.')}
+            </p>
+            <Input
+              placeholder={t('reception.moveUp.reasonPlaceholder', 'Reason (min 3 characters)')}
+              value={moveUpReason}
+              onChange={(e) => setMoveUpReason(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => { setMoveUpId(null); setMoveUpReason(''); }}>
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                disabled={moveUpReason.trim().length < 3 || reorder.isPending}
+                onClick={async () => {
+                  await reorder.mutateAsync({
+                    id: moveUpId,
+                    payload: { beforeId: waiting[0]?.id, reason: moveUpReason.trim() },
+                  });
+                  setMoveUpId(null);
+                  setMoveUpReason('');
+                }}
+              >
+                {t('reception.actions.moveUp')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {transferId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

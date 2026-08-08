@@ -5,13 +5,19 @@ const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+/**
+ * `branchId` is optional: the controller resolves it via `resolveBranchScope`, which pins a
+ * non-global role to its own branch and refuses a request for someone else's. Requiring it here
+ * was a usability trap — a RECEPTIONIST cannot call `GET /branches` (no `branches.view`), so the
+ * client had no way to discover the id it was being forced to supply.
+ */
 export const receptionDashboardQuerySchema = z.object({
-  branchId: objectId,
+  branchId: objectId.optional(),
   date: z.string().optional(),
 });
 
 export const todaysAppointmentsQuerySchema = z.object({
-  branchId: objectId,
+  branchId: objectId.optional(),
   doctorId: objectId.optional(),
   date: z.string().optional(),
   search: z.string().optional(),

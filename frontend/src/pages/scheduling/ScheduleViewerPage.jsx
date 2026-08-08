@@ -20,17 +20,14 @@ import {
 import { APP_ROUTES } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 import { cn } from '@/utils/cn';
+// Local-calendar day keys. See `@/utils/date` for why a UTC slice is wrong here: schedule days are
+// persisted as local start-of-day, so in IST they read back as `…T18:30:00.000Z` on the PREVIOUS
+// UTC date — slicing that shifted every date back a day, which is why the weekly strip and the
+// availability detail disagreed (the weekday came from the server's `dayOfWeek`, correct, while the
+// date string and the detail fetch came from the UTC slice).
+import { localDateKey, startOfWeekKey } from '@/utils/date';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-function mondayOf(dateStr) {
-  const d = dateStr ? new Date(dateStr) : new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
 
 export default function ScheduleViewerPage() {
   const { t } = useTranslation();
@@ -41,8 +38,8 @@ export default function ScheduleViewerPage() {
 
   const [doctorId, setDoctorId] = useState('');
   const [branchId, setBranchId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [weekStart, setWeekStart] = useState(mondayOf());
+  const [date, setDate] = useState(localDateKey());
+  const [weekStart, setWeekStart] = useState(startOfWeekKey());
 
   const activeDoctor = doctorId || doctors[0]?.id || '';
   const slotParams = useMemo(
@@ -109,7 +106,7 @@ export default function ScheduleViewerPage() {
         <Input
           type="date"
           value={weekStart}
-          onChange={(e) => setWeekStart(mondayOf(e.target.value))}
+          onChange={(e) => setWeekStart(startOfWeekKey(e.target.value))}
         />
       </div>
 
@@ -120,27 +117,32 @@ export default function ScheduleViewerPage() {
             <Skeleton className="h-32 w-full" />
           ) : (
             <div className="grid gap-2 sm:grid-cols-7">
-              {(week?.days || []).map((day) => (
+              {(week?.days || []).map((day) => {
+                // Resolve the server timestamp to its LOCAL calendar day once, then use it for the
+                // label, the selection check and the fetch — so all three always agree.
+                const dayKey = localDateKey(day.date);
+                return (
                 <button
                   key={day.date}
                   type="button"
-                  onClick={() => setDate(day.date.slice(0, 10))}
+                  onClick={() => setDate(dayKey)}
                   className={cn(
                     'rounded-lg border p-2 text-left text-xs transition-colors',
-                    date === day.date.slice(0, 10)
+                    date === dayKey
                       ? 'border-primary bg-primary/5'
                       : 'bg-card hover:bg-accent'
                   )}
                 >
                   <p className="font-medium">{t(`scheduling.viewer.days.${DAY_NAMES[day.dayOfWeek]}`, DAY_NAMES[day.dayOfWeek])}</p>
-                  <p className="text-muted-foreground">{day.date.slice(5, 10)}</p>
+                  <p className="text-muted-foreground">{dayKey.slice(5, 10)}</p>
                   {day.available ? (
                     <Badge variant="success" className="mt-2">{t('scheduling.viewer.slotsCount', { count: day.slots.length })}</Badge>
                   ) : (
                     <Badge variant="warning" className="mt-2">{day.reason || t('scheduling.viewer.off')}</Badge>
                   )}
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

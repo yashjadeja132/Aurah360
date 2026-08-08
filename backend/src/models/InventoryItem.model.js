@@ -88,8 +88,16 @@ inventoryItemSchema.virtual('availableStock').get(function availableStock() {
 
 inventoryItemSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
   const available = Math.max(0, (this.currentStock || 0) - (this.reservedStock || 0));
+  // CRITICAL sits between OUT_OF_STOCK and LOW: at or below the configured safety floor
+  // (minimumStock) the item needs attention now, not at the next purchase cycle.
   const stockStatus =
-    available <= 0 ? 'OUT_OF_STOCK' : available <= this.reorderLevel ? 'LOW' : 'OK';
+    available <= 0
+      ? 'OUT_OF_STOCK'
+      : available <= (this.minimumStock || 0)
+        ? 'CRITICAL'
+        : available <= this.reorderLevel
+          ? 'LOW'
+          : 'OK';
   return {
     id: this._id.toString(),
     itemCode: this.itemCode,

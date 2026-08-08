@@ -1,5 +1,6 @@
 import Invoice from '../../models/Invoice.model.js';
 import Payment from '../../models/Payment.model.js';
+import { dayBucket } from '../../utils/date.util.js';
 import {
   parseReportFilters,
   applyCommonMatch,
@@ -91,7 +92,9 @@ class BillingAnalyticsService {
           { $match: payMatch },
           {
             $group: {
-              _id: { $dateToString: { format: '%Y-%m-%d', date: '$paidAt' } },
+              // paidAt is a true instant, but revenue-by-day must follow the CLINIC's day: a
+              // payment taken at 01:00 IST belongs to that day's takings, not the previous one.
+              _id: dayBucket('$paidAt'),
               amount: { $sum: '$amount' },
             },
           },

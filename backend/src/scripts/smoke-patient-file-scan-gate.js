@@ -14,6 +14,7 @@ import PatientTokenService from '../services/PatientTokenService.js';
 import { SCAN_STATE, PATIENT_VISIBILITY } from '../enums/patient.js';
 import { ENTITY_STATUS } from '../constants/index.js';
 import StorageFactory from '../storage/StorageFactory.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 const patientTokenService = new PatientTokenService();
 const storage = StorageFactory.create();
@@ -23,7 +24,7 @@ function assert(condition, message) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_patient_file_scan_gate'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_patient_file_scan_gate'));
   await mongoose.connection.dropDatabase();
 
   const app = new App().getExpressApp();

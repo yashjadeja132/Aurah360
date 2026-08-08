@@ -9,6 +9,24 @@ export const runAiSchema = z.object({
   consultationId: objectId.optional().nullable(),
 });
 
+export const copilotRunSchema = z.object({
+  consultationId: objectId,
+  patientId: objectId.optional().nullable(),
+  includePhotos: z.boolean().optional().default(false),
+});
+
+export const copilotRefineSchema = z.object({
+  answers: z
+    .array(
+      z.object({
+        question: z.string().min(1).max(1000),
+        answer: z.string().min(1).max(2000),
+      })
+    )
+    .min(1)
+    .max(20),
+});
+
 export const dispositionSchema = z.object({
   disposition: z.enum(AI_DISPOSITION_LIST),
   editedOutput: z.record(z.any()).optional().nullable(),
@@ -28,4 +46,4 @@ export const listRunsQuerySchema = z.object({
 export const runIdParamSchema = z.object({ runId: objectId });
 export const useCaseParamSchema = z.object({ useCase: z.enum(AI_USE_CASE_LIST) });
 
-export default { runAiSchema, dispositionSchema, setFlagSchema, listRunsQuerySchema, runIdParamSchema, useCaseParamSchema };
+export default { runAiSchema, copilotRunSchema, copilotRefineSchema, dispositionSchema, setFlagSchema, listRunsQuerySchema, runIdParamSchema, useCaseParamSchema };

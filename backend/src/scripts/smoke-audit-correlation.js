@@ -20,6 +20,7 @@ import AppointmentLifecycleService from '../services/AppointmentLifecycleService
 import { requestIdMiddleware } from '../middlewares/requestId.middleware.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { APPOINTMENT_STATUS } from '../enums/appointment.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function runMiddleware(mw, req, res) {
   return new Promise((resolve, reject) => {
@@ -33,7 +34,7 @@ function makeRes() {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_audit_correlation'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_audit_correlation'));
   await mongoose.connection.dropDatabase();
 
   const auditService = new AuditService();

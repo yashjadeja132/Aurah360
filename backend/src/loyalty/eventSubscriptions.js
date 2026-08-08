@@ -1,6 +1,7 @@
 import { eventBus } from '../events/eventBus.js';
 import logger from '../libs/logger.js';
 import LoyaltyEarningEngineService from '../services/LoyaltyEarningEngineService.js';
+import LoyaltyLedgerService from '../services/LoyaltyLedgerService.js';
 import Invoice from '../models/Invoice.model.js';
 import Patient from '../models/Patient.model.js';
 import { LOYALTY_EARNING_EVENT, LOYALTY_SOURCE_REF_TYPE } from '../enums/loyalty.js';
@@ -33,6 +34,21 @@ import { PATIENT_PORTAL_EVENTS } from '../enums/patientPortal.js';
  * These can be wired the same way once their upstream events/models exist.
  */
 const engine = new LoyaltyEarningEngineService();
+const ledger = new LoyaltyLedgerService();
+
+/**
+ * LOY-001 `earnOnRedeemedPortion` — should the part of a bill settled with the patient's own
+ * points earn points again? Invoice.total is already NET of the redemption, so OFF (the default,
+ * and the no-double-dip answer) needs no adjustment; ON adds the redeemed value back to the
+ * earning base.
+ */
+async function earnableAmountFor(invoice, fallbackAmount) {
+  const amount = Number(fallbackAmount) || 0;
+  const redeemed = Number(invoice?.loyaltyRedemption?.valueInr) || 0;
+  if (!redeemed) return amount;
+  const settings = await ledger.getSettings();
+  return settings?.earnOnRedeemedPortion ? amount + redeemed : amount;
+}
 
 function safeHandle(eventName, handler) {
   eventBus.on(eventName, async (payload) => {
@@ -57,16 +73,22 @@ export function registerLoyaltyEventListeners() {
     });
   });
 
-  // E2/E4 — SPEND_BASED on every finalized invoice; PACKAGE_PURCHASE additionally when the
-  // invoice carries a package snapshot.
-  safeHandle(BILLING_EVENTS.INVOICE_FINALIZED, async (payload) => {
-    const invoice = await Invoice.findById(payload.invoiceId).select('branchId packageSnapshot total').lean();
+  // E2/E4 — SPEND_BASED on every PAID invoice; PACKAGE_PURCHASE additionally when the invoice
+  // carries a package snapshot.
+  //
+  // Deliberately InvoicePaid, not InvoiceFinalized: points are a reward for money actually
+  // received. Accruing at finalize granted points against an invoice that might never be paid
+  // (and, once voided, left points behind that only the clawback path could chase).
+  safeHandle(BILLING_EVENTS.INVOICE_PAID, async (payload) => {
+    const invoice = await Invoice.findById(payload.invoiceId)
+      .select('branchId packageSnapshot total loyaltyRedemption')
+      .lean();
     if (!invoice) return;
 
     await engine.resolveAndCredit(LOYALTY_EARNING_EVENT.SPEND_BASED, {
       patientId: payload.patientId,
       branchId: invoice.branchId,
-      amountInr: payload.total ?? invoice.total,
+      amountInr: await earnableAmountFor(invoice, payload.total ?? invoice.total),
       occurredAt: payload.emittedAt,
       sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
       sourceRefId: payload.invoiceId,

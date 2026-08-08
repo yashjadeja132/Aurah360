@@ -1,0 +1,82 @@
+{
+  "type": "json_schema",
+  "name": "clinical_copilot_suggestions",
+  "description": "Full structured clinical suggestion set for the treating doctor.",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "summary",
+      "possible_conditions",
+      "follow_up_questions",
+      "red_flags",
+      "investigations",
+      "diet_lifestyle_advice",
+      "medication_suggestions",
+      "procedural_options_note",
+      "aftercare_advice_english",
+      "patient_advice_gujarati",
+      "confidence_note"
+    ],
+    "properties": {
+      "summary": { "type": "string" },
+      "possible_conditions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["condition", "likelihood", "reasoning"],
+          "properties": {
+            "condition": { "type": "string" },
+            "likelihood": { "type": "string", "enum": ["high", "medium", "low"] },
+            "reasoning": { "type": "string" }
+          }
+        }
+      },
+      "follow_up_questions": { "type": "array", "items": { "type": "string" } },
+      "red_flags": { "type": "array", "items": { "type": "string" } },
+      "investigations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["test", "reason"],
+          "properties": {
+            "test": { "type": "string" },
+            "reason": { "type": "string" }
+          }
+        }
+      },
+      "diet_lifestyle_advice": { "type": "array", "items": { "type": "string" } },
+      "medication_suggestions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "generic_name",
+            "indian_brand_example",
+            "composition",
+            "form_strength",
+            "typical_dosing",
+            "typical_duration",
+            "cautions"
+          ],
+          "properties": {
+            "generic_name": { "type": "string" },
+            "indian_brand_example": { "type": "string" },
+            "composition": { "type": "string" },
+            "form_strength": { "type": "string" },
+            "typical_dosing": { "type": "string" },
+            "typical_duration": { "type": "string" },
+            "cautions": { "type": "string" }
+          }
+        }
+      },
+      "procedural_options_note": { "type": "string" },
+      "aftercare_advice_english": { "type": "string" },
+      "patient_advice_gujarati": { "type": "string" },
+      "confidence_note": { "type": "string" }
+    }
+  }
+}

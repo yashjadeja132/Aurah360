@@ -7,8 +7,12 @@ coverage/
 .env.*.local
 *.log
 logs/
-uploads/*
-!uploads/.gitkeep
+# A gitignore pattern that contains a slash is anchored to THIS directory, so the original
+# `uploads/*` only ever matched a top-level `/uploads` — `backend/uploads/` was tracked, and 36
+# directories of real uploaded patient documents and clinical photos were staged for commit.
+# `**/` matches at any depth, which is what was meant.
+**/uploads/*
+!**/uploads/.gitkeep
 .DS_Store
 Thumbs.db
 .vscode/

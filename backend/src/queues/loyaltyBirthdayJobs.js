@@ -1,6 +1,4 @@
-import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
-import { attachDeadLetterHandler } from './dlq.js';
+import { getQueue, QUEUE_NAMES } from './connection.js';
 import logger from '../libs/logger.js';
 import Patient from '../models/Patient.model.js';
 import LoyaltyLedgerEntry from '../models/LoyaltyLedgerEntry.model.js';
@@ -95,35 +93,20 @@ export async function ensureLoyaltyBirthdayScan() {
   }
 }
 
-let worker = null;
-
-export function startLoyaltyBirthdayWorker() {
-  if (worker) return worker;
-
-  worker = new Worker(
-    QUEUE_NAMES.LOYALTY,
-    async (job) => {
-      if (job.name === LOYALTY_BIRTHDAY_JOBS.SCAN) {
-        const result = await scanForBirthdayBonuses();
-        logger.info('Loyalty birthday scan job', result);
-        return result;
-      }
-      return { ignored: true };
-    },
-    { connection: getBullConnection() }
-  );
-
-  attachDeadLetterHandler(worker, QUEUE_NAMES.LOYALTY);
-
-  ensureLoyaltyBirthdayScan().catch(() => {});
-
-  logger.info('Loyalty birthday BullMQ worker started');
-  return worker;
-}
+/** Registers onto the shared LOYALTY queue worker — see queues/composeWorker.js. */
+export const loyaltyBirthdayHandlerModule = {
+  jobNames: [LOYALTY_BIRTHDAY_JOBS.SCAN],
+  ensure: ensureLoyaltyBirthdayScan,
+  handle: async () => {
+    const result = await scanForBirthdayBonuses();
+    logger.info('Loyalty birthday scan job', result);
+    return result;
+  },
+};
 
 export default {
   scanForBirthdayBonuses,
   ensureLoyaltyBirthdayScan,
-  startLoyaltyBirthdayWorker,
+  loyaltyBirthdayHandlerModule,
   LOYALTY_BIRTHDAY_JOBS,
 };

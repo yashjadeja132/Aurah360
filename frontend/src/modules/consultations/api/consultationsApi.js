@@ -56,6 +56,20 @@ export const consultationsApi = {
       })
       .then((res) => res.data);
   },
+  listLabOrders(id) {
+    return api.get(`/consultations/${id}/lab-orders`).then((res) => res.data);
+  },
+  labOrderReviewQueue(params) {
+    return api.get('/consultations/lab-orders/review-queue', { params }).then((res) => res.data);
+  },
+  createLabOrder(id, payload) {
+    return api.post(`/consultations/${id}/lab-orders`, payload).then((res) => res.data);
+  },
+  updateLabOrder(id, labOrderId, payload) {
+    return api
+      .patch(`/consultations/${id}/lab-orders/${labOrderId}`, payload)
+      .then((res) => res.data);
+  },
   listTemplates(params) {
     return api.get('/consultations/templates', { params }).then((res) => res.data);
   },

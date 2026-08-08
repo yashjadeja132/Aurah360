@@ -10,9 +10,10 @@ import config from '../config/index.js';
 import { HttpDltSmsProvider } from '../notifications/providers.js';
 import { templateSchema, updateTemplateSchema } from '../validators/notification.validator.js';
 import NotificationTemplate from '../models/NotificationTemplate.model.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_notif_guards'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_notif_guards'));
   await mongoose.connection.dropDatabase();
 
   // --- Task #28: HttpDltSmsProvider DLT template lock ---------------------------------

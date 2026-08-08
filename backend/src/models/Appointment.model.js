@@ -5,6 +5,7 @@ import {
   APPOINTMENT_TYPE_LIST,
   APPOINTMENT_SOURCE_LIST,
   APPOINTMENT_PRIORITY_LIST,
+  CANCELLATION_REASON_LIST,
 } from '../enums/appointment.js';
 
 const resourceAllocationSchema = new mongoose.Schema(
@@ -115,6 +116,12 @@ const appointmentSchema = new mongoose.Schema(
       type: recurringPlaceholderSchema,
       default: () => ({ enabled: false }),
     },
+    /** A13 — controlled cancellation reason; `cancellationReason` holds the free-text note. */
+    cancellationReasonCode: {
+      type: String,
+      enum: [...CANCELLATION_REASON_LIST, null],
+      default: null,
+    },
     cancellationReason: { type: String, default: null },
     cancelledAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
@@ -185,6 +192,7 @@ appointmentSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
       ? this.rescheduledFromId.toString()
       : null,
     recurring: this.recurring,
+    cancellationReasonCode: this.cancellationReasonCode,
     cancellationReason: this.cancellationReason,
     cancelledAt: this.cancelledAt,
     completedAt: this.completedAt,

@@ -4,7 +4,15 @@ import PatientService from '../services/PatientService.js';
 import PatientDocumentService from '../services/PatientDocumentService.js';
 import PatientTimelineService from '../services/PatientTimelineService.js';
 import PatientMergeService from '../services/PatientMergeService.js';
+import { scopedListQuery } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — `list` (the patient BROWSE screen) is scoped to the caller's branch. It is
+ * deliberately NOT narrowed to a DOCTOR's own primaryDoctorId: within a branch a doctor
+ * routinely treats walk-ins and covers colleagues' patients, and hiding them would be a
+ * clinical-safety regression, not a security win. Record reads (`getById`, documents,
+ * timeline) are likewise left broad and audited — see the break-glass model (SEC-002).
+ */
 class PatientController {
   constructor() {
     this.patientService = new PatientService();
@@ -14,7 +22,9 @@ class PatientController {
   }
 
   list = asyncHandler(async (req, res) => {
-    const result = await this.patientService.list(req.query);
+    const result = await this.patientService.list(
+      await scopedListQuery(req, { branch: true })
+    );
     return ApiResponse.success(res, {
       message: 'Patients retrieved',
       data: result.items,
@@ -50,6 +60,17 @@ class PatientController {
       req
     );
     return ApiResponse.success(res, { message: 'Consent updated', data: { patient } });
+  });
+
+  /** PAT-005 — staff-only verification of a guardian link (gates dependent portal access). */
+  setGuardianVerified = asyncHandler(async (req, res) => {
+    const patient = await this.patientService.setGuardianVerified(
+      req.params.id,
+      req.body,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Guardian verification updated', data: { patient } });
   });
 
   softDelete = asyncHandler(async (req, res) => {
@@ -128,7 +149,9 @@ class PatientController {
       req.params.id,
       req.params.documentId,
       req.body.title,
-      req.auth.userId
+      req.auth.userId,
+      req.body.reason || null,
+      req
     );
     return ApiResponse.success(res, { message: 'Document renamed', data: { document } });
   });

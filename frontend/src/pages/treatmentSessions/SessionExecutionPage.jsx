@@ -17,6 +17,7 @@ import {
   useRescheduleSession,
   useUploadSessionPhoto,
 } from '@/modules/treatmentSessions/hooks/useTreatmentSessions';
+import { SessionPreflightPanel } from '@/modules/treatmentSessions/components/SessionPreflightPanel';
 import { SESSION_STATUS_LABELS } from '@/modules/treatmentSessions/constants';
 import { APP_ROUTES, treatmentSessionPrintPath } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
@@ -125,6 +126,24 @@ export default function SessionExecutionPage() {
         </div>
       </div>
 
+      {/* TRT-006 — pre-flight safety gates; "Begin procedure" lives here (not in the generic
+          action row) so the technician sees item-by-item pass/fail before committing. */}
+      <PermissionGuard
+        permissions={[PERMISSIONS.TREATMENT_SESSION_EDIT, PERMISSIONS.TREATMENT_SESSION_ALL]}
+      >
+        <SessionPreflightPanel
+          sessionId={id}
+          session={session}
+          isStarting={start.isPending}
+          onStart={(extra = {}) =>
+            start.mutate({
+              deviceUsage: { device: device || session.deviceId, machine: 'Unit 1' },
+              ...extra,
+            })
+          }
+        />
+      </PermissionGuard>
+
       {/* Technician workflow actions */}
       <div className="flex flex-wrap gap-2 rounded-xl border p-4">
         <PermissionGuard
@@ -133,18 +152,6 @@ export default function SessionExecutionPage() {
           {session.status === 'SCHEDULED' && (
             <Button variant="outline" disabled={checkIn.isPending} onClick={() => checkIn.mutate()}>
               {t('treatmentSessions.execution.checkIn', 'Check in')}
-            </Button>
-          )}
-          {['SCHEDULED', 'CHECKED_IN'].includes(session.status) && (
-            <Button
-              disabled={start.isPending}
-              onClick={() =>
-                start.mutate({
-                  deviceUsage: { device: device || session.deviceId, machine: 'Unit 1' },
-                })
-              }
-            >
-              {t('treatmentSessions.execution.startSession', 'Start session')}
             </Button>
           )}
         </PermissionGuard>

@@ -10,6 +10,7 @@ import { CONSULTATION_STATUS } from '../enums/consultation.js';
 import { FOLLOW_UP_UNIT } from '../enums/consultation.js';
 import { APPOINTMENT_STATUS } from '../enums/appointment.js';
 import { scanForMissedFollowUps, MISSED_FOLLOW_UP_PURPOSE } from '../queues/missedFollowUpJobs.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function makePatient(tag) {
   return Patient.create({
@@ -37,7 +38,7 @@ async function makeConsultation({ patientId, endedAt, followUpValue, followUpUni
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_missed_followup'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_missed_followup'));
   await mongoose.connection.dropDatabase();
   // Recreate the partial unique dedup index freshly for this DB.
   await RecallEntry.syncIndexes();

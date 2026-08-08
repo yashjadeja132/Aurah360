@@ -10,6 +10,7 @@ import TreatmentSession from '../models/TreatmentSession.model.js';
 import QueueEntry from '../models/QueueEntry.model.js';
 import Doctor from '../models/Doctor.model.js';
 import Branch from '../models/Branch.model.js';
+import { hasGlobalScope } from '../helpers/scope.helper.js';
 import InventoryItem from '../models/InventoryItem.model.js';
 import Dispense from '../models/Dispense.model.js';
 import PurchaseOrder from '../models/PurchaseOrder.model.js';
@@ -32,6 +33,7 @@ import {
   EXPORT_FORMAT,
 } from '../enums/report.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
+import { dayBucket } from '../utils/date.util.js';
 import {
   parseReportFilters,
   applyCommonMatch,
@@ -724,9 +726,28 @@ class ReportService {
     }
   }
 
-  async getReportRun(id) {
+  /**
+   * SEC-001 — a report run is readable ONLY by the person who requested it, or by a global-scope
+   * role (OWNER/ADMIN).
+   *
+   * This took no requester argument at all: any holder of `reports.view` could walk report-run ids
+   * and read someone else's output, and `resultSummary` retains sample rows of real patient data.
+   * A run is the residue of a query somebody else was authorised to make — inheriting their
+   * results is inheriting their scope.
+   *
+   * Out-of-scope answers 404, not 403: a 403 would confirm the run exists.
+   */
+  async getReportRun(id, requester = null) {
     const run = await ReportRun.findOne({ _id: id, deletedAt: null }).lean();
     if (!run) throw ApiError.notFound('Report run not found');
+
+    if (requester && !hasGlobalScope(requester)) {
+      const owner = run.requestedBy ? run.requestedBy.toString() : null;
+      if (!owner || owner !== String(requester.userId)) {
+        throw ApiError.notFound('Report run not found');
+      }
+    }
+
     return {
       id: run._id.toString(),
       reportType: run.reportType,
@@ -945,7 +966,8 @@ class ReportService {
       { $match: match },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$paidAt' } },
+          // Revenue rows are grouped by the clinic's day, not the UTC day.
+          _id: dayBucket('$paidAt'),
           amount: { $sum: '$amount' },
           count: { $sum: 1 },
         },

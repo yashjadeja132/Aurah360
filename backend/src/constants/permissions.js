@@ -23,6 +23,13 @@ export const PERMISSIONS = Object.freeze({
   PATIENTS_EDIT: 'patients.edit',
   PATIENTS_DELETE: 'patients.delete',
   PATIENTS_DOCUMENTS: 'patients.documents',
+  /**
+   * SEC-030 — separates DOWNLOAD (taking a copy of the bytes off-premises) from VIEW (rendering
+   * them in the browser). Viewing is gated by the clinical-view set; only holders of this
+   * permission (or of the pre-existing document-management grants it is additive to) may request
+   * `?download=1`, which is what sets `Content-Disposition: attachment`.
+   */
+  PATIENTS_DOCUMENTS_DOWNLOAD: 'patients.documents.download',
   PATIENTS_MERGE: 'patients.merge',
   PATIENTS_ALL: 'patients.*',
 
@@ -97,6 +104,14 @@ export const PERMISSIONS = Object.freeze({
   BRANCHES_ALL: 'branches.*',
 
   // Masters / configuration
+  /**
+   * SEC-030 — narrow, read-only lookup of ACTIVE master records only
+   * (`GET /masters/:masterType/active`), for roles that need to populate a dropdown while
+   * booking or editing a patient but have no business browsing or administering master data.
+   * Strictly weaker than MASTERS_VIEW, which additionally exposes the full (including inactive)
+   * lists and single-record reads that back the admin Masters screens.
+   */
+  MASTERS_LOOKUP: 'masters.lookup',
   MASTERS_VIEW: 'masters.view',
   MASTERS_CREATE: 'masters.create',
   MASTERS_EDIT: 'masters.edit',
@@ -138,6 +153,13 @@ export const PERMISSIONS = Object.freeze({
   CONSULTATION_VIEW: 'consultation.view',
   CONSULTATION_CREATE: 'consultation.create',
   CONSULTATION_EDIT: 'consultation.edit',
+  /**
+   * Authoring the DIAGNOSIS is split out of CONSULTATION_EDIT: recording vitals, intake notes and
+   * examination findings is assistive work a nurse does every day, but naming the condition is a
+   * prescriber act. While both sat behind `consultation.edit`, granting a nurse the intake screen
+   * necessarily granted them the diagnosis endpoint too.
+   */
+  CONSULTATION_DIAGNOSE: 'consultation.diagnose',
   CONSULTATION_SIGN: 'consultation.sign',
   CONSULTATION_LOCK: 'consultation.lock',
   CONSULTATION_ALL: 'consultation.*',
@@ -212,6 +234,18 @@ export const PERMISSIONS = Object.freeze({
   ADVERSE_EVENT_RESOLVE: 'adverse_event.resolve',
   TREATMENT_HARD_STOP_OVERRIDE: 'treatment.hard_stop_override',
 
+  /**
+   * RX-SAFETY — override a blocking prescribing-safety alert (allergy contraindication or a
+   * blocking drug-interaction rule) with a mandatory reason. Deliberately namespaced OUTSIDE
+   * `prescription.*` (same trick as `treatment.hard_stop_override` vs `treatment_session.*`) so
+   * the broad PRESCRIPTION_ALL wildcard cannot silently confer it — it must be granted on purpose.
+   */
+  PRESCRIPTION_SAFETY_OVERRIDE: 'prescription_safety.override',
+  /** Manage the admin-maintained drug-interaction rule set that the checker reads. */
+  PRESCRIPTION_SAFETY_RULES_MANAGE: 'prescription_safety.rules_manage',
+  /** Read the interaction rule set / safety configuration. */
+  PRESCRIPTION_SAFETY_RULES_VIEW: 'prescription_safety.rules_view',
+
   // Billing extensions — real refund, cash close (BIL-002, BIL-003)
   BILLING_CASH_CLOSE: 'billing.cash_close',
   BILLING_CASH_CLOSE_APPROVE: 'billing.cash_close_approve',
@@ -260,6 +294,7 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.PATIENTS_EDIT, module: 'patients', description: 'Edit patients' },
   { key: PERMISSIONS.PATIENTS_DELETE, module: 'patients', description: 'Delete patients' },
   { key: PERMISSIONS.PATIENTS_DOCUMENTS, module: 'patients', description: 'Manage patient documents' },
+  { key: PERMISSIONS.PATIENTS_DOCUMENTS_DOWNLOAD, module: 'patients', description: 'Download (not just view) patient files' },
   { key: PERMISSIONS.PATIENTS_MERGE, module: 'patients', description: 'Detect/merge duplicate patients' },
   { key: PERMISSIONS.PATIENTS_ALL, module: 'patients', description: 'All patient permissions' },
 
@@ -313,6 +348,11 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.BRANCHES_MANAGE, module: 'branches', description: 'Manage branch settings' },
   { key: PERMISSIONS.BRANCHES_ALL, module: 'branches', description: 'All branch permissions' },
 
+  {
+    key: PERMISSIONS.MASTERS_LOOKUP,
+    module: 'masters',
+    description: 'Look up active master records for dropdowns (read-only, no admin screens)',
+  },
   { key: PERMISSIONS.MASTERS_VIEW, module: 'masters', description: 'View master data' },
   { key: PERMISSIONS.MASTERS_CREATE, module: 'masters', description: 'Create master records' },
   { key: PERMISSIONS.MASTERS_EDIT, module: 'masters', description: 'Edit master records' },
@@ -350,6 +390,7 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.CONSULTATION_VIEW, module: 'consultation', description: 'View consultations / EMR' },
   { key: PERMISSIONS.CONSULTATION_CREATE, module: 'consultation', description: 'Start consultations' },
   { key: PERMISSIONS.CONSULTATION_EDIT, module: 'consultation', description: 'Edit consultation clinical data' },
+  { key: PERMISSIONS.CONSULTATION_DIAGNOSE, module: 'consultation', description: 'Author/record a clinical diagnosis' },
   { key: PERMISSIONS.CONSULTATION_SIGN, module: 'consultation', description: 'Sign consultations' },
   { key: PERMISSIONS.CONSULTATION_LOCK, module: 'consultation', description: 'Lock consultations' },
   { key: PERMISSIONS.CONSULTATION_ALL, module: 'consultation', description: 'All consultation permissions' },
@@ -414,6 +455,22 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.ADVERSE_EVENT_CREATE, module: 'adverse_event', description: 'Report an adverse event' },
   { key: PERMISSIONS.ADVERSE_EVENT_RESOLVE, module: 'adverse_event', description: 'Resolve/close an adverse event' },
   { key: PERMISSIONS.TREATMENT_HARD_STOP_OVERRIDE, module: 'treatment', description: 'Override a treatment hard-stop with reason' },
+
+  {
+    key: PERMISSIONS.PRESCRIPTION_SAFETY_OVERRIDE,
+    module: 'prescription_safety',
+    description: 'Override a blocking allergy/interaction alert on prescription finalize, with reason',
+  },
+  {
+    key: PERMISSIONS.PRESCRIPTION_SAFETY_RULES_VIEW,
+    module: 'prescription_safety',
+    description: 'View the drug-interaction rule set used by the prescribing safety check',
+  },
+  {
+    key: PERMISSIONS.PRESCRIPTION_SAFETY_RULES_MANAGE,
+    module: 'prescription_safety',
+    description: 'Create/deactivate drug-interaction rules',
+  },
 
   { key: PERMISSIONS.BILLING_CASH_CLOSE, module: 'billing', description: 'Submit branch cash close' },
   { key: PERMISSIONS.BILLING_CASH_CLOSE_APPROVE, module: 'billing', description: 'Approve branch cash close' },

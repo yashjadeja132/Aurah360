@@ -18,6 +18,7 @@ import {
   releaseDocumentSchema,
   duplicateCheckSchema,
   mergePlaceholderSchema,
+  guardianVerificationSchema,
 } from '../../validators/patient.validator.js';
 
 const router = Router();
@@ -84,6 +85,15 @@ router.patch(
   requirePermission(PERMISSIONS.PATIENTS_EDIT, PERMISSIONS.PATIENTS_ALL),
   validate({ params: patientIdParamSchema, body: updateConsentSchema }),
   controller.updateConsent
+);
+
+// PAT-005 — staff verifies the guardian↔dependent relationship at the desk. This is what unlocks
+// the dependent's portal record for the guardian; it can never be set through a profile edit.
+router.patch(
+  '/:id/guardian-verification',
+  requirePermission(PERMISSIONS.PATIENTS_EDIT, PERMISSIONS.PATIENTS_ALL),
+  validate({ params: patientIdParamSchema, body: guardianVerificationSchema }),
+  controller.setGuardianVerified
 );
 
 router.delete(

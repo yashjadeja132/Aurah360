@@ -53,6 +53,20 @@ export function usePlanProgress(planId) {
   });
 }
 
+/**
+ * TRT-006 — read-only start pre-flight checklist (same gates the backend start() enforces).
+ */
+export function useSessionPreflight(id, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.TREATMENT_SESSION_PREFLIGHT(id),
+    queryFn: async () => {
+      const res = await treatmentSessionsApi.preflight(id);
+      return res.data.preflight;
+    },
+    enabled: Boolean(id) && enabled,
+  });
+}
+
 export function useCreateSession() {
   const qc = useQueryClient();
   return useMutation({
@@ -86,8 +100,18 @@ export function useStartSession(id) {
       toast.success('Session started');
       invalidateAll(qc);
       qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_SESSION_DETAIL(id) });
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_SESSION_PREFLIGHT(id) });
     },
-    onError: (e) => toast.error(errMsg(e, 'Start failed')),
+    onError: (e) => {
+      // The backend now returns the failed gates in `errors` — show them instead of a
+      // generic "Start failed", and refresh the pre-flight checklist.
+      const gates = e?.response?.data?.errors;
+      const description = Array.isArray(gates)
+        ? gates.map((g) => `${g.label || g.key}: ${g.detail || ''}`.trim()).join('\n')
+        : undefined;
+      toast.error(errMsg(e, 'Start failed'), description ? { description } : undefined);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_SESSION_PREFLIGHT(id) });
+    },
   });
 }
 

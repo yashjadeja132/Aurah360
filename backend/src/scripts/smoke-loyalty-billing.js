@@ -27,6 +27,8 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
+import { smokeDbUri } from './smokeDbUri.js';
+
 async function sumPoints(filter) {
   const rows = await LoyaltyLedgerEntry.aggregate([
     { $match: filter },
@@ -36,7 +38,7 @@ async function sumPoints(filter) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_loyalty_billing'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_loyalty_billing'));
   await mongoose.connection.dropDatabase();
 
   console.log('Configured discount-approval threshold percent:', config.billing.discountApprovalThresholdPercent);

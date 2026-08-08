@@ -5,6 +5,7 @@ import PrescriptionRepository, {
 import MedicineRepository from '../repositories/MedicineRepository.js';
 import ConsultationRepository from '../repositories/ConsultationRepository.js';
 import AuditService from './AuditService.js';
+import PrescriptionSafetyService from './PrescriptionSafetyService.js';
 import { generatePrescriptionNumber } from '../helpers/prescriptionNumber.helper.js';
 import { PRESCRIPTION_STATUS } from '../enums/prescription.js';
 import { CONSULTATION_STATUS } from '../enums/consultation.js';
@@ -21,6 +22,7 @@ class PrescriptionService {
     this.medicineRepository = new MedicineRepository();
     this.consultationRepository = new ConsultationRepository();
     this.auditService = new AuditService();
+    this.safetyService = new PrescriptionSafetyService();
   }
 
   #map(doc) {
@@ -236,6 +238,14 @@ class PrescriptionService {
       items: normalizedItems,
       excludePrescriptionId: prescription._id,
     });
+    // RX-SAFETY — surfaced while still a draft so the prescriber sees the block early; enforcement
+    // itself lives in finalize() (a warning on create would be trivially bypassable).
+    result.safety = await this.safetyService.evaluate({
+      patientId: consultation.patientId,
+      items: normalizedItems,
+      excludePrescriptionId: prescription._id,
+      req,
+    });
     return result;
   }
 
@@ -303,8 +313,36 @@ class PrescriptionService {
         items: updates.items,
         excludePrescriptionId: prescription._id,
       });
+      result.safety = await this.safetyService.evaluate({
+        patientId: prescription.patientId,
+        items: updates.items,
+        excludePrescriptionId: prescription._id,
+        req,
+      });
     }
     return result;
+  }
+
+  /**
+   * RX-SAFETY — read-only preflight for the prescription editor (mirrors the treatment-session
+   * preflight endpoint). Tells the UI whether finalize will be refused, and whether THIS caller
+   * could override it.
+   */
+  async safetyCheck(id, req = null) {
+    const prescription = await this.prescriptionRepository.findByIdNotDeleted(id);
+    if (!prescription) throw ApiError.notFound('Prescription not found');
+    const evaluation = await this.safetyService.evaluate({
+      patientId: prescription.patientId,
+      items: prescription.items || [],
+      excludePrescriptionId: prescription._id,
+      req,
+    });
+    return {
+      prescriptionId: prescription._id.toString(),
+      prescriptionNumber: prescription.prescriptionNumber,
+      status: prescription.status,
+      ...evaluation,
+    };
   }
 
   async deleteDraft(id, actorId) {
@@ -319,7 +357,16 @@ class PrescriptionService {
     return { id };
   }
 
-  async finalize(id, actorId, req = null) {
+  /**
+   * RX-SAFETY — finalize is the enforcement point, chosen because #assertDraft already establishes
+   * that a FINALIZED prescription is immutable: once past this gate the item list can never change,
+   * so checking here cannot be bypassed by a later edit.
+   *
+   * `payload.override.reason` + PERMISSIONS.PRESCRIPTION_SAFETY_OVERRIDE is the only way past a
+   * blocking allergy/interaction alert, and the override is written onto the prescription AND the
+   * audit log (see PrescriptionSafetyService.assertSafeToFinalize).
+   */
+  async finalize(id, payload = {}, actorId = null, req = null) {
     const prescription = await this.prescriptionRepository.findByIdNotDeleted(id);
     if (!prescription) throw ApiError.notFound('Prescription not found');
     this.#assertDraft(prescription);
@@ -328,20 +375,36 @@ class PrescriptionService {
       throw ApiError.badRequest('Cannot finalize an empty prescription');
     }
 
+    const { evaluation, overrides } = await this.safetyService.assertSafeToFinalize(
+      prescription,
+      payload?.override,
+      actorId,
+      req
+    );
+
     await this.prescriptionRepository.updateById(id, {
       status: PRESCRIPTION_STATUS.FINALIZED,
       finalizedAt: new Date(),
       finalizedBy: actorId,
       updatedBy: actorId,
+      ...(overrides.length ? { $push: { safetyOverrides: { $each: overrides } } } : {}),
     });
 
     await this.auditService.record(AUDIT_ACTIONS.PRESCRIPTION_FINALIZED, {
       actorId,
-      metadata: { prescriptionId: id, prescriptionNumber: prescription.prescriptionNumber },
+      metadata: {
+        prescriptionId: id,
+        prescriptionNumber: prescription.prescriptionNumber,
+        safetyStatus: evaluation.status,
+        safetyOverrideCount: overrides.length,
+        interactionSourceConfigured: evaluation.interaction.configured,
+      },
       req,
     });
 
-    return this.getById(id);
+    const result = await this.getById(id);
+    result.safety = evaluation;
+    return result;
   }
 
   async duplicate(id, actorId, req = null) {

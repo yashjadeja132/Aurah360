@@ -5,9 +5,10 @@ import config from '../config/index.js';
 import Patient from '../models/Patient.model.js';
 import PatientPortalService from '../services/PatientPortalService.js';
 import { PRIVACY_REQUEST_TYPE } from '../enums/privacy.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_privacy'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_privacy'));
   await mongoose.connection.dropDatabase();
 
   const patientA = await Patient.create({

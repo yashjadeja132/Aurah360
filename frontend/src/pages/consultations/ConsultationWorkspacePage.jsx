@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Lock, PenLine } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ChevronLeft, ChevronRight, Lock, PenLine } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,8 @@ import {
   useLockConsultation,
   useUpdateConsultation,
 } from '@/modules/consultations/hooks/useConsultations';
+import { useInsertTarget } from '@/modules/consultations/hooks/useInsertTarget';
+import { INSERT_TARGETS, appendText, resetInsertQueue } from '@/modules/consultations/insertBus';
 import { SoapEditor } from '@/modules/consultations/components/SoapEditor';
 import { VitalsForm } from '@/modules/consultations/components/VitalsForm';
 import {
@@ -22,7 +24,9 @@ import {
   ExaminationForm,
 } from '@/modules/consultations/components/DiagnosisExamForms';
 import { ClinicalPhotosPanel } from '@/modules/consultations/components/ClinicalPhotosPanel';
-import { AiAssistPanel } from '@/modules/consultations/components/AiAssistPanel';
+import { LabOrdersPanel } from '@/modules/consultations/components/LabOrdersPanel';
+import { AiCopilotPanel } from '@/modules/consultations/components/AiCopilotPanel';
+import { PrescriptionDraftPanel } from '@/modules/consultations/components/PrescriptionDraftPanel';
 import {
   PatientSummarySidebar,
   TimelinePanel,
@@ -30,11 +34,149 @@ import {
 import {
   ConsultationStatusBadge,
 } from '@/modules/consultations/components/StatusBadges';
-import { FOLLOW_UP_UNITS, WORKSPACE_TABS } from '@/modules/consultations/constants';
+import {
+  CONTEXT_SECTIONS,
+  FOLLOW_UP_UNITS,
+  RECORD_SECTIONS,
+} from '@/modules/consultations/constants';
 import { APP_ROUTES } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 import { useAuth } from '@/contexts/AuthContext';
 
+/** Which section an accepted AI insertion landed in, so its tab can flag itself. */
+const TARGET_SECTION = {
+  [INSERT_TARGETS.SOAP_SUBJECTIVE]: 'soap',
+  [INSERT_TARGETS.SOAP_OBJECTIVE]: 'soap',
+  [INSERT_TARGETS.SOAP_ASSESSMENT]: 'soap',
+  [INSERT_TARGETS.SOAP_PLAN]: 'soap',
+  [INSERT_TARGETS.DIAGNOSIS]: 'diagnosis',
+  [INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS]: 'followup',
+  [INSERT_TARGETS.LAB_ORDER]: 'labs',
+  [INSERT_TARGETS.PRESCRIPTION_LINE]: 'rx',
+};
+
+const ALL_SECTIONS = [...CONTEXT_SECTIONS, ...RECORD_SECTIONS];
+const ALL_SECTION_IDS = ALL_SECTIONS.map((s) => s.id);
+
+/**
+ * Declared at module scope on purpose: a component defined inside the page body would get a new
+ * identity on every render, remounting its subtree and throwing away in-progress form state.
+ */
+/**
+ * One horizontally-scrolling tab row with an arrow at each end. The arrows exist because the ten
+ * sections do not fit the half-width column at common laptop sizes, and a wrapping strip pushed
+ * the panel down by two rows. Each arrow disables itself at its end of the track so it never
+ * looks clickable when it would do nothing.
+ */
+function SectionTabStrip({ children }) {
+  const trackRef = useRef(null);
+  const [atStart, setAtStart] = useState(true);
+  const [atEnd, setAtEnd] = useState(true);
+
+  const sync = useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setAtStart(el.scrollLeft <= 1);
+    // 1px tolerance: fractional scroll widths never settle exactly on `max`.
+    setAtEnd(el.scrollLeft >= max - 1);
+  }, []);
+
+  useEffect(() => {
+    sync();
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [sync]);
+
+  const nudge = (direction) => {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * Math.max(160, el.clientWidth * 0.6), behavior: 'smooth' });
+  };
+
+  return (
+    <div className="flex shrink-0 items-center gap-1 border-b p-2">
+      <ArrowButton direction="left" disabled={atStart} onClick={() => nudge(-1)} />
+      <div
+        ref={trackRef}
+        onScroll={sync}
+        role="tablist"
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {children}
+      </div>
+      <ArrowButton direction="right" disabled={atEnd} onClick={() => nudge(1)} />
+    </div>
+  );
+}
+
+function ArrowButton({ direction, disabled, onClick }) {
+  const { t } = useTranslation();
+  const Icon = direction === 'left' ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={
+        direction === 'left'
+          ? t('consultations.workspace.scrollTabsLeft', 'Scroll tabs left')
+          : t('consultations.workspace.scrollTabsRight', 'Scroll tabs right')
+      }
+      className={cn(
+        'shrink-0 rounded-md border p-1.5 text-muted-foreground transition',
+        disabled ? 'cursor-default opacity-30' : 'hover:bg-muted hover:text-foreground'
+      )}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
+  );
+}
+
+function SectionTab({ sectionId, label, active, flagged, flagTitle, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(sectionId)}
+      className={cn(
+        // shrink-0 + nowrap keep every tab on the single scrolling row instead of squeezing.
+        'relative shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition',
+        active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+      )}
+      role="tab"
+      aria-selected={active}
+    >
+      {label}
+      {flagged && !active && (
+        <span
+          className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-info"
+          title={flagTitle}
+        />
+      )}
+    </button>
+  );
+}
+
+/** Inactive panels stay mounted but hidden so in-progress edits are never thrown away. */
+function Panel({ active, children }) {
+  return <div className={active ? 'block' : 'hidden'}>{children}</div>;
+}
+
+/**
+ * The in-cabin consultation cockpit.
+ *
+ * Two halves on desktop: the AI copilot on the left, and ONE tabbed section on the right holding
+ * both patient context (Summary, Timeline) and the clinical record (SOAP … Follow-up). The copilot
+ * is never a tab, so the doctor reads a suggestion and types into the note at the same time; each
+ * half scrolls independently so neither scrolls the other out of view. Below `lg` the halves stack
+ * with the copilot first.
+ *
+ * The record/context panels all stay mounted (inactive ones are CSS-hidden), so unsaved edits and
+ * AI-accepted text survive tab switching.
+ */
 export default function ConsultationWorkspacePage() {
   const { t } = useTranslation();
   const { id } = useParams();
@@ -43,11 +185,19 @@ export default function ConsultationWorkspacePage() {
   const consultation = data?.consultation;
   const patientId = consultation?.patientId;
   const summaryQuery = usePatientConsultationSummary(patientId);
-  const [tab, setTab] = useState('soap');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [insertedInto, setInsertedInto] = useState({});
+
+  // Deep-linkable / reload-safe active tab: /consultations/:id?section=diagnosis
+  const requested = searchParams.get('section');
+  const tab = ALL_SECTION_IDS.includes(requested) ? requested : 'soap';
 
   const sign = useSignConsultation(id);
   const lock = useLockConsultation(id);
   const update = useUpdateConsultation(id);
+
+  // Drop anything queued for a section that never mounted when leaving the workspace.
+  useEffect(() => () => resetInsertQueue(), [id]);
 
   const readOnly = useMemo(() => {
     if (!consultation) return true;
@@ -76,8 +226,32 @@ export default function ConsultationWorkspacePage() {
     }
   }, [consultation?.id]);
 
-  const tabLabel = (tabId) => t(`consultations.tabs.${tabId}`, WORKSPACE_TABS.find((w) => w.id === tabId)?.label || tabId);
-  const followUpUnitLabel = (unit) => t(`consultations.followUp.units.${unit}`, FOLLOW_UP_UNITS.find((u) => u.value === unit)?.label || unit);
+  /** Patient-instruction inserts append to the follow-up instructions box, unsaved and editable. */
+  useInsertTarget(
+    INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
+    ({ text }) => setFollowUp((prev) => ({ ...prev, instructions: appendText(prev.instructions, text) })),
+    !readOnly
+  );
+
+  const onAiInsert = useCallback((target) => {
+    const section = TARGET_SECTION[target];
+    if (section) setInsertedInto((prev) => ({ ...prev, [section]: true }));
+  }, []);
+
+  const selectTab = (next) => {
+    const params = new URLSearchParams(searchParams);
+    params.set('section', next);
+    setSearchParams(params, { replace: true });
+    setInsertedInto((prev) => (prev[next] ? { ...prev, [next]: false } : prev));
+  };
+
+  const sectionLabel = (sectionId) =>
+    t(
+      `consultations.tabs.${sectionId}`,
+      ALL_SECTIONS.find((s) => s.id === sectionId)?.label || sectionId
+    );
+  const followUpUnitLabel = (unit) =>
+    t(`consultations.followUp.units.${unit}`, FOLLOW_UP_UNITS.find((u) => u.value === unit)?.label || unit);
 
   if (isLoading) {
     return <p className="p-6 text-sm text-muted-foreground">{t('consultations.workspace.loading', 'Loading workspace…')}</p>;
@@ -89,6 +263,18 @@ export default function ConsultationWorkspacePage() {
       </p>
     );
   }
+
+  const renderTab = (section) => (
+    <SectionTab
+      key={section.id}
+      sectionId={section.id}
+      label={sectionLabel(section.id)}
+      active={tab === section.id}
+      flagged={Boolean(insertedInto[section.id])}
+      flagTitle={t('consultations.workspace.pendingInsert', 'AI text inserted here — review it')}
+      onSelect={selectTab}
+    />
+  );
 
   return (
     <section className="space-y-4">
@@ -152,145 +338,145 @@ export default function ConsultationWorkspacePage() {
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[260px_1fr_280px]">
-        <div className="rounded-xl border bg-card">
-          <PatientSummarySidebar
-            summary={summaryQuery.data}
-            loading={summaryQuery.isLoading}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* PRIMARY half — the copilot is always on screen, never behind a tab. */}
+        <div className="min-h-0 lg:h-[calc(100vh-13rem)]">
+          <AiCopilotPanel
+            consultationId={id}
+            patientId={patientId}
+            readOnly={readOnly}
+            chiefComplaint={consultation?.chiefComplaint}
+            onInsert={onAiInsert}
           />
         </div>
 
-        <div className="rounded-xl border bg-card p-4">
-          <div className="mb-4 flex flex-wrap gap-1 border-b pb-2">
-            {WORKSPACE_TABS.map((wt) => (
-              <button
-                key={wt.id}
-                type="button"
-                onClick={() => setTab(wt.id)}
-                className={cn(
-                  'rounded-md px-3 py-1.5 text-sm font-medium transition',
-                  tab === wt.id
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted'
-                )}
-              >
-                {tabLabel(wt.id)}
-              </button>
-            ))}
-          </div>
+        {/* One tabbed section: patient context first, then the clinical record. */}
+        <div className="flex min-h-0 flex-col rounded-xl border bg-card lg:h-[calc(100vh-13rem)]">
+          <SectionTabStrip>{ALL_SECTIONS.map(renderTab)}</SectionTabStrip>
 
-          {tab === 'soap' && (
-            <SoapEditor consultationId={id} soap={data.soap} readOnly={readOnly} />
-          )}
-          {tab === 'vitals' && (
-            <VitalsForm consultationId={id} vitals={data.vitals} readOnly={readOnly} />
-          )}
-          {tab === 'exam' && (
-            <ExaminationForm
-              consultationId={id}
-              examination={data.examination}
-              readOnly={readOnly}
-            />
-          )}
-          {tab === 'diagnosis' && (
-            <DiagnosisForm
-              consultationId={id}
-              diagnosis={data.diagnosis}
-              readOnly={readOnly}
-            />
-          )}
-          {tab === 'photos' && (
-            <ClinicalPhotosPanel
-              consultationId={id}
-              photos={data.photos || []}
-              readOnly={readOnly}
-            />
-          )}
-          {tab === 'followup' && (
-            <div className="space-y-3">
-              <h3 className="font-semibold">{t('consultations.followUp.title', 'Follow-up recommendation')}</h3>
-              <p className="text-xs text-muted-foreground">
-                {t('consultations.followUp.hint', 'Appointment module will consume this later.')}
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <Panel active={tab === 'summary'}>
+              <PatientSummarySidebar
+                summary={summaryQuery.data}
+                loading={summaryQuery.isLoading}
+              />
+            </Panel>
+            <Panel active={tab === 'timeline'}>
+              <TimelinePanel summary={summaryQuery.data} loading={summaryQuery.isLoading} />
+            </Panel>
+            <Panel active={tab === 'soap'}>
+              <SoapEditor consultationId={id} soap={data.soap} readOnly={readOnly} />
+            </Panel>
+            <Panel active={tab === 'vitals'}>
+              <VitalsForm consultationId={id} vitals={data.vitals} readOnly={readOnly} />
+            </Panel>
+            <Panel active={tab === 'exam'}>
+              <ExaminationForm
+                consultationId={id}
+                examination={data.examination}
+                readOnly={readOnly}
+              />
+            </Panel>
+            <Panel active={tab === 'diagnosis'}>
+              <DiagnosisForm
+                consultationId={id}
+                diagnosis={data.diagnosis}
+                readOnly={readOnly}
+              />
+            </Panel>
+            <Panel active={tab === 'rx'}>
+              <PrescriptionDraftPanel consultationId={id} readOnly={readOnly} />
+            </Panel>
+            <Panel active={tab === 'photos'}>
+              <ClinicalPhotosPanel
+                consultationId={id}
+                photos={data.photos || []}
+                readOnly={readOnly}
+              />
+            </Panel>
+            <Panel active={tab === 'labs'}>
+              <LabOrdersPanel consultationId={id} readOnly={readOnly} />
+            </Panel>
+            <Panel active={tab === 'followup'}>
+              <div className="space-y-3">
+                <h3 className="font-semibold">{t('consultations.followUp.title', 'Follow-up recommendation')}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {t('consultations.followUp.hint', 'Appointment module will consume this later.')}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.value', 'Value')}</Label>
+                    <Input
+                      type="number"
+                      value={followUp.value}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, value: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.unit', 'Unit')}</Label>
+                    <Select
+                      value={followUp.unit}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, unit: e.target.value }))}
+                    >
+                      {FOLLOW_UP_UNITS.map((u) => (
+                        <option key={u.value} value={u.value}>
+                          {followUpUnitLabel(u.value)}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
                 <div className="space-y-1">
-                  <Label>{t('consultations.followUp.value', 'Value')}</Label>
+                  <Label>{t('consultations.followUp.reason', 'Reason')}</Label>
                   <Input
-                    type="number"
-                    value={followUp.value}
+                    value={followUp.reason}
                     disabled={readOnly}
-                    onChange={(e) => setFollowUp((p) => ({ ...p, value: e.target.value }))}
+                    onChange={(e) => setFollowUp((p) => ({ ...p, reason: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label>{t('consultations.followUp.unit', 'Unit')}</Label>
-                  <Select
-                    value={followUp.unit}
+                  <Label>
+                    {t('consultations.followUp.instructions', 'Instructions')}{' '}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {t('consultations.followUp.instructionsAiHint', '(accepted AI advice appends here — edit before saving)')}
+                    </span>
+                  </Label>
+                  <textarea
+                    className="min-h-[140px] w-full rounded-lg border px-3 py-2 text-sm"
+                    value={followUp.instructions}
                     disabled={readOnly}
-                    onChange={(e) => setFollowUp((p) => ({ ...p, unit: e.target.value }))}
-                  >
-                    {FOLLOW_UP_UNITS.map((u) => (
-                      <option key={u.value} value={u.value}>
-                        {followUpUnitLabel(u.value)}
-                      </option>
-                    ))}
-                  </Select>
+                    onChange={(e) =>
+                      setFollowUp((p) => ({ ...p, instructions: e.target.value }))
+                    }
+                  />
                 </div>
+                {!readOnly && (
+                  <Button
+                    disabled={update.isPending}
+                    onClick={() =>
+                      update.mutate({
+                        followUp: {
+                          value: followUp.value ? Number(followUp.value) : null,
+                          unit: followUp.unit,
+                          reason: followUp.reason || null,
+                          instructions: followUp.instructions || null,
+                        },
+                      })
+                    }
+                  >
+                    {t('consultations.followUp.save', 'Save follow-up')}
+                  </Button>
+                )}
+                {user?.role === 'OWNER' && consultation.locked && (
+                  <p className="text-xs text-muted-foreground">
+                    {t('consultations.followUp.unlockNote', 'Unlock is available via API for Owner only.')}
+                  </p>
+                )}
               </div>
-              <div className="space-y-1">
-                <Label>{t('consultations.followUp.reason', 'Reason')}</Label>
-                <Input
-                  value={followUp.reason}
-                  disabled={readOnly}
-                  onChange={(e) => setFollowUp((p) => ({ ...p, reason: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>{t('consultations.followUp.instructions', 'Instructions')}</Label>
-                <textarea
-                  className="min-h-[80px] w-full rounded-lg border px-3 py-2 text-sm"
-                  value={followUp.instructions}
-                  disabled={readOnly}
-                  onChange={(e) =>
-                    setFollowUp((p) => ({ ...p, instructions: e.target.value }))
-                  }
-                />
-              </div>
-              {!readOnly && (
-                <Button
-                  disabled={update.isPending}
-                  onClick={() =>
-                    update.mutate({
-                      followUp: {
-                        value: followUp.value ? Number(followUp.value) : null,
-                        unit: followUp.unit,
-                        reason: followUp.reason || null,
-                        instructions: followUp.instructions || null,
-                      },
-                    })
-                  }
-                >
-                  {t('consultations.followUp.save', 'Save follow-up')}
-                </Button>
-              )}
-              {user?.role === 'OWNER' && consultation.locked && (
-                <p className="text-xs text-muted-foreground">
-                  {t('consultations.followUp.unlockNote', 'Unlock is available via API for Owner only.')}
-                </p>
-              )}
-            </div>
-          )}
-          {tab === 'ai' && (
-            <AiAssistPanel
-              patientId={patientId}
-              consultationId={id}
-              context={{ chiefComplaint: consultation?.chiefComplaint }}
-            />
-          )}
-        </div>
-
-        <div className="rounded-xl border bg-card">
-          <TimelinePanel summary={summaryQuery.data} loading={summaryQuery.isLoading} />
+            </Panel>
+          </div>
         </div>
       </div>
     </section>

@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
+import { getQueue, getBullConnection, enqueueJob, QUEUE_NAMES } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 
@@ -10,23 +10,22 @@ export const ANALYTICS_JOBS = Object.freeze({
   MONTHLY_DIGEST: 'analytics-monthly-digest',
 });
 
+/** Called from the analytics request path — must not block the response. */
 export async function enqueueAnalyticsExport({ category, format, query, actorId }) {
-  try {
-    const queue = getQueue(QUEUE_NAMES.ANALYTICS);
-    const job = await queue.add(
-      ANALYTICS_JOBS.HEAVY_EXPORT,
-      { category, format, query, actorId },
-      {
-        removeOnComplete: 50,
-        removeOnFail: 100,
-        attempts: 2,
-      }
-    );
-    return { jobId: job.id, status: 'QUEUED', category, format };
-  } catch (err) {
-    logger.warn('Analytics export not enqueued', { message: err.message });
-    return { status: 'FAILED', message: err.message };
+  const job = await enqueueJob(
+    QUEUE_NAMES.ANALYTICS,
+    ANALYTICS_JOBS.HEAVY_EXPORT,
+    { category, format, query, actorId },
+    {
+      removeOnComplete: 50,
+      removeOnFail: 100,
+      attempts: 2,
+    }
+  );
+  if (!job) {
+    return { status: 'FAILED', message: 'Export could not be queued — background queue unavailable.' };
   }
+  return { jobId: job.id, status: 'QUEUED', category, format };
 }
 
 export async function ensureAnalyticsScheduledJobs() {

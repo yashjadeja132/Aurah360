@@ -6,6 +6,7 @@ import Patient from '../models/Patient.model.js';
 import Appointment from '../models/Appointment.model.js';
 import { APPOINTMENT_STATUS } from '../enums/appointment.js';
 import { scanAndSendAppointmentReminders } from '../queues/appointmentReminderJobs.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function ymd(d) {
   return d.toISOString().slice(0, 10);
@@ -16,7 +17,7 @@ function hhmm(d) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_appt_reminders'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_appt_reminders'));
   await mongoose.connection.dropDatabase();
 
   const patient = await Patient.create({

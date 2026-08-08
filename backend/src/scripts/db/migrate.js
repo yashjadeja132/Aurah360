@@ -9,13 +9,15 @@ import database from '../../config/database.js';
 import logger from '../../libs/logger.js';
 import mongoose from 'mongoose';
 
-// Import models so schemas register
-import '../../models/User.model.js';
-import '../../models/RefreshToken.model.js';
-import '../../models/Patient.model.js';
-import '../../models/Appointment.model.js';
-import '../../models/Invoice.model.js';
-import '../../models/Lead.model.js';
+/**
+ * Register EVERY model, via the barrel, so syncIndexes covers the whole schema.
+ *
+ * This used to hand-list six models, which quietly made the utility useless for the rest: an index
+ * change on any unlisted model (LoyaltyLedgerEntry's redemption idempotency guard, for one) would
+ * report "Migration utility complete" having never touched it. A migration tool that silently skips
+ * the collection you changed is worse than no tool, because it reports success.
+ */
+import '../../models/index.js';
 
 async function migrate() {
   await database.connect();

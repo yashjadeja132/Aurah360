@@ -92,6 +92,7 @@ loyaltyEarningRuleSchema.methods.toSafeObject = function toSafeObject(extra = {}
       perAmountInr: v.perAmountInr,
       roundingRule: v.roundingRule,
       branchIds: (v.branchIds || []).map((b) => b.toString()),
+      branchOverrides: v.branchOverrides ? Object.fromEntries(v.branchOverrides) : null,
       serviceIds: (v.serviceIds || []).map((s) => s.toString()),
       packageIds: (v.packageIds || []).map((p) => p.toString()),
       perEventCap: v.perEventCap,

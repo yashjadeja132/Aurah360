@@ -10,6 +10,7 @@ import config from '../config/index.js';
 import App from '../app.js';
 import TokenService from '../services/TokenService.js';
 import { ROLES } from '../constants/roles.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 const tokenService = new TokenService();
 
@@ -18,7 +19,7 @@ function assert(condition, message) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_csrf'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_csrf'));
   await mongoose.connection.dropDatabase();
 
   const app = new App().getExpressApp();

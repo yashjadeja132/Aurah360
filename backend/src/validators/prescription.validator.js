@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   DOSAGE_FORM_LIST,
+  INTERACTION_MATCH_ON_LIST,
+  INTERACTION_SEVERITY_LIST,
   MEDICINE_ROUTE_LIST,
   PRESCRIPTION_STATUS_LIST,
 } from '../enums/prescription.js';
@@ -42,8 +44,11 @@ export const prescriptionIdParamSchema = z.object({ id: objectId });
 export const consultationIdParamSchema = z.object({ consultationId: objectId });
 export const patientIdParamSchema = z.object({ patientId: objectId });
 
+// SEC-030 — doctorId optional; a DOCTOR's own id is resolved server-side from their token and
+// the controller still requires a resolvable one (see scope.helper.js).
 export const doctorQuerySchema = z.object({
-  doctorId: objectId,
+  doctorId: objectId.optional(),
+  branchId: objectId.optional(),
   status: z.enum(PRESCRIPTION_STATUS_LIST).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -90,4 +95,34 @@ export const templateCreateSchema = z.object({
 
 export const applyTemplateSchema = z.object({
   consultationId: objectId,
+});
+
+/**
+ * RX-SAFETY — finalize body. `override.reason` is the only way past a blocking allergy/interaction
+ * alert and is meaningless without substance, so a minimum length is enforced here rather than
+ * accepting " " and writing it to the audit trail.
+ */
+export const finalizePrescriptionSchema = z.object({
+  override: z
+    .object({
+      reason: z.string().trim().min(10).max(1000),
+    })
+    .optional(),
+});
+
+export const createInteractionRuleSchema = z.object({
+  ruleCode: z.string().max(60).optional(),
+  termA: z.string().min(3).max(120),
+  termB: z.string().min(3).max(120),
+  matchOnA: z.enum(INTERACTION_MATCH_ON_LIST).optional(),
+  matchOnB: z.enum(INTERACTION_MATCH_ON_LIST).optional(),
+  severity: z.enum(INTERACTION_SEVERITY_LIST).optional(),
+  blocking: z.boolean().optional(),
+  clinicalEffect: z.string().max(1000).optional().nullable(),
+  management: z.string().max(1000).optional().nullable(),
+  sourceReference: z.string().max(300).optional().nullable(),
+});
+
+export const updateInteractionRuleSchema = z.object({
+  isActive: z.boolean(),
 });

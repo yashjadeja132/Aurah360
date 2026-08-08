@@ -139,7 +139,7 @@ class PatientPortalService {
         .sort({ createdAt: -1 })
         .limit(8)
         .lean(),
-      this.documentService.list(patientId),
+      this.documentService.listPatientVisible(patientId),
       this.planService.listByPatient(patientId),
     ]);
 
@@ -147,7 +147,15 @@ class PatientPortalService {
     for (const plan of (plans || []).slice(0, 3)) {
       try {
         const p = await this.sessionService.getProgress(plan.id || plan._id);
-        progress.push({ planId: plan.id || plan._id?.toString(), ...p });
+        // Carry the human-readable identity through: the portal showed patients a truncated
+        // ObjectId ("Plan a3f9e2") because the title never reached it. A patient recognises the
+        // treatment by name, never by id.
+        progress.push({
+          planId: plan.id || plan._id?.toString(),
+          planTitle: plan.title || null,
+          planNumber: plan.planNumber || null,
+          ...p,
+        });
       } catch {
         /* ignore */
       }
@@ -259,12 +267,31 @@ class PatientPortalService {
     };
   }
 
-  /** Verifies guardianPatientId is the guardian of dependentId; returns the dependent doc. */
+  /**
+   * Verifies guardianPatientId is the guardian of dependentId; returns the dependent doc.
+   *
+   * TWO checks, both required (PAT-005):
+   *  1. the link exists — this record names that guardian; and
+   *  2. `guardianVerified` — a staff member actually confirmed the relationship at the desk.
+   *
+   * (1) alone is not an authorisation: the guardian fields are populated at registration from
+   * whatever the person at the counter said, so without (2) anyone who got themselves recorded as
+   * a guardian would read that dependent's entire clinical record through the portal. Verification
+   * is set only by staff via PatientService.setGuardianVerified() and is stripped from every
+   * client-writable payload, so it cannot be self-asserted.
+   */
   async #assertGuardianOf(guardianPatientId, dependentId) {
     this.#assertId(dependentId);
     const dependent = await Patient.findOne({ _id: dependentId, deletedAt: null }).lean();
     if (!dependent) throw ApiError.notFound('Dependent not found');
     assertOwnPatient(dependent.guardianPatientId, guardianPatientId);
+    if (!dependent.guardianVerified) {
+      throw ApiError.forbidden(
+        'This guardian relationship has not been verified by the clinic yet. Please visit or call '
+          + 'the clinic with proof of guardianship to have it verified before accessing these records.',
+        'GUARDIAN_NOT_VERIFIED'
+      );
+    }
     return dependent;
   }
 
@@ -588,11 +615,13 @@ class PatientPortalService {
   // ─── Documents ─────────────────────────────────────────────────────
 
   async listDocuments(patientId) {
-    return this.documentService.list(patientId);
+    return this.documentService.listPatientVisible(patientId);
   }
 
   async downloadDocument(patientId, documentId, req = null) {
-    const docs = await this.documentService.list(patientId);
+    // Resolved from the same visibility-filtered set as the listing, so an unreleased document is
+    // "not found" here rather than downloadable by direct id.
+    const docs = await this.documentService.listPatientVisible(patientId);
     const doc = (docs || []).find((d) => (d.id || d._id?.toString()) === documentId);
     if (!doc) throw ApiError.notFound('Document not found');
     await this.#logDownload(patientId, 'document', documentId, req);

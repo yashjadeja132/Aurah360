@@ -1,7 +1,16 @@
 import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import TreatmentPlanService from '../services/TreatmentPlanService.js';
+import ApiError from '../libs/ApiError.js';
+import { scopedListQuery } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — `listByDoctor` (the doctor's own plan worklist) is scoped to the caller's branch and,
+ * for a DOCTOR, to their own server-resolved doctorId. Plan reads by plan/patient/consultation id
+ * stay broad and audited so a covering doctor can review an in-flight plan before treating.
+ * Protocol and package catalogues are organisation-level reference data, not patient data, and
+ * are intentionally not row-scoped.
+ */
 class TreatmentPlanController {
   constructor() {
     this.service = new TreatmentPlanService();
@@ -28,9 +37,12 @@ class TreatmentPlanController {
   });
 
   listByDoctor = asyncHandler(async (req, res) => {
-    const items = await this.service.listByDoctor(req.query.doctorId, {
-      status: req.query.status,
-      limit: req.query.limit,
+    const scoped = await scopedListQuery(req, { branch: true, doctor: true });
+    if (!scoped.doctorId) throw ApiError.badRequest('doctorId is required');
+    const items = await this.service.listByDoctor(scoped.doctorId, {
+      status: scoped.status,
+      limit: scoped.limit,
+      branchId: scoped.branchId || null,
     });
     return ApiResponse.success(res, { data: items });
   });

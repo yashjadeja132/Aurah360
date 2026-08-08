@@ -112,7 +112,27 @@ class DoctorService {
     return base;
   }
 
-  async create(payload, actorId, req = null) {
+  /**
+   * SEC-030 — branch scoping for a doctor is SET MEMBERSHIP on `branches` (their privileges),
+   * not equality on a single branch column. Folded into the lookup so a doctor who does not
+   * practise at the caller's branch answers 404, never 403.
+   */
+  async #findScoped(id, branchId) {
+    const filter = { _id: id, deletedAt: null };
+    if (branchId) filter.branches = branchId;
+    const doctor = await this.doctorRepository.model.findOne(filter).exec();
+    if (!doctor) throw ApiError.notFound('Doctor not found');
+    return doctor;
+  }
+
+  async create(payload, actorId, req = null, { branchId = null } = {}) {
+    // A branch-scoped creator (BRANCH_MANAGER) may only grant privileges at their own branch.
+    if (branchId) {
+      if ((payload.branches || []).some((b) => String(b) !== String(branchId))) {
+        throw ApiError.forbidden('branches is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+      }
+      payload = { ...payload, branches: [branchId] };
+    }
     await this.#assertUser(payload.userId);
     await this.#assertUniqueCodes(payload);
 
@@ -143,9 +163,14 @@ class DoctorService {
     return this.getById(doctor._id);
   }
 
-  async update(id, payload, actorId, req = null) {
-    const doctor = await this.doctorRepository.findByIdNotDeleted(id);
-    if (!doctor) throw ApiError.notFound('Doctor not found');
+  async update(id, payload, actorId, req = null, { branchId = null } = {}) {
+    const doctor = await this.#findScoped(id, branchId);
+
+    // A scoped editor cannot hand a doctor privileges at branches they do not manage.
+    if (branchId && payload.branches
+      && payload.branches.some((b) => String(b) !== String(branchId))) {
+      throw ApiError.forbidden('branches is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
 
     await this.#assertUniqueCodes(payload, id);
 
@@ -229,9 +254,8 @@ class DoctorService {
     };
   }
 
-  async activate(id, actorId, req = null) {
-    const doctor = await this.doctorRepository.findByIdNotDeleted(id);
-    if (!doctor) throw ApiError.notFound('Doctor not found');
+  async activate(id, actorId, req = null, { branchId = null } = {}) {
+    const doctor = await this.#findScoped(id, branchId);
 
     await this.doctorRepository.updateById(id, {
       isActive: true,
@@ -248,9 +272,8 @@ class DoctorService {
     return this.getById(id);
   }
 
-  async deactivate(id, actorId, req = null) {
-    const doctor = await this.doctorRepository.findByIdNotDeleted(id);
-    if (!doctor) throw ApiError.notFound('Doctor not found');
+  async deactivate(id, actorId, req = null, { branchId = null } = {}) {
+    const doctor = await this.#findScoped(id, branchId);
 
     await this.doctorRepository.updateById(id, {
       isActive: false,
@@ -267,9 +290,8 @@ class DoctorService {
     return this.getById(id);
   }
 
-  async softDelete(id, actorId, req = null) {
-    const doctor = await this.doctorRepository.findByIdNotDeleted(id);
-    if (!doctor) throw ApiError.notFound('Doctor not found');
+  async softDelete(id, actorId, req = null, { branchId = null } = {}) {
+    const doctor = await this.#findScoped(id, branchId);
 
     await this.doctorRepository.updateById(id, {
       deletedAt: new Date(),

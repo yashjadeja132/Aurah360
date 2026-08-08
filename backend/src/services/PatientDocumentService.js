@@ -30,13 +30,26 @@ class PatientDocumentService {
     return patient;
   }
 
+  /** Staff view — every document on the record, including the ones not released to the patient. */
   async list(patientId) {
     await this.#assertPatient(patientId);
     const docs = await this.documentRepository.findByPatient(patientId);
     return docs.map((d) => d.toSafeObject());
   }
 
-  async upload(patientId, { file, category, title, notes, clinicalDate, source, relatedVisitId, branchId }, actorId, req = null) {
+  /**
+   * Patient-portal view. Documents default to HIDDEN and are released explicitly (see `release`),
+   * but the portal was serving `list()` — so a patient's own app listed every unreleased upload
+   * with its title, category and notes. `GET /files/patient/documents/:id` refused the BYTES of a
+   * hidden document, which made the leak metadata-only and easy to miss; the fix belongs here, at
+   * the listing, so no portal caller can enumerate what it must not see.
+   */
+  async listPatientVisible(patientId) {
+    const docs = await this.list(patientId);
+    return docs.filter((d) => d.patientVisibility !== PATIENT_VISIBILITY.HIDDEN);
+  }
+
+  async upload(patientId, { file, category, title, notes, clinicalDate, source, relatedVisitId, branchId, supersedesDocumentId }, actorId, req = null) {
     await this.#assertPatient(patientId);
     if (!file?.buffer) throw ApiError.badRequest('File is required');
     if (!clinicalDate) throw ApiError.badRequest('Clinical/report date is required (DOC-001)');
@@ -63,6 +76,27 @@ class PatientDocumentService {
       mimeType: file.mimetype,
     });
 
+    /**
+     * DOC-002 versioning. `version` and `supersedesDocumentId` existed on the model with zero write
+     * sites, so re-uploading a corrected report produced two unrelated documents and staff had no
+     * way to tell which one was current — the model claimed versioning the service never performed.
+     *
+     * A replacement never mutates or deletes the original: the superseded document stays exactly as
+     * it was (DOC-003 immutability) and the new row simply points back at it, one higher. The
+     * predecessor must belong to the SAME PATIENT — otherwise a caller could chain one patient's
+     * record onto another's.
+     */
+    let version = 1;
+    let supersedes = null;
+    if (supersedesDocumentId) {
+      const previous = await this.documentRepository.findByIdNotDeleted(supersedesDocumentId);
+      if (!previous || previous.patientId.toString() !== patientId.toString()) {
+        throw ApiError.badRequest('Superseded document not found for this patient');
+      }
+      supersedes = previous._id;
+      version = (previous.version || 1) + 1;
+    }
+
     const doc = await this.documentRepository.create({
       patientId,
       category,
@@ -79,6 +113,8 @@ class PatientDocumentService {
       scanState,
       reviewState: DOCUMENT_REVIEW_STATE.UNREVIEWED,
       patientVisibility: PATIENT_VISIBILITY.HIDDEN,
+      version,
+      supersedesDocumentId: supersedes,
       notes: notes || null,
       uploadedBy: actorId,
     });
@@ -100,14 +136,28 @@ class PatientDocumentService {
     return doc.toSafeObject();
   }
 
-  async rename(patientId, documentId, title, actorId) {
+  /**
+   * DOC-003 — a metadata correction must be auditable. This used to overwrite the title with no
+   * audit row at all, so a report could be retitled after the fact leaving no trace of what it was
+   * called before or who changed it. The previous title is recorded in the audit entry, because an
+   * audit that says only "title changed" cannot answer the question anyone actually asks.
+   */
+  async rename(patientId, documentId, title, actorId, reason = null, req = null) {
     await this.#assertPatient(patientId);
     const doc = await this.documentRepository.findByIdNotDeleted(documentId);
     if (!doc || doc.patientId.toString() !== patientId.toString()) {
       throw ApiError.notFound('Document not found');
     }
 
+    const previousTitle = doc.title;
     const updated = await this.documentRepository.updateById(documentId, { title });
+
+    await this.auditService.record(AUDIT_ACTIONS.PATIENT_DOCUMENT_RENAMED, {
+      actorId,
+      metadata: { patientId, documentId, previousTitle, newTitle: title, reason: reason || null },
+      req,
+    });
+
     return updated.toSafeObject();
   }
 

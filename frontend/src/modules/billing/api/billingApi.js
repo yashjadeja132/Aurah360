@@ -22,6 +22,24 @@ export const billingApi = {
   finalize(id) {
     return api.post(`/billing/${id}/finalize`).then((res) => res.data);
   },
+  /** A.5 — approver worklist of draft invoices whose discount is above the threshold. */
+  discountApprovalQueue(params) {
+    return api.get('/billing/discount-approvals', { params }).then((res) => res.data);
+  },
+  approveDiscount(id, decisionNote) {
+    return api.post(`/billing/${id}/approve-discount`, { decisionNote }).then((res) => res.data);
+  },
+  rejectDiscount(id, decisionNote) {
+    return api.post(`/billing/${id}/reject-discount`, { decisionNote }).then((res) => res.data);
+  },
+  /** A.4 — finalized invoices still carrying a balance, oldest first, with aging buckets. */
+  duePayments(params) {
+    return api.get('/billing/due-payments', { params }).then((res) => res.data);
+  },
+  /** A.8 — refund a recorded payment. `reason` must be a REFUND_REASON code. */
+  refundPayment(paymentId, payload) {
+    return api.post(`/billing/payments/${paymentId}/refund`, payload).then((res) => res.data);
+  },
   recordPayment(id, payload) {
     return api.post(`/billing/${id}/payments`, payload).then((res) => res.data);
   },

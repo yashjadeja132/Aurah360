@@ -17,6 +17,9 @@ import {
   eachDayKey,
   startOfDay,
 } from '../helpers/reportFilters.helper.js';
+// Shared with the analytics/report services — see the helper's own docs for why the clinic
+// timezone is mandatory here. Previously a local copy lived in this file.
+import { dayBucket } from '../utils/date.util.js';
 
 class AnalyticsService {
   async kpis(query = {}) {
@@ -162,7 +165,7 @@ class AnalyticsService {
       { $match: match },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$paidAt' } },
+          _id: dayBucket('$paidAt'),
           amount: { $sum: '$amount' },
           count: { $sum: 1 },
         },
@@ -183,7 +186,7 @@ class AnalyticsService {
       { $match: match },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$appointmentDate' } },
+          _id: dayBucket('$appointmentDate'),
           count: { $sum: 1 },
         },
       },
@@ -222,12 +225,7 @@ class AnalyticsService {
       { $match: match },
       {
         $group: {
-          _id: {
-            $dateToString: {
-              format: '%Y-%m-%d',
-              date: { $ifNull: ['$registrationDate', '$createdAt'] },
-            },
-          },
+          _id: dayBucket({ $ifNull: ['$registrationDate', '$createdAt'] }),
           count: { $sum: 1 },
         },
       },
@@ -277,7 +275,9 @@ class AnalyticsService {
       {
         $group: {
           _id: {
-            day: { $dateToString: { format: '%Y-%m-%d', date: '$scheduledDate' } },
+            // `scheduledDate` is a CALENDAR DAY stored as local start-of-day, so the UTC day is the
+            // previous one — this series was labelled a day early. Group on the clinic calendar.
+            day: dayBucket('$scheduledDate'),
             status: '$status',
           },
           count: { $sum: 1 },

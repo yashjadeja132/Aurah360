@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appointmentsApi } from '../api/appointmentsApi';
 import { QUERY_KEYS } from '@/constants/queryKeys';
 
-export function useAppointmentList(params) {
+export function useAppointmentList(params, enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.APPOINTMENT_LIST(params),
     queryFn: async () => {
       const res = await appointmentsApi.list(params);
       return { items: res.data || [], meta: res.meta };
     },
+    enabled: Boolean(enabled),
     keepPreviousData: true,
   });
 }
@@ -69,7 +70,8 @@ export function useAppointmentMutations() {
     }),
     confirm: useMutation({ mutationFn: appointmentsApi.confirm, onSuccess: invalidate }),
     cancel: useMutation({
-      mutationFn: ({ id, reason }) => appointmentsApi.cancel(id, { reason }),
+      mutationFn: ({ id, reasonCode, reason }) =>
+        appointmentsApi.cancel(id, { reasonCode, reason }),
       onSuccess: invalidate,
     }),
     noShow: useMutation({ mutationFn: appointmentsApi.noShow, onSuccess: invalidate }),

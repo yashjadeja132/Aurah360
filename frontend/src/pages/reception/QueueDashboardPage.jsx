@@ -16,6 +16,9 @@ import {
   useQueueSummary,
 } from '@/modules/reception/hooks/useReception';
 import { useQueueSocket } from '@/modules/reception/hooks/useQueueSocket';
+// 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
+// and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
+import { todayKey } from '@/utils/date';
 
 function Chip({ label, value }) {
   return (
@@ -39,7 +42,7 @@ export default function QueueDashboardPage() {
   const [statusFilter, setStatusFilter] = useState('');
 
   const effectiveBranchId = branchId || sortedBranches[0]?.id || '';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey();
 
   useQueueSocket({ branchId: effectiveBranchId, enabled: Boolean(effectiveBranchId) });
 

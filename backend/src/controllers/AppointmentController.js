@@ -2,7 +2,15 @@ import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import AppointmentService from '../services/AppointmentService.js';
 import AppointmentLifecycleService from '../services/AppointmentLifecycleService.js';
+import { scopedListQuery } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — the three BROWSE endpoints here (list, doctorCalendar, listWaitlist) are row-scoped
+ * to the caller's branch and, for a DOCTOR, to their own doctorId (see scope.helper.js).
+ * `getById` and `patientHistory` are deliberately left broad: a doctor covering a colleague or
+ * handling an emergency must be able to open a specific appointment/patient history, which is
+ * the same "broad read, strongly audited" model the break-glass mechanism assumes.
+ */
 class AppointmentController {
   constructor() {
     this.appointmentService = new AppointmentService();
@@ -10,7 +18,9 @@ class AppointmentController {
   }
 
   list = asyncHandler(async (req, res) => {
-    const result = await this.appointmentService.list(req.query);
+    const result = await this.appointmentService.list(
+      await scopedListQuery(req, { branch: true, doctor: true })
+    );
     return ApiResponse.success(res, {
       message: 'Appointments retrieved',
       data: result.items,
@@ -48,11 +58,12 @@ class AppointmentController {
   });
 
   doctorCalendar = asyncHandler(async (req, res) => {
+    const scoped = await scopedListQuery(req, { branch: true, doctor: true });
     const items = await this.appointmentService.doctorCalendar(
-      req.query.doctorId,
-      new Date(req.query.from),
-      new Date(req.query.to),
-      req.query.branchId || null
+      scoped.doctorId,
+      new Date(scoped.from),
+      new Date(scoped.to),
+      scoped.branchId || null
     );
     return ApiResponse.success(res, { data: items });
   });
@@ -139,7 +150,9 @@ class AppointmentController {
   });
 
   listWaitlist = asyncHandler(async (req, res) => {
-    const entries = await this.appointmentService.listWaitlist(req.query);
+    const entries = await this.appointmentService.listWaitlist(
+      await scopedListQuery(req, { branch: true, doctor: true })
+    );
     return ApiResponse.success(res, { message: 'Waitlist retrieved', data: { entries } });
   });
 

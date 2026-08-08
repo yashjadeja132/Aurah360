@@ -1,76 +1,13 @@
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Receipt } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { PermissionGuard } from '@/components/common/PermissionGuard';
-import { useBranchList } from '@/modules/branches/hooks/useBranches';
-import { usePatientList } from '@/modules/patients/hooks/usePatients';
-import {
-  useInvoices,
-  useCreateInvoice,
-  useCreateInvoiceFromPlan,
-} from '@/modules/billing/hooks/useBilling';
-import {
-  INVOICE_STATUS_LABELS,
-  PAYMENT_STATUS_LABELS,
-  formatMoney,
-  emptyItem,
-} from '@/modules/billing/constants';
-import { invoiceDetailPath, invoicePrintPath } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { InvoiceListPanel } from '@/modules/billing/components/InvoiceListPanel';
 
+/**
+ * Standalone invoice list. The body now lives in `InvoiceListPanel` so the billing hub
+ * (`BillingHubPage`) can render exactly the same UI as a client-side tab; this route stays for
+ * deep links and existing bookmarks.
+ */
 export default function InvoiceListPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const planId = searchParams.get('treatmentPlanId') || '';
-  const patientFromQuery = searchParams.get('patientId') || '';
-
-  const [branchId, setBranchId] = useState('');
-  const [paymentStatus, setPaymentStatus] = useState('');
-  const [search, setSearch] = useState('');
-  const [patientId, setPatientId] = useState(patientFromQuery);
-
-  const { data: branchesData } = useBranchList({ limit: 50 });
-  const branches = branchesData?.items || [];
-  const effectiveBranch = branchId || branches[0]?.id || '';
-
-  const { data: patientsData } = usePatientList({ limit: 50 });
-  const patients = patientsData?.items || [];
-
-  const { data, isLoading } = useInvoices({
-    branchId: effectiveBranch || undefined,
-    paymentStatus: paymentStatus || undefined,
-    search: search || undefined,
-    patientId: patientId || undefined,
-    limit: 50,
-  });
-  const invoices = data?.items || [];
-  const create = useCreateInvoice();
-  const fromPlan = useCreateInvoiceFromPlan();
-
-  const startBlank = async () => {
-    if (!effectiveBranch || !patientId) return;
-    const res = await create.mutateAsync({
-      patientId,
-      branchId: effectiveBranch,
-      items: [{ ...emptyItem(), description: t('billing.list.consultationFee', 'Consultation fee'), unitPrice: 500, itemType: 'CONSULTATION' }],
-    });
-    const id = res?.data?.invoice?.id;
-    if (id) navigate(invoiceDetailPath(id));
-  };
-
-  const startFromPlan = async () => {
-    if (!planId) return;
-    const res = await fromPlan.mutateAsync(planId);
-    const id = res?.data?.invoice?.id;
-    if (id) navigate(invoiceDetailPath(id));
-  };
-
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -81,87 +18,7 @@ export default function InvoiceListPage() {
           </p>
         </div>
       </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Select value={effectiveBranch} onChange={(e) => setBranchId(e.target.value)}>
-          <option value="">{t('billing.list.branch', 'Branch')}</option>
-          {branches.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.displayName || b.name}
-            </option>
-          ))}
-        </Select>
-        <Select value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-          <option value="">{t('billing.list.patient', 'Patient')}</option>
-          {patients.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.fullName || `${p.firstName} ${p.lastName}`} ({p.mrn})
-            </option>
-          ))}
-        </Select>
-        <Select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
-          <option value="">{t('billing.list.allPaymentStatus', 'All payment status')}</option>
-          {Object.entries(PAYMENT_STATUS_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </Select>
-        <Input placeholder={t('billing.list.searchPlaceholder', 'Search INV-…')} value={search} onChange={(e) => setSearch(e.target.value)} />
-        <PermissionGuard permissions={[PERMISSIONS.BILLING_CREATE, PERMISSIONS.BILLING_ALL]}>
-          <Button onClick={startBlank} disabled={!patientId || !effectiveBranch || create.isPending}>
-            <Plus className="h-4 w-4" />
-            {t('billing.list.newInvoice', 'New invoice')}
-          </Button>
-        </PermissionGuard>
-      </div>
-
-      {planId && (
-        <PermissionGuard permissions={[PERMISSIONS.BILLING_CREATE, PERMISSIONS.BILLING_ALL]}>
-          <Button variant="outline" onClick={startFromPlan} disabled={fromPlan.isPending}>
-            {t('billing.list.createFromPlan', 'Create from treatment plan')}
-          </Button>
-        </PermissionGuard>
-      )}
-
-      <div className="space-y-2">
-        {isLoading && <p className="text-sm text-muted-foreground">{t('billing.list.loading', 'Loading…')}</p>}
-        {invoices.map((inv) => (
-          <div
-            key={inv.id}
-            className="flex flex-col gap-2 rounded-xl border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div className="flex items-center gap-3">
-              <Receipt className="h-4 w-4 text-primary" />
-              <div>
-                <p className="font-medium">
-                  {inv.invoiceNumber} · {inv.patient?.fullName || t('billing.list.patient', 'Patient')}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {formatMoney(inv.total)} · {t('billing.list.paid', 'Paid')} {formatMoney(inv.paidAmount)} · {t('billing.list.balance', 'Balance')}{' '}
-                  {formatMoney(inv.balanceAmount)}
-                </p>
-              </div>
-              <Badge variant={inv.status === 'FINALIZED' ? 'success' : 'warning'}>
-                {INVOICE_STATUS_LABELS[inv.status] || inv.status}
-              </Badge>
-              {inv.outstanding && <Badge variant="destructive">{t('billing.list.outstanding', 'Outstanding')}</Badge>}
-              <Badge variant="outline">{PAYMENT_STATUS_LABELS[inv.paymentStatus]}</Badge>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link to={invoiceDetailPath(inv.id)}>{t('billing.list.open', 'Open')}</Link>
-              </Button>
-              <Button asChild size="sm" variant="outline">
-                <Link to={invoicePrintPath(inv.id)}>{t('billing.list.print', 'Print')}</Link>
-              </Button>
-            </div>
-          </div>
-        ))}
-        {!invoices.length && !isLoading && (
-          <p className="text-sm text-muted-foreground">{t('billing.list.noInvoices', 'No invoices yet.')}</p>
-        )}
-      </div>
+      <InvoiceListPanel />
     </section>
   );
 }

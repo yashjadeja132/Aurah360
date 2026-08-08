@@ -9,6 +9,7 @@ import config from '../config/index.js';
 import '../models/index.js'; // registers every model so populate() paths resolve
 import Consultation from '../models/Consultation.model.js';
 import PrescriptionService from '../services/PrescriptionService.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -27,7 +28,7 @@ async function makeConsultation({ patientId, doctorId, branchId }) {
 
 async function main() {
   await mongoose.connect(
-    config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_duplicate_medicine')
+    smokeDbUri(config.mongo.uri, 'aurah360_smoke_duplicate_medicine')
   );
   await mongoose.connection.dropDatabase();
 
@@ -58,7 +59,8 @@ async function main() {
   console.log('✓ (a) duplicate within same prescription flagged, save succeeded:', rxWithInternalDup.warnings);
 
   // Finalize it so it counts as "active" for the next check.
-  await prescriptionService.finalize(rxWithInternalDup.id, actorId);
+  // finalize(id, payload, actorId, req) — payload carries the RX-SAFETY override when needed.
+  await prescriptionService.finalize(rxWithInternalDup.id, {}, actorId);
 
   // --- (b) second active prescription reusing a medicine from the first ---
   const consultation2 = await makeConsultation({ patientId, doctorId, branchId });

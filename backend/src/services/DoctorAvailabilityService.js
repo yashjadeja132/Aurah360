@@ -178,18 +178,34 @@ class DoctorAvailabilityService {
       return { valid: false, reason: result.reason || 'UNAVAILABLE', slots: result.slots };
     }
 
-    const match = result.slots.find(
-      (s) =>
-        s.start === startTime &&
-        s.end === endTime &&
-        (!branchId || !s.branchId || s.branchId === String(branchId))
+    const candidates = result.slots.filter(
+      (s) => !branchId || !s.branchId || s.branchId === String(branchId)
     );
 
-    if (!match) {
+    /**
+     * RSC-001 — a slot request is valid when it starts on the grid and is covered by one slot OR
+     * by a run of CONTIGUOUS slots ending exactly on its end time.
+     *
+     * This is strictly a relaxation: an exact single-slot match is still a match, so nothing that
+     * booked before can stop booking now. It exists because service `durationMinutes` is only
+     * enforceable if a service longer than one grid slot is bookable at all — a 30-minute service
+     * on a 15-minute grid was previously impossible to book. Where the schedule has a buffer
+     * between slots the run is not contiguous, so those grids stay as strict as they were.
+     */
+    const span = [];
+    let cursor = startTime;
+    while (timeToMinutes(cursor) < timeToMinutes(endTime)) {
+      const next = candidates.find((s) => s.start === cursor);
+      if (!next) break;
+      span.push(next);
+      cursor = next.end;
+    }
+
+    if (!span.length || cursor !== endTime) {
       return { valid: false, reason: 'SLOT_NOT_AVAILABLE', slots: result.slots };
     }
 
-    return { valid: true, reason: null, slot: match };
+    return { valid: true, reason: null, slot: span[0], span };
   }
 
   /** Backward-compatible Module 3 API */

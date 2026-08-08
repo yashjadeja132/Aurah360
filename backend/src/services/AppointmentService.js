@@ -68,6 +68,9 @@ class AppointmentService {
       throw ApiError.badRequest(`Slot unavailable: ${validation.reason}`);
     }
 
+    await this.#assertServiceDuration(payload);
+    await this.#assertDailyLimit(payload, validation.slot, excludeId);
+
     await this.conflictService.assertNoConflicts({
       doctorId: payload.doctorId,
       patientId: payload.patientId,
@@ -82,9 +85,8 @@ class AppointmentService {
     const roomId = payload.roomId || payload.resourceAllocation?.roomId;
     const deviceId = payload.deviceId || payload.resourceAllocation?.deviceId;
     if (roomId) {
-      if (!(await this.resourceService.isRoomAvailable(roomId))) {
-        throw ApiError.conflict('Selected room is not in service', 'ROOM_UNAVAILABLE');
-      }
+      // RSC-001 — the room document carries the booking policy (capacity + cleaning turnover).
+      const room = await this.resourceService.assertRoomBookable(roomId);
       await this.conflictService.assertResourceAvailable({
         field: 'roomId',
         resourceId: roomId,
@@ -92,12 +94,16 @@ class AppointmentService {
         startTime: payload.startTime,
         endTime: payload.endTime,
         excludeId,
+        capacity: room?.capacity ?? 1,
+        bufferMinutes: room?.cleaningBufferMinutes ?? 0,
       });
     }
     if (deviceId) {
-      if (!(await this.resourceService.isDeviceAvailable(deviceId))) {
-        throw ApiError.conflict('Selected device is not in service', 'DEVICE_UNAVAILABLE');
-      }
+      // RSC-001 — maintenance is judged at the moment the device would be used, not at booking time.
+      await this.resourceService.assertDeviceBookable(
+        deviceId,
+        appointmentMoment(payload.appointmentDate, payload.startTime)
+      );
       await this.conflictService.assertResourceAvailable({
         field: 'deviceId',
         resourceId: deviceId,
@@ -106,6 +112,65 @@ class AppointmentService {
         endTime: payload.endTime,
         excludeId,
       });
+    }
+  }
+
+  /**
+   * RSC-001 — a SERVICE master's configured `durationMinutes` is the length of that service.
+   * Until now the booked length came entirely from client-supplied start/end times, so the
+   * configured duration described nothing.
+   *
+   * Unset / null / 0 means "this service has no fixed length" and imposes nothing.
+   */
+  async #assertServiceDuration(payload) {
+    if (!payload.serviceId) return;
+    const service = await this.masterRepository.findByIdNotDeleted(payload.serviceId);
+    if (!service || service.type !== MASTER_TYPES.SERVICE) return;
+    const required = service.durationMinutes;
+    if (!required) return;
+
+    const booked = timeToMinutes(payload.endTime) - timeToMinutes(payload.startTime);
+    if (booked !== required) {
+      throw ApiError.badRequest(
+        `Service "${service.name}" is configured to take ${required} minutes but this appointment `
+          + `is ${booked} minutes — book a ${required}-minute slot or change the service's `
+          + 'durationMinutes',
+        null,
+        'SERVICE_DURATION_MISMATCH'
+      );
+    }
+  }
+
+  /**
+   * RSC-001 — `maximumAppointments` on the doctor's schedule row is a per-day cap. It was copied
+   * into every generated slot and then read by nobody.
+   *
+   * 0 (the model default) means unlimited. Only appointments that actually consume capacity are
+   * counted — the repository's active-status filter already excludes cancelled / no-show /
+   * rescheduled rows — and the appointment being edited is excluded from its own count.
+   */
+  async #assertDailyLimit(payload, slot, excludeId = null) {
+    const cap = Number(slot?.maximumAppointments) || 0;
+    if (cap <= 0) return;
+
+    const dayAppts = await this.appointmentRepository.findActiveForDoctorDay(
+      payload.doctorId,
+      payload.appointmentDate
+    );
+    const scheduleBranchId = slot?.branchId || payload.branchId;
+    const consuming = dayAppts.filter((appt) => {
+      if (excludeId && appt._id.toString() === excludeId.toString()) return false;
+      if (scheduleBranchId && appt.branchId?.toString() !== String(scheduleBranchId)) return false;
+      return true;
+    });
+
+    if (consuming.length >= cap) {
+      throw ApiError.conflict(
+        `This doctor's schedule allows a maximum of ${cap} appointments per day at this branch and `
+          + `${consuming.length} are already booked — raise maximumAppointments on the doctor's `
+          + 'schedule or choose another day',
+        'DOCTOR_DAILY_LIMIT_REACHED'
+      );
     }
   }
 
@@ -345,6 +410,7 @@ class AppointmentService {
           doctorId: appointment.doctorId,
           patientId: appointment.patientId,
           branchId: appointment.branchId,
+          serviceId: appointment.serviceId,
           appointmentDate: appointment.appointmentDate,
           startTime: appointment.startTime,
           endTime: appointment.endTime,
@@ -455,6 +521,14 @@ class AppointmentService {
 function startOfDay(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Absolute moment an appointment begins — appointment date at its "HH:mm" start time. */
+function appointmentMoment(date, startTime) {
+  const d = startOfDay(date);
+  const minutes = timeToMinutes(startTime);
+  if (minutes != null) d.setMinutes(minutes);
   return d;
 }
 

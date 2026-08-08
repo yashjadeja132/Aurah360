@@ -1,9 +1,16 @@
 import { z } from 'zod';
 import {
+  AGING_BUCKET_LIST,
+  DISCOUNT_APPROVAL_STATUS_LIST,
+  REFUND_METHOD_LIST,
+  REFUND_REASON,
+  REFUND_REASON_LIST,
   DISCOUNT_TYPE_LIST,
   INVOICE_ITEM_TYPE_LIST,
   INVOICE_STATUS_LIST,
+  PAYMENT_METHOD,
   PAYMENT_METHOD_LIST,
+  paymentMethodRequiresReference,
   PAYMENT_STATUS_LIST,
 } from '../enums/billing.js';
 
@@ -17,8 +24,12 @@ export const invoiceItemSchema = z.object({
   quantity: z.coerce.number().min(0).optional(),
   unitPrice: z.coerce.number().min(0),
   discount: z.coerce.number().min(0).optional(),
-  tax: z.coerce.number().min(0).optional(),
-  total: z.coerce.number().min(0).optional(),
+  // `tax`, `taxPercent` and `total` are NOT accepted. The GST rate for each line is derived
+  // server-side from the item master (InventoryItem.gstPercent) or the service's fee schedule,
+  // and the amounts follow from it — see BillingService#resolveLineTaxRates and
+  // helpers/invoiceTax.helper.js. Accepting them here previously let a caller name its own tax
+  // rate; the value was then silently overwritten by a pro-rata reallocation, which was both
+  // confusing and, on a mixed-rate invoice, wrong.
 });
 
 export const createInvoiceSchema = z.object({
@@ -32,8 +43,10 @@ export const createInvoiceSchema = z.object({
   items: z.array(invoiceItemSchema).min(1),
   discountType: z.enum(DISCOUNT_TYPE_LIST).optional(),
   discountValue: z.coerce.number().min(0).optional(),
-  // discountApprovalRequired/discountApproved are computed server-side and cannot be set by the caller.
-  taxPercent: z.coerce.number().min(0).max(100).optional(),
+  // Mandatory only when the discount exceeds the configured threshold — that check needs the
+  // computed subtotal, so it lives in BillingService (#assertDiscountReason).
+  discountReason: z.string().max(500).optional().nullable(),
+  // discountApprovalStatus/discountApprovalRequired/discountApproved are computed server-side and cannot be set by the caller.
   notes: z.string().max(2000).optional().nullable(),
   packageSnapshot: z
     .object({
@@ -56,13 +69,35 @@ export const updateInvoiceSchema = z.object({
   items: z.array(invoiceItemSchema).min(1).optional(),
   discountType: z.enum(DISCOUNT_TYPE_LIST).optional(),
   discountValue: z.coerce.number().min(0).optional(),
-  // discountApprovalRequired/discountApproved are computed server-side and cannot be set by the caller.
-  taxPercent: z.coerce.number().min(0).max(100).optional(),
+  // Mandatory only above the threshold — enforced in BillingService (#assertDiscountReason).
+  discountReason: z.string().max(500).optional().nullable(),
+  // discountApprovalStatus/discountApprovalRequired/discountApproved are computed server-side and cannot be set by the caller.
   notes: z.string().max(2000).optional().nullable(),
 });
 
-export const approveDiscountSchema = z.object({
-  reason: z.string().min(1).max(500),
+/**
+ * Approve/reject both take the approver's decision note. `reason` is this endpoint's original
+ * field name; `decisionNote` matches the approval-queue vocabulary used by loyalty. Either
+ * satisfies the requirement — BillingService reads whichever is present.
+ */
+export const discountDecisionSchema = z
+  .object({
+    reason: z.string().min(1).max(500).optional(),
+    decisionNote: z.string().min(1).max(500).optional(),
+  })
+  .refine((v) => Boolean(v.reason?.trim() || v.decisionNote?.trim()), {
+    message: 'A decision note is required',
+    path: ['decisionNote'],
+  });
+
+/** @deprecated kept as an alias so existing imports of the approve-only schema keep working. */
+export const approveDiscountSchema = discountDecisionSchema;
+
+export const discountApprovalQueueQuerySchema = z.object({
+  status: z.enum(DISCOUNT_APPROVAL_STATUS_LIST).optional(),
+  branchId: objectId.optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 export const voidDraftSchema = z.object({
@@ -83,32 +118,93 @@ export const invoiceListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-export const paymentSplitSchema = z.object({
-  method: z.enum(PAYMENT_METHOD_LIST),
-  amount: z.coerce.number().min(0),
-  reference: z.string().max(200).optional().nullable(),
-});
+/** PAY-04 — non-cash modes are unreconcilable without a reference number. */
+const referenceMissing = (reference) => !String(reference ?? '').trim();
 
-export const recordPaymentSchema = z.object({
-  amount: z.coerce.number().min(0).optional(),
-  method: z.enum(PAYMENT_METHOD_LIST).optional(),
-  splits: z.array(paymentSplitSchema).optional(),
-  isAdvance: z.boolean().optional(),
-  reference: z.string().max(200).optional().nullable(),
-  notes: z.string().max(1000).optional().nullable(),
-  paidAt: z.coerce.date().optional(),
-});
+export const paymentSplitSchema = z
+  .object({
+    method: z.enum(PAYMENT_METHOD_LIST),
+    amount: z.coerce.number().min(0),
+    reference: z.string().max(200).optional().nullable(),
+  })
+  .superRefine((val, ctx) => {
+    if (paymentMethodRequiresReference(val.method) && referenceMissing(val.reference)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['reference'],
+        message: `Reference is required for ${val.method} payments`,
+      });
+    }
+  });
 
-export const refundSchema = z.object({
-  amount: z.coerce.number().min(0).optional(),
-  notes: z.string().max(1000).optional().nullable(),
-  reason: z.string().min(1).max(500),
-  method: z.enum(['ORIGINAL_MODE', 'CASH', 'CREDIT_NOTE']).optional(),
-  creditNoteExpiresAt: z.coerce.date().optional().nullable(),
+export const recordPaymentSchema = z
+  .object({
+    amount: z.coerce.number().min(0).optional(),
+    method: z.enum(PAYMENT_METHOD_LIST).optional(),
+    splits: z.array(paymentSplitSchema).optional(),
+    isAdvance: z.boolean().optional(),
+    reference: z.string().max(200).optional().nullable(),
+    notes: z.string().max(1000).optional().nullable(),
+    paidAt: z.coerce.date().optional(),
+  })
+  .superRefine((val, ctx) => {
+    // Split payments carry their reference per leg (validated by paymentSplitSchema).
+    if (val.method === PAYMENT_METHOD.SPLIT || (val.splits && val.splits.length > 0)) return;
+    if (paymentMethodRequiresReference(val.method) && referenceMissing(val.reference)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['reference'],
+        message: `Reference is required for ${val.method} payments`,
+      });
+    }
+  });
+
+/**
+ * A.8 — the refund reason is mandatory and drawn from a controlled list (REFUND_REASON) so
+ * refunds can be reported on by cause. BillingService.refund still accepts any non-empty reason
+ * (internal/script callers predate this list); this schema is the HTTP contract.
+ */
+export const refundSchema = z
+  .object({
+    amount: z.coerce.number().min(0).optional(),
+    notes: z.string().max(1000).optional().nullable(),
+    reason: z.enum(REFUND_REASON_LIST, {
+      errorMap: () => ({ message: 'A refund reason is required' }),
+    }),
+    method: z.enum(REFUND_METHOD_LIST).optional(),
+    creditNoteExpiresAt: z.coerce.date().optional().nullable(),
+  })
+  .superRefine((val, ctx) => {
+    // OTHER carries no information on its own — force the cashier to say what happened.
+    if (val.reason === REFUND_REASON.OTHER && !String(val.notes ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['notes'],
+        message: 'Notes are required when the refund reason is OTHER',
+      });
+    }
+  });
+
+/** A.4 — due-payments worklist filters. */
+export const duePaymentsQuerySchema = z.object({
+  branchId: objectId.optional(),
+  patientId: objectId.optional(),
+  bucket: z.enum(AGING_BUCKET_LIST).optional(),
+  search: z.string().optional(),
+  /** Restrict to patients with a CHECKED_IN appointment today (collect while they are here). */
+  checkedInToday: z
+    .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
+    .optional()
+    .transform((v) => v === true || v === 'true' || v === '1'),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 export const applyLoyaltyRedemptionSchema = z.object({
   points: z.coerce.number().int().positive(),
+  /** LOY-005 — a client-generated key so a retried apply (flaky network, double-clicked button)
+   *  replays the original redemption instead of spending the patient's points a second time. */
+  idempotencyKey: z.string().min(8).max(120).optional(),
 });
 
 export const applyCreditNoteSchema = z.object({

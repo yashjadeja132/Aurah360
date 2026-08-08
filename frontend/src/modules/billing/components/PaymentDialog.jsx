@@ -13,21 +13,29 @@ export function PaymentDialog({ open, balance, onClose, onSubmit, pending }) {
   const [method, setMethod] = useState('CASH');
   const [reference, setReference] = useState('');
   const [isAdvance, setIsAdvance] = useState(false);
-  const [splitA, setSplitA] = useState({ method: 'CASH', amount: '' });
-  const [splitB, setSplitB] = useState({ method: 'UPI', amount: '' });
+  const [splitA, setSplitA] = useState({ method: 'CASH', amount: '', reference: '' });
+  const [splitB, setSplitB] = useState({ method: 'UPI', amount: '', reference: '' });
 
   if (!open) return null;
 
+  // PAY-04 — every non-cash mode needs a reference number to stay reconcilable; split legs are
+  // validated independently because each leg carries its own mode.
+  const referenceMissing = (leg) => leg.method !== 'CASH' && !String(leg.reference || '').trim();
+  const invalid =
+    mode === 'split'
+      ? referenceMissing(splitA) || referenceMissing(splitB)
+      : referenceMissing({ method, reference });
+
   const submit = () => {
+    if (invalid) return;
     if (mode === 'split') {
       onSubmit({
         method: 'SPLIT',
         splits: [
-          { method: splitA.method, amount: Number(splitA.amount) || 0 },
-          { method: splitB.method, amount: Number(splitB.amount) || 0 },
+          { method: splitA.method, amount: Number(splitA.amount) || 0, reference: splitA.reference || null },
+          { method: splitB.method, amount: Number(splitB.amount) || 0, reference: splitB.reference || null },
         ],
         isAdvance,
-        reference: reference || null,
       });
     } else {
       onSubmit({
@@ -108,6 +116,26 @@ export function PaymentDialog({ open, balance, onClose, onSubmit, pending }) {
                   onChange={(e) => setSplitA((s) => ({ ...s, amount: e.target.value }))}
                 />
               </div>
+              <div className="col-span-2">
+                <Label>
+                  {t('billing.paymentDialog.split1Reference', 'Split 1 reference')}
+                  {splitA.method !== 'CASH' && <span className="text-destructive"> *</span>}
+                </Label>
+                <Input
+                  value={splitA.reference}
+                  onChange={(e) => setSplitA((s) => ({ ...s, reference: e.target.value }))}
+                  placeholder={
+                    splitA.method === 'CASH'
+                      ? t('billing.paymentDialog.referenceOptional', 'Optional for cash')
+                      : t('billing.paymentDialog.referenceRequired', 'Required for non-cash payments')
+                  }
+                />
+                {referenceMissing(splitA) && (
+                  <p className="mt-1 text-xs font-medium text-destructive">
+                    {t('billing.paymentDialog.referenceRequiredError', 'A reference number is required for non-cash payments.')}
+                  </p>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -131,20 +159,58 @@ export function PaymentDialog({ open, balance, onClose, onSubmit, pending }) {
                   onChange={(e) => setSplitB((s) => ({ ...s, amount: e.target.value }))}
                 />
               </div>
+              <div className="col-span-2">
+                <Label>
+                  {t('billing.paymentDialog.split2Reference', 'Split 2 reference')}
+                  {splitB.method !== 'CASH' && <span className="text-destructive"> *</span>}
+                </Label>
+                <Input
+                  value={splitB.reference}
+                  onChange={(e) => setSplitB((s) => ({ ...s, reference: e.target.value }))}
+                  placeholder={
+                    splitB.method === 'CASH'
+                      ? t('billing.paymentDialog.referenceOptional', 'Optional for cash')
+                      : t('billing.paymentDialog.referenceRequired', 'Required for non-cash payments')
+                  }
+                />
+                {referenceMissing(splitB) && (
+                  <p className="mt-1 text-xs font-medium text-destructive">
+                    {t('billing.paymentDialog.referenceRequiredError', 'A reference number is required for non-cash payments.')}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        <div>
-          <Label>{t('billing.paymentDialog.reference', 'Reference')}</Label>
-          <Input value={reference} onChange={(e) => setReference(e.target.value)} />
-        </div>
+        {mode === 'single' && (
+          <div>
+            <Label>
+              {t('billing.paymentDialog.reference', 'Reference')}
+              {method !== 'CASH' && <span className="text-destructive"> *</span>}
+            </Label>
+            <Input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={
+                method === 'CASH'
+                  ? t('billing.paymentDialog.referenceOptional', 'Optional for cash')
+                  : t('billing.paymentDialog.referenceRequired', 'Required for non-cash payments')
+              }
+            />
+            {referenceMissing({ method, reference }) && (
+              <p className="mt-1 text-xs font-medium text-destructive">
+                {t('billing.paymentDialog.referenceRequiredError', 'A reference number is required for non-cash payments.')}
+              </p>
+            )}
+          </div>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={isAdvance} onChange={(e) => setIsAdvance(e.target.checked)} />
           {t('billing.paymentDialog.advanceAdjustment', 'Advance adjustment')}
         </label>
 
-        <Button className="w-full" disabled={pending} onClick={submit}>
+        <Button className="w-full" disabled={pending || invalid} onClick={submit}>
           {t('billing.paymentDialog.title', 'Record payment')}
         </Button>
       </div>

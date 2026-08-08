@@ -3,8 +3,8 @@ import api from '@/services/api';
 /**
  * REST client for the Loyalty & Rewards (LOY) module. Paths follow the same
  * `/api/loyalty/...` base pattern used by sibling modules (see crmApi.js,
- * inventory api files). Some endpoints (e.g. the dry-run preview calculator)
- * are not yet wired on the backend — see getPreviewCalculation below.
+ * inventory api files). The rule preview calculator is a real server-side dry run
+ * (POST /loyalty/rules/preview) — see getPreviewCalculation below.
  */
 export const loyaltyApi = {
   // --- LOY-001: Program settings (versioned, effective-dated) ---
@@ -92,52 +92,19 @@ export const loyaltyApi = {
   },
 
   /**
-   * getPreviewCalculation — CLIENT-SIDE APPROXIMATION.
+   * getPreviewCalculation — server-side DRY RUN of a rule-version draft (LOY-002).
    *
-   * No dry-run/preview endpoint is wired on the backend yet for LoyaltyEarningRule
-   * versions, so this reproduces the formula/rounding semantics implied by
-   * LOYALTY_POINT_FORMULA_TYPE and LOYALTY_ROUNDING_RULE (backend/src/enums/loyalty.js)
-   * purely in the browser, so admins get an instant preview while editing a rule
-   * draft. This does NOT apply eligibility, caps, or campaign multipliers server-side
-   * and MUST be replaced with a real POST /loyalty/rules/preview call once the
-   * backend team ships one — the shape of `ruleDraft` here matches ruleVersionSchema
-   * so swapping this for a real request is a drop-in change.
+   * POST /loyalty/rules/preview runs the draft through the real earning engine
+   * (LoyaltyEarningEngineService.previewPoints) and writes nothing. `ruleDraft` is the
+   * ruleVersionSchema shape; extra editor-only keys are ignored by the backend
+   * validator. Pass patientId/branchId/serviceId to also simulate eligibility and
+   * ledger-backed caps.
    */
-  getPreviewCalculation(ruleDraft, amountInr = 0) {
-    const { formulaType, pointValue = 0, perAmountInr = 1, roundingRule = 'FLOOR' } = ruleDraft || {};
-    let raw = 0;
-    if (formulaType === 'FIXED') {
-      raw = Number(pointValue) || 0;
-    } else if (formulaType === 'PER_AMOUNT') {
-      const per = Number(perAmountInr) || 1;
-      raw = (Number(amountInr) / per) * (Number(pointValue) || 0);
-    } else if (formulaType === 'PERCENT_OF_AMOUNT') {
-      raw = (Number(amountInr) * (Number(pointValue) || 0)) / 100;
-    }
-
-    let points;
-    if (roundingRule === 'CEILING') points = Math.ceil(raw);
-    else if (roundingRule === 'ROUND') points = Math.round(raw);
-    else points = Math.floor(raw); // FLOOR (default)
-
-    const capped = applyCaps(points, ruleDraft);
-    return {
-      isClientSideEstimate: true,
-      rawPoints: raw,
-      roundedPoints: points,
-      cappedPoints: capped.value,
-      capApplied: capped.capApplied,
-    };
+  getPreviewCalculation(ruleDraft, amountInr = 0, simulate = {}) {
+    return api
+      .post('/loyalty/rules/preview', { ...(ruleDraft || {}), ...simulate, amountInr })
+      .then((r) => r.data);
   },
 };
-
-function applyCaps(points, ruleDraft = {}) {
-  const caps = [ruleDraft.perEventCap, ruleDraft.perDayCap, ruleDraft.perMonthCap, ruleDraft.lifetimeCap].filter(
-    (c) => c !== null && c !== undefined && c !== ''
-  );
-  if (!caps.length) return { value: points, capApplied: false };
-  const min = Math.min(points, ...caps.map(Number));
-  return { value: min, capApplied: min < points };
-}
 
 export default loyaltyApi;

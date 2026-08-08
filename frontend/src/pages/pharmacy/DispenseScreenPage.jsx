@@ -62,7 +62,10 @@ export default function DispenseScreenPage() {
     <section className="mx-auto max-w-4xl space-y-6">
       <div>
         <Button asChild variant="ghost" size="sm" className="-ml-2">
-          <Link to={APP_ROUTES.PHARMACY_QUEUE}>
+          {/* Points at the hub's queue tab rather than the standalone
+              /pharmacy/queue route, so this back link keeps working once that
+              route is folded into PharmacyHubPage. */}
+          <Link to={`${APP_ROUTES.PHARMACY}?tab=queue`}>
             <ArrowLeft className="h-4 w-4" />
             {t('pharmacy.dispense.queue', 'Queue')}
           </Link>

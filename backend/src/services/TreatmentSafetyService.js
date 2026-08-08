@@ -47,7 +47,15 @@ class TreatmentSafetyService {
   }
 
   // --- Adverse events -------------------------------------------------------------
-  async reportAdverseEvent(payload, actorId, req = null) {
+  /**
+   * SEC-030 — `scope.branchId` is the caller's pinned branch (null for OWNER/ADMIN). The
+   * controller has already forced it onto the payload; this assertion is the belt-and-braces
+   * check so a future caller cannot slip an out-of-branch write past the service directly.
+   */
+  async reportAdverseEvent(payload, actorId, req = null, { branchId = null } = {}) {
+    if (branchId && String(payload.branchId) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
     const event = await AdverseEvent.create({
       ...payload,
       reportedBy: actorId,
@@ -83,9 +91,21 @@ class TreatmentSafetyService {
     return rows.map((r) => r.toSafeObject());
   }
 
-  async updateAdverseEvent(id, payload, actorId, req = null) {
-    const event = await AdverseEvent.findById(id);
+  /**
+   * SEC-030 — the branch filter is part of the LOOKUP, not a check after it: an event in
+   * another branch is indistinguishable from one that does not exist (404, never 403).
+   */
+  #scopedFilter(id, branchId) {
+    return branchId ? { _id: id, branchId } : { _id: id };
+  }
+
+  async updateAdverseEvent(id, payload, actorId, req = null, { branchId = null } = {}) {
+    const event = await AdverseEvent.findOne(this.#scopedFilter(id, branchId));
     if (!event) throw ApiError.notFound('Adverse event not found');
+    // A scoped caller may not relocate an event into (or out of) another branch.
+    if (branchId && payload.branchId && String(payload.branchId) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
     Object.assign(event, payload);
     await event.save();
 
@@ -97,8 +117,8 @@ class TreatmentSafetyService {
     return event.toSafeObject();
   }
 
-  async closeAdverseEvent(id, { closureNotes }, actorId, req = null) {
-    const event = await AdverseEvent.findById(id);
+  async closeAdverseEvent(id, { closureNotes }, actorId, req = null, { branchId = null } = {}) {
+    const event = await AdverseEvent.findOne(this.#scopedFilter(id, branchId));
     if (!event) throw ApiError.notFound('Adverse event not found');
     event.status = ADVERSE_EVENT_STATUS.CLOSED;
     event.closedBy = actorId;

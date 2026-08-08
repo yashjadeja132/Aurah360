@@ -9,6 +9,8 @@ export const AI_USE_CASE = Object.freeze({
   PATIENT_INSTRUCTION_DRAFT: 'PATIENT_INSTRUCTION_DRAFT',
   TREATMENT_CHECKLIST_ASSIST: 'TREATMENT_CHECKLIST_ASSIST',
   ANALYTICS_NARRATIVE: 'ANALYTICS_NARRATIVE',
+  /** Full structured clinical suggestion set for the doctor (AI-001, §9.2). */
+  CLINICAL_COPILOT: 'CLINICAL_COPILOT',
 });
 
 export const AI_USE_CASE_LIST = Object.freeze(Object.values(AI_USE_CASE));
@@ -29,6 +31,8 @@ export const AI_RUN_STATUS = Object.freeze({
   INVALID_OUTPUT: 'INVALID_OUTPUT',
   BLOCKED_PII: 'BLOCKED_PII',
   KILL_SWITCH: 'KILL_SWITCH',
+  /** Month-to-date estimated spend reached AI_MONTHLY_BUDGET_USD — call refused, flow degrades. */
+  BUDGET_EXCEEDED: 'BUDGET_EXCEEDED',
 });
 
 export const AI_RUN_STATUS_LIST = Object.freeze(Object.values(AI_RUN_STATUS));

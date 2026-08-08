@@ -76,18 +76,70 @@ class PatientService {
     return doc.toSafeObject(extra);
   }
 
+  /**
+   * PAT-DUP — duplicate detection ran ONLY in the browser (POST /patients/duplicates/check before
+   * submit), so it protected the form, not the record: any API client, import job or retried
+   * request could mint unlimited duplicates of the same person, splitting their history across
+   * MRNs. The check now runs where the record is actually written.
+   *
+   * It is a 409 with the candidate on it, not a block: real families share a phone number, so the
+   * clinic must be able to say "yes, this is a different person" by re-posting with
+   * `allowDuplicate: true`. Matching is on mobile OR name+DOB — email alone is intentionally not
+   * a bar, since households commonly share one address.
+   */
+  async #assertNotDuplicate({ mobile, firstName, lastName, dateOfBirth }) {
+    const candidates = await this.duplicateService.findDuplicates({
+      mobile,
+      firstName,
+      lastName,
+      dateOfBirth,
+    });
+    if (!candidates.length) return;
+
+    const [likely] = candidates;
+    throw new ApiError(409, 'A patient with these details already exists.', {
+      code: 'PATIENT_DUPLICATE_SUSPECTED',
+      errors: {
+        // Named so the caller can show WHO it collided with and offer "this is a different
+        // person" — a bare 409 would leave reception unable to act on it.
+        matches: candidates.slice(0, 5).map((c) => ({
+          id: c.id,
+          mrn: c.mrn,
+          fullName: [c.firstName, c.lastName].filter(Boolean).join(' '),
+          mobile: c.mobile,
+          dateOfBirth: c.dateOfBirth,
+          matchReasons: c.matchReasons,
+        })),
+        likelyMatchId: likely.id,
+        override: 'Re-submit with allowDuplicate: true to register this patient anyway.',
+      },
+    });
+  }
+
   async create(payload, actorId, req = null) {
-    await this.#assertBranch(payload.primaryBranchId);
-    await this.#assertDoctor(payload.primaryDoctorId);
-    await this.#assertLeadSource(payload.leadSourceId);
+    const { allowDuplicate = false, ...attributes } = payload;
+
+    await this.#assertBranch(attributes.primaryBranchId);
+    await this.#assertDoctor(attributes.primaryDoctorId);
+    await this.#assertLeadSource(attributes.leadSourceId);
+
+    if (!allowDuplicate) await this.#assertNotDuplicate(attributes);
 
     const mrn = await generateMrn();
-    const patientCode = payload.patientCode || (await generatePatientCode(mrn));
+    const patientCode = attributes.patientCode || (await generatePatientCode(mrn));
 
     const patient = await this.patientRepository.create({
-      ...payload,
+      ...attributes,
       mrn,
       patientCode,
+      /**
+       * PAT-003 first-touch attribution. Captured ONCE, here, from the source category the record
+       * was created with. `update()` strips this key from every payload, so later edits to
+       * `sourceCategory` (a patient who arrives via Instagram and is later re-tagged to a referral)
+       * can never rewrite where the patient originally came from. Never client-settable: the
+       * create validator does not list the field, so an inbound value is dropped before this point.
+       */
+      firstTouchSourceCategory: attributes.sourceCategory || null,
       email: payload.email || null,
       createdBy: actorId,
       updatedBy: actorId,
@@ -133,6 +185,31 @@ class PatientService {
     delete updates.mrn;
     delete updates.uuid;
     delete updates.patientCode;
+    /**
+     * PAT-003 — first touch is immutable. Set once at creation and never rewritten, so marketing
+     * attribution reflects where the patient actually came from rather than the last person who
+     * edited the source dropdown. Also strip `guardianVerified`: verification is a staff act
+     * performed through setGuardianVerified(), never a field anyone can set in a profile edit.
+     */
+    delete updates.firstTouchSourceCategory;
+    delete updates.guardianVerified;
+
+    // Backfill only: records created before first-touch capture existed have it unset, and the
+    // earliest source we have is the best available first touch. Never overwrites a set value.
+    if (!existing.firstTouchSourceCategory && payload.sourceCategory) {
+      updates.firstTouchSourceCategory = payload.sourceCategory;
+    }
+
+    // RX-SAFETY — "No Known Drug Allergies" is a clinical assertion, so stamp who confirmed it
+    // and when server-side. The prescribing safety check reads this to tell "confirmed none"
+    // apart from "never asked" (see PrescriptionSafetyService).
+    if (updates.medical && updates.medical.noKnownDrugAllergies === true) {
+      updates.medical = {
+        ...updates.medical,
+        allergiesConfirmedAt: updates.medical.allergiesConfirmedAt || new Date(),
+        allergiesConfirmedBy: actorId,
+      };
+    }
 
     await this.patientRepository.updateById(id, updates);
 
@@ -199,6 +276,45 @@ class PatientService {
     await this.auditService.record(AUDIT_ACTIONS.PATIENT_CONSENT_UPDATED, {
       actorId,
       metadata: { patientId: id },
+      resourceType: 'Patient',
+      resourceId: id,
+      req,
+    });
+
+    return this.#mapPatient(await this.patientRepository.findByIdPopulated(id));
+  }
+
+  /**
+   * PAT-005 — staff verification of a guardian↔dependent link.
+   *
+   * `guardianVerified` is the gate PatientPortalService uses before releasing a dependent's
+   * clinical record to a guardian's portal login, so it can only ever be set here, by an
+   * authenticated staff member holding PATIENTS_EDIT, after they have checked the relationship
+   * against ID/consent at the desk. It is stripped from create/update payloads precisely so that
+   * nobody can self-assert it.
+   */
+  async setGuardianVerified(id, { verified, note = null }, actorId, req = null) {
+    const existing = await this.patientRepository.findByIdNotDeleted(id);
+    if (!existing) throw ApiError.notFound('Patient not found');
+    if (!existing.guardianPatientId) {
+      throw ApiError.badRequest('This patient has no guardian link to verify.');
+    }
+
+    await this.patientRepository.updateById(id, {
+      guardianVerified: Boolean(verified),
+      updatedBy: actorId,
+    });
+
+    await this.timelineService.addEvent(id, {
+      eventType: TIMELINE_EVENT.PROFILE_UPDATED,
+      title: verified ? 'Guardian link verified' : 'Guardian link verification revoked',
+      metadata: { guardianPatientId: existing.guardianPatientId?.toString?.() || null, note },
+      actorId,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.PATIENT_UPDATED, {
+      actorId,
+      metadata: { patientId: id, guardianVerified: Boolean(verified), note },
       resourceType: 'Patient',
       resourceId: id,
       req,

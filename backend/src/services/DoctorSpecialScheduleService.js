@@ -42,7 +42,19 @@ class DoctorSpecialScheduleService {
     return rows.map((r) => r.toSafeObject());
   }
 
-  async upsert(payload, actorId, req = null) {
+  /** SEC-030 — another branch's special schedule reads as NOT FOUND, never 403. */
+  #assertInScope(row, scopeBranchId) {
+    if (!scopeBranchId || !row) return row;
+    if (String(row.branchId) !== String(scopeBranchId)) {
+      throw ApiError.notFound('Special schedule not found');
+    }
+    return row;
+  }
+
+  async upsert(payload, actorId, req = null, { branchId: scopeBranchId = null } = {}) {
+    if (scopeBranchId && String(payload.branchId) !== String(scopeBranchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
     const doctor = await this.doctorRepository.findByIdNotDeleted(payload.doctorId);
     if (!doctor) throw ApiError.notFound('Doctor not found');
     const branch = await this.branchRepository.findByIdNotDeleted(payload.branchId);
@@ -84,9 +96,10 @@ class DoctorSpecialScheduleService {
     return row.toSafeObject();
   }
 
-  async softDelete(id, actorId, req = null) {
+  async softDelete(id, actorId, req = null, { branchId: scopeBranchId = null } = {}) {
     const existing = await this.specialRepository.findByIdNotDeleted(id);
     if (!existing) throw ApiError.notFound('Special schedule not found');
+    this.#assertInScope(existing, scopeBranchId);
 
     await this.specialRepository.updateById(id, {
       deletedAt: new Date(),

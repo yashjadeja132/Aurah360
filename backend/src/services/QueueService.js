@@ -71,6 +71,40 @@ class QueueService {
     return mapped;
   }
 
+  /**
+   * PRD §6.5/§17.2 — serialisation for the PUBLIC waiting-room board.
+   *
+   * The lobby screen is readable by everyone standing in the waiting room, so the server must
+   * never SEND identity there — hiding a column in the UI is not a control, because the payload
+   * is still on the wire and in the browser cache. This mapper is therefore a whitelist built
+   * from scratch rather than `#map()` minus a few keys: a field added to the model later cannot
+   * silently appear on the public board.
+   *
+   * What is deliberately included: the token (how a patient recognises their turn), initials
+   * (disambiguates two people holding adjacent tokens), the doctor and the coarse status. What
+   * is deliberately excluded: name, mobile, MRN, VIP flag, reception/clinical notes, appointment
+   * details and the patient id itself.
+   */
+  #mapPublic(doc) {
+    if (!doc) return null;
+    const patient = doc.patientId;
+    const initials = [patient?.firstName, patient?.lastName]
+      .filter(Boolean)
+      .map((part) => String(part).trim().charAt(0).toUpperCase())
+      .join('');
+    const doctorUser = doc.doctorId?.userId;
+    return {
+      id: doc._id.toString(),
+      tokenNumber: doc.tokenNumber,
+      patientInitials: initials || null,
+      doctorId: doc.doctorId?._id ? doc.doctorId._id.toString() : (doc.doctorId?.toString?.() || null),
+      doctorName: doctorUser ? `${doctorUser.firstName} ${doctorUser.lastName}`.trim() : null,
+      queueStatus: doc.queueStatus,
+      estimatedWaitTime: doc.estimatedWaitTime,
+      sortOrder: doc.sortOrder,
+    };
+  }
+
   #waitingMinutes(doc) {
     if (!doc.arrivalTime) return 0;
     if ([QUEUE_STATUS.COMPLETED, QUEUE_STATUS.CANCELLED].includes(doc.queueStatus)) {
@@ -166,14 +200,27 @@ class QueueService {
     return this.#emit(SOCKET_EVENTS.PATIENT_CHECKED_IN, entry);
   }
 
-  async listBranchQueue(branchId, date = new Date()) {
-    const rows = await this.queueRepository.findTodayByBranch(branchId, date);
-    return Promise.all(rows.map(async (r) => this.#map(await this.queueRepository.findByIdPopulated(r._id))));
+  /**
+   * SEC-030 — `doctorId` narrows a branch queue to one doctor's column. It is set from the
+   * caller's server-resolved scope (a DOCTOR only ever sees their own patients waiting), never
+   * from raw client input; reception passes null and keeps the full branch board.
+   */
+  /**
+   * `publicDisplay` picks the serialiser, NOT a post-filter: the staff board legitimately needs
+   * the full record (reception calls patients by name and phones the ones who do not answer), so
+   * both audiences are served by the same query but never by the same payload.
+   */
+  async listBranchQueue(branchId, date = new Date(), { doctorId = null, publicDisplay = false } = {}) {
+    const all = await this.queueRepository.findTodayByBranch(branchId, date);
+    const rows = doctorId ? all.filter((r) => r.doctorId?.toString() === doctorId.toString()) : all;
+    const map = publicDisplay ? (d) => this.#mapPublic(d) : (d) => this.#map(d);
+    return Promise.all(rows.map(async (r) => map(await this.queueRepository.findByIdPopulated(r._id))));
   }
 
-  async listDoctorQueue(doctorId, date = new Date()) {
+  async listDoctorQueue(doctorId, date = new Date(), { publicDisplay = false } = {}) {
     const rows = await this.queueRepository.findDoctorQueue(doctorId, date);
-    return Promise.all(rows.map(async (r) => this.#map(await this.queueRepository.findByIdPopulated(r._id))));
+    const map = publicDisplay ? (d) => this.#mapPublic(d) : (d) => this.#map(d);
+    return Promise.all(rows.map(async (r) => map(await this.queueRepository.findByIdPopulated(r._id))));
   }
 
   async getById(id) {
@@ -313,7 +360,8 @@ class QueueService {
     return this.#emit(SOCKET_EVENTS.QUEUE_UPDATED, entry);
   }
 
-  async reorder(id, { beforeId = null, afterId = null }, actorId) {
+  async reorder(id, { beforeId = null, afterId = null, reason }, actorId, req = null) {
+    if (!reason?.trim()) throw ApiError.badRequest('Reorder reason is required');
     const entry = await this.queueRepository.findByIdNotDeleted(id);
     if (!entry) throw ApiError.notFound('Queue entry not found');
     if (entry.queueStatus !== QUEUE_STATUS.WAITING) {
@@ -330,13 +378,38 @@ class QueueService {
     }
 
     await this.queueRepository.updateById(id, { sortOrder, updatedBy: actorId });
+    await this.auditService.record(AUDIT_ACTIONS.QUEUE_REORDERED, {
+      actorId,
+      metadata: {
+        queueEntryId: id,
+        beforeId: beforeId || null,
+        afterId: afterId || null,
+        fromSortOrder: entry.sortOrder,
+        toSortOrder: sortOrder,
+        reason: reason.trim(),
+      },
+      req,
+    });
     await this.#refreshWaitTimes(entry.doctorId, entry.queueDate);
     return this.#emit(SOCKET_EVENTS.QUEUE_UPDATED, entry);
   }
 
-  async summary(branchId, date = new Date()) {
-    const counts = await this.queueRepository.countByStatus(branchId, date);
-    const rows = await this.queueRepository.findTodayByBranch(branchId, date);
+  /**
+   * SEC-030 — when `doctorId` is set (a DOCTOR's server-resolved scope) the whole summary,
+   * including the per-doctor breakdown and the counts, is restricted to that doctor. The
+   * counts are recomputed from the scoped rows rather than reusing the branch-wide aggregate,
+   * which would otherwise leak colleagues' patient volumes back through the totals.
+   */
+  async summary(branchId, date = new Date(), { doctorId = null } = {}) {
+    const allRows = await this.queueRepository.findTodayByBranch(branchId, date);
+    const rows = doctorId
+      ? allRows.filter((r) => r.doctorId?.toString() === doctorId.toString())
+      : allRows;
+
+    const counts = doctorId
+      ? rows.reduce((acc, r) => ({ ...acc, [r.queueStatus]: (acc[r.queueStatus] || 0) + 1 }), {})
+      : await this.queueRepository.countByStatus(branchId, date);
+
     const waiting = rows.filter((r) => r.queueStatus === QUEUE_STATUS.WAITING);
     const completed = rows.filter((r) => r.queueStatus === QUEUE_STATUS.COMPLETED);
     const avgWait =

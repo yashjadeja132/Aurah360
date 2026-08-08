@@ -18,9 +18,10 @@ import ClinicalPhoto from '../models/ClinicalPhoto.model.js';
 import ConsultationClinicalService from '../services/ConsultationClinicalService.js';
 import ConsentService from '../services/ConsentService.js';
 import { CONSENT_PURPOSE } from '../enums/privacy.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_photo_consent'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_photo_consent'));
   await mongoose.connection.dropDatabase();
 
   const patient = await Patient.create({

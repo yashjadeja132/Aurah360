@@ -38,81 +38,99 @@ import {
   Award,
   Megaphone,
   ClipboardCheck,
+  FlaskConical,
+  HardHat,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { APP_CONFIG } from '@/constants/config';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS, ROLE_LABELS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES, ROLE_LABELS } from '@/constants/rbac';
 import { hasAnyPermission } from '@/utils/permissions';
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { NotificationBell } from '@/components/common/NotificationBell';
 
+/**
+ * Role shorthands used by the nav model below.
+ *
+ * `roles` on a group or item is a WHITELIST: the entry is FOR those roles. It is an
+ * additional gate on top of `permissions`, never a replacement — an entry renders only
+ * when the role check AND the permission check both pass (defence in depth; the API is
+ * the real authority). Omitting `roles` means "every role", subject to permissions.
+ */
+const ADMINS = [ROLES.OWNER, ROLES.ADMIN];
+const MANAGERS = [...ADMINS, ROLES.BRANCH_MANAGER];
+const CLINICAL = [ROLES.DOCTOR, ROLES.NURSE];
+
 /** Grouped navigation — mirrors the PRD's role-based information architecture (§17.3). */
 const navGroups = [
   {
     labelKey: 'nav.overview',
     label: 'Overview',
+    // Every role keeps a home link. `/` resolves through RoleLanding, so a doctor lands
+    // on "My day", a cashier on the cash desk, a branch manager on the branch screen.
     items: [{ to: APP_ROUTES.DASHBOARD, labelKey: 'nav.dashboard', label: 'Dashboard', icon: LayoutDashboard }],
   },
   {
     labelKey: 'nav.frontDesk',
     label: 'Front desk',
     items: [
-      { to: APP_ROUTES.RECEPTION, labelKey: 'nav.reception', label: 'Reception', icon: ClipboardList, permissions: [PERMISSIONS.RECEPTION_VIEW, PERMISSIONS.RECEPTION_ALL] },
-      { to: APP_ROUTES.QUEUE, labelKey: 'nav.queue', label: 'Queue', icon: ListOrdered, permissions: [PERMISSIONS.QUEUE_VIEW, PERMISSIONS.QUEUE_ALL] },
-      { to: APP_ROUTES.APPOINTMENTS, labelKey: 'nav.appointments', label: 'Appointments', icon: CalendarCheck2, permissions: [PERMISSIONS.APPOINTMENTS_VIEW, PERMISSIONS.APPOINTMENTS_ALL] },
-      { to: APP_ROUTES.SCHEDULING_VIEWER, labelKey: 'nav.scheduling', label: 'Scheduling', icon: CalendarClock, permissions: [PERMISSIONS.SCHEDULE_VIEW, PERMISSIONS.SCHEDULE_ALL, PERMISSIONS.HOLIDAYS_VIEW] },
-      { to: APP_ROUTES.PATIENTS, labelKey: 'nav.patients', label: 'Patients', icon: HeartPulse, permissions: [PERMISSIONS.PATIENTS_VIEW, PERMISSIONS.PATIENTS_ALL] },
+      { to: APP_ROUTES.RECEPTION_DESK, labelKey: 'nav.receptionDesk', label: 'Front desk', icon: ClipboardList, roles: [...MANAGERS, ROLES.RECEPTIONIST], permissions: [PERMISSIONS.RECEPTION_VIEW, PERMISSIONS.RECEPTION_ALL] },
+      // Branch command is a management screen; it was previously gated on REPORTS_VIEW,
+      // which every reporting role holds — hence doctors/cashiers could see it.
+      { to: APP_ROUTES.BRANCH_COMMAND, labelKey: 'nav.branchCommand', label: 'Branch', icon: DoorOpen, roles: MANAGERS, permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ALL] },
+      { to: APP_ROUTES.QUEUE, labelKey: 'nav.queue', label: 'Queue', icon: ListOrdered, roles: [...MANAGERS, ...CLINICAL, ROLES.RECEPTIONIST, ROLES.TECHNICIAN], permissions: [PERMISSIONS.QUEUE_VIEW, PERMISSIONS.QUEUE_ALL] },
+      { to: APP_ROUTES.APPOINTMENTS, labelKey: 'nav.appointments', label: 'Appointments', icon: CalendarCheck2, roles: [...MANAGERS, ...CLINICAL, ROLES.RECEPTIONIST, ROLES.TECHNICIAN, ROLES.CRM_EXECUTIVE], permissions: [PERMISSIONS.APPOINTMENTS_VIEW, PERMISSIONS.APPOINTMENTS_ALL] },
+      { to: APP_ROUTES.SCHEDULING_VIEWER, labelKey: 'nav.scheduling', label: 'Scheduling', icon: CalendarClock, roles: [...MANAGERS, ROLES.RECEPTIONIST, ROLES.DOCTOR], permissions: [PERMISSIONS.SCHEDULE_VIEW, PERMISSIONS.SCHEDULE_ALL, PERMISSIONS.HOLIDAYS_VIEW] },
+      { to: APP_ROUTES.PATIENTS, labelKey: 'nav.patients', label: 'Patients', icon: HeartPulse, roles: [...MANAGERS, ...CLINICAL, ROLES.RECEPTIONIST, ROLES.TECHNICIAN, ROLES.CRM_EXECUTIVE], permissions: [PERMISSIONS.PATIENTS_VIEW, PERMISSIONS.PATIENTS_ALL] },
     ],
   },
   {
     labelKey: 'nav.clinical',
     label: 'Clinical',
     items: [
-      { to: APP_ROUTES.CONSULTATIONS, labelKey: 'nav.emr', label: 'EMR', icon: FileHeart, permissions: [PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL] },
-      { to: APP_ROUTES.PRESCRIPTIONS, labelKey: 'nav.prescriptions', label: 'Prescriptions', icon: Pill, permissions: [PERMISSIONS.PRESCRIPTION_VIEW, PERMISSIONS.PRESCRIPTION_ALL] },
-      { to: APP_ROUTES.TREATMENT_PLANS, labelKey: 'nav.treatmentPlans', label: 'Treatment plans', icon: ClipboardPen, permissions: [PERMISSIONS.TREATMENT_PLAN_VIEW, PERMISSIONS.TREATMENT_PLAN_ALL] },
-      { to: APP_ROUTES.TREATMENT_DASHBOARD, labelKey: 'nav.treatmentSessions', label: 'Treatment sessions', icon: Activity, permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL] },
-      { to: APP_ROUTES.TREATMENT_SAFETY, labelKey: 'nav.treatmentSafety', label: 'Treatment safety', icon: ShieldAlert, permissions: [PERMISSIONS.ADVERSE_EVENT_VIEW, PERMISSIONS.ADVERSE_EVENT_CREATE, PERMISSIONS.PATCH_TEST_VIEW] },
+      { to: APP_ROUTES.CONSULTATIONS, labelKey: 'nav.emr', label: 'EMR', icon: FileHeart, roles: [...MANAGERS, ...CLINICAL], permissions: [PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL] },
+      { to: APP_ROUTES.REPORT_REVIEW_QUEUE, labelKey: 'nav.reportReview', label: 'Report review', icon: FlaskConical, roles: [...ADMINS, ROLES.DOCTOR], permissions: [PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL] },
+      { to: APP_ROUTES.PRESCRIPTIONS, labelKey: 'nav.prescriptions', label: 'Prescriptions', icon: Pill, roles: [...MANAGERS, ...CLINICAL, ROLES.PHARMACIST], permissions: [PERMISSIONS.PRESCRIPTION_VIEW, PERMISSIONS.PRESCRIPTION_ALL] },
+      // Plans / sessions / protocols / packages / safety are now tabs inside the Treatments hub,
+      // so three sidebar entries collapse to one. The old routes stay registered for deep links.
+      { to: APP_ROUTES.TREATMENT_DASHBOARD, labelKey: 'nav.treatments', label: 'Treatments', icon: Activity, roles: [...MANAGERS, ...CLINICAL, ROLES.TECHNICIAN], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL, PERMISSIONS.TREATMENT_PLAN_VIEW, PERMISSIONS.TREATMENT_PLAN_ALL, PERMISSIONS.ADVERSE_EVENT_VIEW, PERMISSIONS.ADVERSE_EVENT_CREATE, PERMISSIONS.PATCH_TEST_VIEW] },
+      { to: APP_ROUTES.TECHNICIAN_WORKLIST, labelKey: 'nav.technicianWorklist', label: 'My worklist', icon: HardHat, roles: [...ADMINS, ROLES.TECHNICIAN], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL] },
     ],
   },
   {
     labelKey: 'nav.operations',
     label: 'Operations',
     items: [
-      { to: APP_ROUTES.PHARMACY, labelKey: 'nav.pharmacy', label: 'Pharmacy', icon: Syringe, permissions: [PERMISSIONS.PHARMACY_VIEW, PERMISSIONS.PHARMACY_ALL] },
-      { to: APP_ROUTES.INVENTORY, labelKey: 'nav.inventory', label: 'Inventory', icon: Package, permissions: [PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_ALL] },
-      { to: APP_ROUTES.INVENTORY_TRANSFERS, labelKey: 'nav.transfers', label: 'Transfers', icon: Truck, permissions: [PERMISSIONS.INVENTORY_TRANSFER_REQUEST, PERMISSIONS.INVENTORY_TRANSFER_APPROVE, PERMISSIONS.INVENTORY_ALL] },
+      { to: APP_ROUTES.PHARMACY, labelKey: 'nav.pharmacy', label: 'Pharmacy', icon: Syringe, roles: [...MANAGERS, ROLES.PHARMACIST], permissions: [PERMISSIONS.PHARMACY_VIEW, PERMISSIONS.PHARMACY_ALL] },
+      { to: APP_ROUTES.INVENTORY, labelKey: 'nav.inventory', label: 'Inventory', icon: Package, roles: [...MANAGERS, ROLES.PHARMACIST], permissions: [PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_ALL] },
+      // Transfers, ledger, purchase orders, suppliers and expiry are now tabs in the Stock hub.
+      // Dues / cash close / discount approvals are now tabs inside the Billing hub, so four
+      // sidebar entries collapse to two. The old routes stay registered for deep links.
+      { to: APP_ROUTES.BILLING_CASHIER, labelKey: 'nav.cashDesk', label: 'Cash desk', icon: Wallet, permissions: [PERMISSIONS.BILLING_VIEW, PERMISSIONS.BILLING_ALL] },
       { to: APP_ROUTES.BILLING, labelKey: 'nav.billing', label: 'Billing', icon: IndianRupee, permissions: [PERMISSIONS.BILLING_VIEW, PERMISSIONS.BILLING_ALL] },
-      { to: APP_ROUTES.BILLING_CASH_CLOSE, labelKey: 'nav.cashClose', label: 'Cash close', icon: Wallet, permissions: [PERMISSIONS.BILLING_CASH_CLOSE, PERMISSIONS.BILLING_ALL] },
     ],
   },
   {
     labelKey: 'nav.growth',
     label: 'Growth',
     items: [
-      { to: APP_ROUTES.CRM, labelKey: 'nav.crm', label: 'CRM', icon: Target, permissions: [PERMISSIONS.CRM_VIEW, PERMISSIONS.CRM_ALL] },
-      { to: APP_ROUTES.CRM_OFFERS, labelKey: 'nav.offers', label: 'Offers', icon: BadgePercent, permissions: [PERMISSIONS.CRM_OFFERS_VIEW, PERMISSIONS.CRM_OFFERS_MANAGE, PERMISSIONS.CRM_ALL] },
-      { to: APP_ROUTES.CRM_RECALL, labelKey: 'nav.recall', label: 'Recall', icon: PhoneCall, permissions: [PERMISSIONS.CRM_RECALL, PERMISSIONS.CRM_ALL] },
+      // Leads, pipeline, follow-ups, recalls, offers and feedback are now tabs in the CRM hub.
+      { to: APP_ROUTES.CRM, labelKey: 'nav.crm', label: 'CRM', icon: Target, permissions: [PERMISSIONS.CRM_VIEW, PERMISSIONS.CRM_ALL, PERMISSIONS.CRM_RECALL, PERMISSIONS.CRM_OFFERS_VIEW, PERMISSIONS.CRM_OFFERS_MANAGE, PERMISSIONS.CRM_FEEDBACK_VIEW] },
       { to: APP_ROUTES.NOTIFICATIONS, labelKey: 'nav.notifications', label: 'Notifications', icon: Bell, permissions: [PERMISSIONS.NOTIFICATIONS_VIEW, PERMISSIONS.NOTIFICATIONS_ALL] },
-      { to: APP_ROUTES.ANALYTICS, labelKey: 'nav.analytics', label: 'Analytics', icon: BarChart3, permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ALL, PERMISSIONS.DASHBOARD_VIEW] },
-      { to: APP_ROUTES.REPORTS, labelKey: 'nav.reports', label: 'Reports', icon: BarChart3, permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ALL] },
+      // Dashboards, reports, analytics and scheduled reports are now tabs in the Reports hub.
+      { to: APP_ROUTES.REPORTS, labelKey: 'nav.reports', label: 'Reports', icon: BarChart3, permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ALL, PERMISSIONS.DASHBOARD_VIEW] },
     ],
   },
   {
     labelKey: 'nav.loyaltyGroup',
     label: 'Loyalty',
     items: [
-      { to: APP_ROUTES.LOYALTY, labelKey: 'nav.loyaltyDashboard', label: 'Dashboard', icon: Gift, permissions: [PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_RULES_VIEW, PERMISSIONS.LOYALTY_REPORTS_VIEW, PERMISSIONS.LOYALTY_ALL] },
-      { to: APP_ROUTES.LOYALTY_SETTINGS, labelKey: 'nav.loyaltySettings', label: 'Settings', icon: Settings, permissions: [PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_SETTINGS_MANAGE, PERMISSIONS.LOYALTY_ALL] },
-      { to: APP_ROUTES.LOYALTY_RULES, labelKey: 'nav.loyaltyRules', label: 'Earning rules', icon: ClipboardCheck, permissions: [PERMISSIONS.LOYALTY_RULES_VIEW, PERMISSIONS.LOYALTY_RULES_MANAGE, PERMISSIONS.LOYALTY_ALL] },
-      { to: APP_ROUTES.LOYALTY_TIERS, labelKey: 'nav.loyaltyTiers', label: 'Tiers', icon: Award, permissions: [PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_SETTINGS_MANAGE, PERMISSIONS.LOYALTY_ALL] },
-      { to: APP_ROUTES.LOYALTY_CAMPAIGNS, labelKey: 'nav.loyaltyCampaigns', label: 'Campaigns', icon: Megaphone, permissions: [PERMISSIONS.LOYALTY_CAMPAIGNS_MANAGE, PERMISSIONS.LOYALTY_ALL] },
-      { to: APP_ROUTES.LOYALTY_ADJUSTMENTS, labelKey: 'nav.loyaltyAdjustments', label: 'Adjustment queue', icon: ShieldAlert, permissions: [PERMISSIONS.LOYALTY_ADJUST_APPROVE, PERMISSIONS.LOYALTY_ALL] },
+      // Overview, rules, tiers, campaigns, approvals and settings are now tabs in the Loyalty hub.
+      { to: APP_ROUTES.LOYALTY, labelKey: 'nav.loyaltyDashboard', label: 'Loyalty', icon: Gift, permissions: [PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_SETTINGS_MANAGE, PERMISSIONS.LOYALTY_RULES_VIEW, PERMISSIONS.LOYALTY_RULES_MANAGE, PERMISSIONS.LOYALTY_REPORTS_VIEW, PERMISSIONS.LOYALTY_CAMPAIGNS_MANAGE, PERMISSIONS.LOYALTY_ADJUST_APPROVE, PERMISSIONS.LOYALTY_ALL] },
     ],
   },
   {
@@ -221,10 +239,23 @@ export function AppLayout() {
     navigate(APP_ROUTES.LOGIN, { replace: true });
   };
 
+  /**
+   * Both gates must pass. The permission gate alone was too coarse: a role granted one narrow
+   * permission inherited whole sections — DOCTOR holds reports.view for its own dashboard, which
+   * was enough to surface the Branch Manager command screen. `roles` is a whitelist; omitting it
+   * means "every role", still subject to permissions.
+   */
+  const allowedForRole = (entry) => !entry.roles || entry.roles.includes(user?.role);
+
   const visibleGroups = navGroups
+    .filter(allowedForRole)
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => !item.permissions || hasAnyPermission(user?.permissions, item.permissions)),
+      items: group.items.filter(
+        (item) =>
+          allowedForRole(item) &&
+          (!item.permissions || hasAnyPermission(user?.permissions, item.permissions))
+      ),
     }))
     .filter((group) => group.items.length > 0);
 

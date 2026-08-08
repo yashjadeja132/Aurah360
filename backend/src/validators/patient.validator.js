@@ -4,6 +4,7 @@ import {
   BLOOD_GROUP_LIST,
   MARITAL_STATUS_LIST,
   DOCUMENT_CATEGORY_LIST,
+  PATIENT_SOURCE_CATEGORY_LIST,
 } from '../enums/patient.js';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
@@ -33,6 +34,9 @@ const medicalSchema = z
     heightCm: z.coerce.number().min(0).max(300).optional().nullable(),
     weightKg: z.coerce.number().min(0).max(500).optional().nullable(),
     allergies: z.string().max(2000).optional().nullable(),
+    /** RX-SAFETY — "No Known Drug Allergies" positive confirmation (see Patient.model.js). */
+    noKnownDrugAllergies: z.coerce.boolean().optional(),
+    allergiesConfirmedAt: z.coerce.date().optional().nullable(),
     chronicDiseases: z.string().max(2000).optional().nullable(),
     pastMedicalHistory: z.string().max(4000).optional().nullable(),
     pastSurgicalHistory: z.string().max(4000).optional().nullable(),
@@ -83,6 +87,22 @@ export const createPatientSchema = z.object({
   primaryDoctorId: z.preprocess(emptyToNull, objectId.nullable().optional()),
   leadSourceId: z.preprocess(emptyToNull, objectId.nullable().optional()),
   referredBy: z.string().max(200).optional().nullable(),
+  /**
+   * PAT-003 / PAT-005 — `validate()` replaces req.body with the PARSED object, so a field the
+   * schema does not mention is not merely unvalidated, it is deleted. Patient.model.js has carried
+   * these columns (and toSafeObject() has echoed them back as null) all along, so every referral
+   * attribution and every guardian record posted to the API was silently discarded here.
+   */
+  sourceCategory: z.preprocess(
+    emptyToNull,
+    z.enum(PATIENT_SOURCE_CATEGORY_LIST).nullable().optional()
+  ),
+  campaign: z.string().max(200).optional().nullable().transform(emptyToNull),
+  isDependent: z.coerce.boolean().optional(),
+  guardianPatientId: z.preprocess(emptyToNull, objectId.nullable().optional()),
+  guardianName: z.string().max(120).optional().nullable().transform(emptyToNull),
+  guardianRelationship: z.string().max(80).optional().nullable().transform(emptyToNull),
+  guardianPhone: z.string().max(20).optional().nullable().transform(emptyToNull),
   registrationDate: z.coerce.date().optional(),
   isVip: z.boolean().optional(),
   isBlacklisted: z.boolean().optional(),
@@ -90,11 +110,27 @@ export const createPatientSchema = z.object({
   consent: consentSchema.optional(),
   notes: z.string().max(2000).optional().nullable(),
   patientCode: z.string().max(40).optional().nullable(),
+  /**
+   * PAT-DUP — deliberate override of server-side duplicate detection. Not a patient attribute:
+   * PatientService#create consumes it and never persists it. Families genuinely share a phone
+   * number, so the check must be overridable rather than a hard block.
+   */
+  allowDuplicate: z.coerce.boolean().optional(),
 });
 
 export const updatePatientSchema = createPatientSchema.partial();
 
 export const updateConsentSchema = consentSchema;
+
+/**
+ * PAT-005 — the ONLY schema in which `guardianVerified` is accepted, and it is bound to a
+ * staff-authenticated PATCH /patients/:id/guardian-verification. It is deliberately absent from
+ * create/update: `validate()` deletes unlisted keys, so a patient/guardian cannot self-assert it.
+ */
+export const guardianVerificationSchema = z.object({
+  verified: z.coerce.boolean(),
+  note: z.string().max(500).optional().nullable(),
+});
 
 export const listPatientQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
@@ -131,10 +167,15 @@ export const uploadDocumentSchema = z.object({
   source: z.string().max(30).optional(),
   relatedVisitId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
   branchId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
+  /** DOC-002 — id of the document this upload replaces; the service bumps `version` from it.
+   *  Must be listed here or `validate()` strips it before it reaches the service. */
+  supersedesDocumentId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
 });
 
 export const renameDocumentSchema = z.object({
   title: z.string().min(1).max(200).trim(),
+  /** DOC-003 — a metadata correction must be explainable, so the reason is recorded in the audit. */
+  reason: z.string().min(1).max(500).trim().optional(),
 });
 
 export const reviewDocumentSchema = z.object({

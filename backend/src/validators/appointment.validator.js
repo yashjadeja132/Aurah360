@@ -4,6 +4,8 @@ import {
   APPOINTMENT_TYPE_LIST,
   APPOINTMENT_SOURCE_LIST,
   APPOINTMENT_PRIORITY_LIST,
+  CANCELLATION_REASON,
+  CANCELLATION_REASON_LIST,
 } from '../enums/appointment.js';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
@@ -69,9 +71,36 @@ export const availableSlotsQuerySchema = z.object({
   branchId: objectId,
 });
 
-export const cancelAppointmentSchema = z.object({
-  reason: z.string().max(500).optional().nullable(),
-});
+/**
+ * A13 — cancellation reason is mandatory. Preferred shape is a controlled `reasonCode`
+ * enum plus optional free-text `reason`. Legacy callers that only send a free-text
+ * `reason` string stay supported (back-compat), but a bare cancel is rejected.
+ */
+export const cancelAppointmentSchema = z
+  .object({
+    reasonCode: z.enum(CANCELLATION_REASON_LIST).optional().nullable(),
+    reason: z.string().max(500).optional().nullable(),
+  })
+  .superRefine((val, ctx) => {
+    const note = typeof val.reason === 'string' ? val.reason.trim() : '';
+    if (!val.reasonCode) {
+      if (note.length < 3) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['reasonCode'],
+          message: 'Cancellation reason is required',
+        });
+      }
+      return;
+    }
+    if (val.reasonCode === CANCELLATION_REASON.OTHER && note.length < 3) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['reason'],
+        message: 'A note is required when the cancellation reason is OTHER',
+      });
+    }
+  });
 
 export const rescheduleAppointmentSchema = z.object({
   appointmentDate: z.coerce.date(),
@@ -102,8 +131,11 @@ export const followUpSchema = createAppointmentSchema.pick({
   serviceId: true,
 });
 
+// SEC-030 — doctorId is optional here because a DOCTOR's own id is resolved server-side from
+// their token; the controller still rejects the request when no doctor can be determined, so
+// non-doctor callers (reception etc.) must supply one exactly as before.
 export const doctorCalendarQuerySchema = z.object({
-  doctorId: objectId,
+  doctorId: objectId.optional(),
   from: z.coerce.date(),
   to: z.coerce.date(),
   branchId: objectId.optional(),

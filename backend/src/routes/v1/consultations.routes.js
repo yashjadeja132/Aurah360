@@ -24,6 +24,7 @@ import {
   createLabOrderSchema,
   updateLabOrderSchema,
   labOrderIdParamSchema,
+  labOrderReviewQueueQuerySchema,
 } from '../../validators/consultation.validator.js';
 
 const router = Router();
@@ -64,6 +65,15 @@ router.delete(
   requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
   validate({ params: consultationIdParamSchema }),
   controller.deleteTemplate
+);
+
+// A13 — cross-patient Report Review worklist. Must stay above '/:id' so 'lab-orders' is not
+// swallowed as a consultation id.
+router.get(
+  '/lab-orders/review-queue',
+  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
+  validate({ query: labOrderReviewQueueQuerySchema }),
+  controller.labOrderReviewQueue
 );
 
 router.get(
@@ -199,9 +209,11 @@ router.put(
   controller.saveVitals
 );
 
+// Diagnosis authoring is prescriber-only — deliberately NOT CONSULTATION_EDIT, which assistive
+// clinical roles (nurse) hold so they can record vitals and intake notes on the same screen.
 router.put(
   '/:id/diagnosis',
-  requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
+  requirePermission(PERMISSIONS.CONSULTATION_DIAGNOSE, PERMISSIONS.CONSULTATION_ALL),
   validate({ params: consultationIdParamSchema, body: diagnosisSchema }),
   controller.saveDiagnosis
 );

@@ -68,6 +68,10 @@ export const PERMISSIONS = Object.freeze({
   PRESCRIPTION_FINALIZE: 'prescription.finalize',
   PRESCRIPTION_PRINT: 'prescription.print',
   PRESCRIPTION_ALL: 'prescription.*',
+  /** RX-SAFETY — outside `prescription.*` on purpose, so the wildcard cannot confer it. */
+  PRESCRIPTION_SAFETY_OVERRIDE: 'prescription_safety.override',
+  PRESCRIPTION_SAFETY_RULES_VIEW: 'prescription_safety.rules_view',
+  PRESCRIPTION_SAFETY_RULES_MANAGE: 'prescription_safety.rules_manage',
   TREATMENT_PLAN_VIEW: 'treatment_plan.view',
   TREATMENT_PLAN_CREATE: 'treatment_plan.create',
   TREATMENT_PLAN_EDIT: 'treatment_plan.edit',
@@ -138,6 +142,7 @@ export const PERMISSIONS = Object.freeze({
   TREATMENT_HARD_STOP_OVERRIDE: 'treatment.hard_stop_override',
   BILLING_CASH_CLOSE: 'billing.cash_close',
   BILLING_CASH_CLOSE_APPROVE: 'billing.cash_close_approve',
+  BILLING_DISCOUNT_APPROVE: 'billing.discount_approve',
   BILLING_CREDIT_NOTE: 'billing.credit_note',
   INVENTORY_TRANSFER_REQUEST: 'inventory.transfer_request',
   INVENTORY_TRANSFER_APPROVE: 'inventory.transfer_approve',
@@ -162,6 +167,24 @@ export const PERMISSIONS = Object.freeze({
   LOYALTY_REPORTS_VIEW: 'loyalty.reports_view',
   LOYALTY_CAMPAIGNS_MANAGE: 'loyalty.campaigns_manage',
   LOYALTY_ALL: 'loyalty.*',
+});
+
+/**
+ * Canonical staff role codes, mirroring `backend/src/constants/roles.js`.
+ * The backend remains the authority on what a role may DO; this map exists so the
+ * UI can reason about roles by name instead of by scattered string literals.
+ */
+export const ROLES = Object.freeze({
+  OWNER: 'OWNER',
+  ADMIN: 'ADMIN',
+  BRANCH_MANAGER: 'BRANCH_MANAGER',
+  DOCTOR: 'DOCTOR',
+  RECEPTIONIST: 'RECEPTIONIST',
+  NURSE: 'NURSE',
+  TECHNICIAN: 'TECHNICIAN',
+  CASHIER: 'CASHIER',
+  PHARMACIST: 'PHARMACIST',
+  CRM_EXECUTIVE: 'CRM_EXECUTIVE',
 });
 
 export const ROLE_OPTIONS = Object.freeze([

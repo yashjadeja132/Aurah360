@@ -2,11 +2,21 @@ import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import PrescriptionService from '../services/PrescriptionService.js';
 import MedicineService from '../services/MedicineService.js';
+import PrescriptionSafetyService from '../services/PrescriptionSafetyService.js';
+import ApiError from '../libs/ApiError.js';
+import { scopedListQuery } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — the doctor-keyed BROWSE lists (`listByDoctor`, `recentMedicines`, `listTemplates`)
+ * resolve a DOCTOR's own doctorId server-side and refuse a doctorId outside the caller's scope.
+ * Prescription reads keyed to a patient/consultation/prescription id stay broad and audited so a
+ * covering doctor can see what a patient is already taking — withholding that is a safety risk.
+ */
 class PrescriptionController {
   constructor() {
     this.prescriptionService = new PrescriptionService();
     this.medicineService = new MedicineService();
+    this.safetyService = new PrescriptionSafetyService();
   }
 
   create = asyncHandler(async (req, res) => {
@@ -34,9 +44,12 @@ class PrescriptionController {
   });
 
   listByDoctor = asyncHandler(async (req, res) => {
-    const items = await this.prescriptionService.listByDoctor(req.query.doctorId, {
-      status: req.query.status,
-      limit: req.query.limit,
+    const scoped = await scopedListQuery(req, { branch: true, doctor: true });
+    if (!scoped.doctorId) throw ApiError.badRequest('doctorId is required');
+    const items = await this.prescriptionService.listByDoctor(scoped.doctorId, {
+      status: scoped.status,
+      limit: scoped.limit,
+      branchId: scoped.branchId || null,
     });
     return ApiResponse.success(res, { data: items });
   });
@@ -56,13 +69,44 @@ class PrescriptionController {
     return ApiResponse.success(res, { message: 'Draft prescription deleted' });
   });
 
+  /**
+   * RX-SAFETY — a blocking allergy/interaction alert makes this return 409
+   * PRESCRIPTION_SAFETY_BLOCKED. Pass `{ override: { reason } }` to proceed; that path requires
+   * PERMISSIONS.PRESCRIPTION_SAFETY_OVERRIDE and is audited.
+   */
   finalize = asyncHandler(async (req, res) => {
     const prescription = await this.prescriptionService.finalize(
       req.params.id,
+      req.body || {},
       req.auth.userId,
       req
     );
     return ApiResponse.success(res, { message: 'Prescription finalized', data: { prescription } });
+  });
+
+  safetyCheck = asyncHandler(async (req, res) => {
+    const safety = await this.prescriptionService.safetyCheck(req.params.id, req);
+    return ApiResponse.success(res, { message: 'Safety check evaluated', data: { safety } });
+  });
+
+  listInteractionRules = asyncHandler(async (req, res) => {
+    const data = await this.safetyService.listInteractionRules();
+    return ApiResponse.success(res, { message: 'Interaction rules retrieved', data });
+  });
+
+  createInteractionRule = asyncHandler(async (req, res) => {
+    const rule = await this.safetyService.createInteractionRule(req.body, req.auth.userId, req);
+    return ApiResponse.created(res, { message: 'Interaction rule created', data: { rule } });
+  });
+
+  updateInteractionRule = asyncHandler(async (req, res) => {
+    const rule = await this.safetyService.setInteractionRuleActive(
+      req.params.id,
+      req.body.isActive,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Interaction rule updated', data: { rule } });
   });
 
   duplicate = asyncHandler(async (req, res) => {
@@ -83,13 +127,19 @@ class PrescriptionController {
     return ApiResponse.success(res, { message: 'Print data ready', data });
   });
 
+  // Doctor-scoped only: these rows are already keyed to a single doctor, so a branch pin would
+  // add nothing while making an unassigned-branch account fail for no security benefit.
   recentMedicines = asyncHandler(async (req, res) => {
-    const items = await this.prescriptionService.recentMedicines(req.query.doctorId);
+    const scoped = await scopedListQuery(req, { branch: false, doctor: true });
+    if (!scoped.doctorId) throw ApiError.badRequest('doctorId is required');
+    const items = await this.prescriptionService.recentMedicines(scoped.doctorId);
     return ApiResponse.success(res, { data: items });
   });
 
   listTemplates = asyncHandler(async (req, res) => {
-    const items = await this.prescriptionService.listTemplates(req.query.doctorId);
+    const scoped = await scopedListQuery(req, { branch: false, doctor: true });
+    if (!scoped.doctorId) throw ApiError.badRequest('doctorId is required');
+    const items = await this.prescriptionService.listTemplates(scoped.doctorId);
     return ApiResponse.success(res, { data: items });
   });
 

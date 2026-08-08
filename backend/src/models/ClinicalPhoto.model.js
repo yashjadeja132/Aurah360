@@ -36,10 +36,18 @@ const clinicalPhotoSchema = new mongoose.Schema(
     lighting: { type: String, default: null },
     photographerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     captureDevice: { type: String, default: null },
+    /**
+     * IMG-002 before/after pairing. Set at capture and now READ when listing, so the comparison
+     * view can resolve a photo's counterpart instead of asking the doctor to re-find it by eye.
+     */
     pairedPhotoId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalPhoto', default: null },
-    /** IMG-004 — annotation is a derivative; original stays immutable. */
-    isAnnotatedDerivative: { type: Boolean, default: false },
-    originalPhotoId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalPhoto', default: null },
+    /*
+     * `isAnnotatedDerivative` and `originalPhotoId` (IMG-004) were removed. They had zero read and
+     * zero write sites anywhere in the codebase — non-destructive annotation was never built, and
+     * carrying its schema implied a capability that does not exist. Re-add them together with the
+     * annotation endpoint if that feature is picked up; a field with no behaviour behind it is a
+     * claim the system cannot honour.
+     */
     /** IMG-005 — release/export are separate, explicit permissions; hidden by default. */
     patientVisibility: { type: String, enum: PATIENT_VISIBILITY_LIST, default: PATIENT_VISIBILITY.HIDDEN },
     releasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -83,8 +91,6 @@ clinicalPhotoSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     photographerId: this.photographerId ? this.photographerId.toString() : null,
     captureDevice: this.captureDevice,
     pairedPhotoId: this.pairedPhotoId ? this.pairedPhotoId.toString() : null,
-    isAnnotatedDerivative: this.isAnnotatedDerivative,
-    originalPhotoId: this.originalPhotoId ? this.originalPhotoId.toString() : null,
     patientVisibility: this.patientVisibility,
     releasedBy: this.releasedBy ? this.releasedBy.toString() : null,
     releasedAt: this.releasedAt,

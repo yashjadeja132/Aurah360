@@ -81,7 +81,39 @@
     "yourRole": "Your role",
     "permissions": "Effective permissions",
     "branch": "Branch",
-    "session": "Session"
+    "session": "Session",
+    "thereFallback": "there",
+    "accessScope": "Access scope for this login",
+    "grantedToAccount": "Granted to this account",
+    "allBranches": "All branches",
+    "currentScope": "Current working scope",
+    "secure": "Secure",
+    "sessionHint": "Protected by an encrypted session",
+    "open": "Open",
+    "quickLinks": {
+      "patients": {
+        "label": "Patients",
+        "description": "Register patients and open their records."
+      },
+      "appointments": {
+        "label": "Appointments",
+        "description": "Book, reschedule and track visits."
+      },
+      "billing": {
+        "label": "Billing",
+        "description": "Raise invoices and collect payments."
+      },
+      "staff": {
+        "label": "Staff",
+        "description": "Manage staff accounts and roles."
+      }
+    },
+    "yourAccountDescription": "Update your profile details and sign-in password.",
+    "viewProfile": "View profile",
+    "changePassword": "Change password",
+    "needSomethingElse": "Need something else?",
+    "useSidebar": "Use the sidebar to reach every module.",
+    "sidebarGroupsDescription": "Modules are grouped as Overview, Front Desk, Clinical, Operations, Growth and Administration."
   },
   "crm": {
     "leadStatus": {
@@ -432,6 +464,7 @@
       "diagnosis": "Diagnosis",
       "photos": "Photos",
       "followup": "Follow-up",
+      "labs": "Lab orders",
       "ai": "AI assist"
     },
     "statusLabels": {
@@ -516,6 +549,32 @@
         "AFTER": "After",
         "BODY_MAP": "Body map",
         "OTHER": "Other"
+      }
+    },
+    "labs": {
+      "title": "Lab orders",
+      "hint": "Order investigations, record incoming results, then mark them doctor reviewed.",
+      "testName": "Test name",
+      "provider": "Lab / provider",
+      "dueDate": "Due date",
+      "reason": "Clinical reason",
+      "order": "Order test",
+      "loadFailed": "Failed to load lab orders",
+      "emptyTitle": "No lab orders yet",
+      "emptyDescription": "Investigations ordered for this consultation will be tracked here.",
+      "noProvider": "No provider",
+      "due": "Due",
+      "resultReceivedAt": "Result received",
+      "reviewedAt": "Reviewed",
+      "reviewCommentPlaceholder": "Review comment (optional)",
+      "markResultReceived": "Mark result received",
+      "markReviewed": "Mark doctor reviewed",
+      "cancel": "Cancel order",
+      "statusLabels": {
+        "ORDERED": "Ordered",
+        "RESULT_RECEIVED": "Result received",
+        "REVIEWED": "Doctor reviewed",
+        "CANCELLED": "Cancelled"
       }
     },
     "ai": {
@@ -639,6 +698,11 @@
     "transfer": {
       "title": "Transfer queue",
       "reasonPlaceholder": "Reason (required)"
+    },
+    "moveUp": {
+      "title": "Move up in queue",
+      "reasonRequired": "A reason is required for a priority jump.",
+      "reasonPlaceholder": "Reason (min 3 characters)"
     },
     "checkIn": {
       "button": "Check-in",
@@ -1026,6 +1090,12 @@
       "noShow": "No-show",
       "complete": "Complete",
       "reschedule": "Reschedule",
+      "cancelTitle": "Cancel appointment",
+      "cancelReasonRequired": "A cancellation reason is mandatory.",
+      "cancelReasonSelect": "Select a reason…",
+      "cancelNotePlaceholder": "Describe the reason (required)",
+      "confirmCancel": "Confirm cancellation",
+      "cancelFailed": "Cancel failed",
       "cancelReasonPrompt": "Cancellation reason",
       "deleteConfirm": "Soft-delete this appointment?",
       "details": "Details",
@@ -1508,6 +1578,111 @@
       "addSupplier": "Add supplier",
       "loading": "Loading…",
       "gst": "GST"
+    }
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page you are looking for does not exist or has been moved.",
+    "backToDashboard": "Back to dashboard"
+  },
+  "users": {
+    "list": {
+      "title": "Staff",
+      "subtitle": "Manage staff logins, roles and access across the clinic.",
+      "addStaff": "Add staff",
+      "loadFailed": "Could not load the staff list.",
+      "activateSuccess": "{{name}} activated",
+      "activateFailed": "Could not activate this staff member.",
+      "deactivateSuccess": "{{name}} deactivated",
+      "deactivateFailed": "Could not deactivate this staff member."
+    },
+    "table": {
+      "nameHeader": "Name",
+      "roleHeader": "Role",
+      "employeeIdHeader": "Employee ID",
+      "statusHeader": "Status",
+      "actionsHeader": "Actions",
+      "active": "Active",
+      "inactive": "Inactive",
+      "view": "View",
+      "edit": "Edit",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "emptyTitle": "No staff found",
+      "emptyDescription": "Change the filters or add a new staff member to get started."
+    },
+    "filters": {
+      "searchPlaceholder": "Search by name, email or employee ID",
+      "allRoles": "All roles",
+      "ownerRole": "Owner",
+      "allStatuses": "All statuses",
+      "active": "Active",
+      "inactive": "Inactive",
+      "sortNewest": "Newest first",
+      "sortFirstName": "First name",
+      "sortLastName": "Last name",
+      "sortRole": "Role",
+      "sortLastLogin": "Last login"
+    },
+    "form": {
+      "firstNameLabel": "First name",
+      "lastNameLabel": "Last name",
+      "emailLabel": "Email",
+      "phoneLabel": "Phone",
+      "passwordLabel": "Password",
+      "roleLabel": "Role",
+      "genderLabel": "Gender",
+      "selectPlaceholder": "Select",
+      "employeeIdLabel": "Employee ID",
+      "departmentLabel": "Department",
+      "designationLabel": "Designation",
+      "saving": "Saving…",
+      "createStaff": "Create staff",
+      "saveChanges": "Save changes"
+    },
+    "create": {
+      "title": "Add staff",
+      "subtitle": "Create a login for a new staff member.",
+      "detailsTitle": "Staff details",
+      "detailsDescription": "Personal details, role and sign-in credentials.",
+      "success": "Staff member created",
+      "failed": "Could not create the staff member."
+    },
+    "edit": {
+      "title": "Edit staff",
+      "detailsTitle": "Staff details",
+      "success": "Staff member updated",
+      "failed": "Could not update the staff member.",
+      "notFound": "Staff member not found."
+    },
+    "detail": {
+      "backToStaff": "Staff",
+      "edit": "Edit",
+      "resetPassword": "Reset password",
+      "delete": "Remove",
+      "profileTitle": "Profile",
+      "roleLabel": "Role",
+      "statusLabel": "Status",
+      "phoneLabel": "Phone",
+      "employeeIdLabel": "Employee ID",
+      "departmentLabel": "Department",
+      "designationLabel": "Designation",
+      "genderLabel": "Gender",
+      "lastLoginLabel": "Last login",
+      "permissionsTitle": "Permissions",
+      "noPermissions": "No permissions assigned.",
+      "refresh": "Refresh",
+      "resetPasswordTitle": "Reset password",
+      "resetPasswordDescription": "Set a new sign-in password for {{name}}.",
+      "newPasswordLabel": "New password",
+      "cancel": "Cancel",
+      "reset": "Reset password",
+      "resetSuccess": "Password reset successfully",
+      "resetFailed": "Could not reset the password.",
+      "confirmDelete": "Remove this staff member? Their login will be deactivated.",
+      "deleteSuccess": "Staff member removed",
+      "deleteFailed": "Could not remove the staff member.",
+      "notFound": "Staff member not found."
     }
   }
 }

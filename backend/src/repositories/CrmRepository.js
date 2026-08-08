@@ -13,9 +13,13 @@ export class LeadRepository extends BaseRepository {
     return this.model.findOne({ _id: id, deletedAt: null }).exec();
   }
 
-  async findByIdPopulated(id) {
+  /** SEC-030 — `branchId` (when non-null) narrows the lookup itself, so an out-of-branch lead
+   *  simply "does not exist" for this caller. */
+  async findByIdPopulated(id, { branchId = null } = {}) {
+    const filter = { _id: id, deletedAt: null };
+    if (branchId) filter.branchId = branchId;
     return this.model
-      .findOne({ _id: id, deletedAt: null })
+      .findOne(filter)
       .populate('branchId', 'name displayName branchCode')
       .populate('assignedTo', 'firstName lastName role email')
       .populate('sourceId', 'name code type')
@@ -125,9 +129,20 @@ export class LeadTaskRepository extends BaseRepository {
     return this.model.findOne({ _id: id, deletedAt: null }).exec();
   }
 
-  async list({ leadId, assignedTo, status, limit = 50, skip = 0 } = {}) {
+  async list({ leadIdsIn = null, leadId, assignedTo, status, limit = 50, skip = 0 } = {}) {
     const filter = { deletedAt: null };
-    if (leadId) filter.leadId = leadId;
+    // SEC-030 — `leadIdsIn` is the branch scope expressed as lead ids (a task has no branch of
+    // its own). An empty array is a real answer — "your branch has no leads" — and must filter
+    // everything out, so it is applied whenever the caller passed an array at all.
+    if (Array.isArray(leadIdsIn)) filter.leadId = { $in: leadIdsIn };
+    // A client-supplied leadId may only NARROW within the scope, never replace it: combining
+    // both with $and means `?leadId=<other branch's lead>` yields nothing rather than that
+    // lead's tasks.
+    if (leadId) {
+      filter.leadId = Array.isArray(leadIdsIn)
+        ? { $in: leadIdsIn.filter((id) => String(id) === String(leadId)) }
+        : leadId;
+    }
     if (assignedTo) filter.assignedTo = assignedTo;
     if (status) filter.status = status;
     const [items, total] = await Promise.all([

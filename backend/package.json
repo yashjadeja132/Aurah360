@@ -16,6 +16,10 @@
     "smoke:module1": "node src/scripts/smoke-module1.js",
     "smoke:module19": "node src/scripts/smoke-module19.js",
     "smoke:regression": "node src/scripts/smoke-regression.js",
+    "smoke:file-access": "node src/scripts/smoke-file-access.js",
+    "smoke:loyalty-billing": "node src/scripts/smoke-loyalty-billing.js",
+    "smoke:loyalty-admin": "node src/scripts/smoke-loyalty-admin.js",
+    "smoke:discount-approval": "node src/scripts/smoke-discount-approval.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "echo \"Add ESLint when ready\""
@@ -24,6 +28,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.34.5",
     "compression": "^1.7.5",

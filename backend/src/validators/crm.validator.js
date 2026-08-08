@@ -78,6 +78,8 @@ export const convertSchema = z.object({
   dateOfBirth: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   remarks: z.string().optional().nullable(),
+  /** PAT-DUP — lead conversion creates a Patient, so it needs the same deliberate override. */
+  allowDuplicate: z.coerce.boolean().optional(),
 });
 
 export const createTaskSchema = z.object({

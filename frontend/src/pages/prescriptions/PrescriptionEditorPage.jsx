@@ -8,10 +8,12 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PrescriptionItemEditor } from '@/modules/prescriptions/components/PrescriptionItemEditor';
+import { PrescriptionSafetyPanel } from '@/modules/prescriptions/components/PrescriptionSafetyPanel';
 import {
   usePrescription,
   useUpdatePrescription,
   useFinalizePrescription,
+  usePrescriptionSafety,
   useCreateTemplate,
   useRecentMedicines,
 } from '@/modules/prescriptions/hooks/usePrescriptions';
@@ -30,6 +32,8 @@ export default function PrescriptionEditorPage() {
 
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState([]);
+  const [overrideReason, setOverrideReason] = useState('');
+  const { data: safety, refetch: refetchSafety } = usePrescriptionSafety(id);
 
   useEffect(() => {
     if (rx) {
@@ -55,6 +59,8 @@ export default function PrescriptionEditorPage() {
       </p>
     );
   }
+
+  const safetyBlocked = safety?.status === 'BLOCKED';
 
   const payloadItems = () =>
     items.map((it) => ({
@@ -101,15 +107,32 @@ export default function PrescriptionEditorPage() {
               <PermissionGuard
                 permissions={[PERMISSIONS.PRESCRIPTION_FINALIZE, PERMISSIONS.PRESCRIPTION_ALL]}
               >
+                {/* RX-SAFETY — the server is the gate; this only reflects it and collects the
+                    override reason. A blocked prescription cannot be finalized without one. */}
                 <Button
-                  disabled={finalize.isPending || items.length === 0}
+                  variant={safetyBlocked ? 'destructive' : 'default'}
+                  disabled={
+                    finalize.isPending ||
+                    items.length === 0 ||
+                    (safetyBlocked && (!safety?.canOverride || overrideReason.trim().length < 10))
+                  }
                   onClick={async () => {
                     await update.mutateAsync({ notes, items: payloadItems() });
-                    await finalize.mutateAsync();
+                    const fresh = await refetchSafety();
+                    const stillBlocked = fresh.data?.status === 'BLOCKED';
+                    await finalize.mutateAsync(
+                      stillBlocked && overrideReason.trim()
+                        ? { override: { reason: overrideReason.trim() } }
+                        : {}
+                    );
+                    setOverrideReason('');
+                    refetchSafety();
                   }}
                 >
                   <Check className="h-4 w-4" />
-                  {t('prescriptions.editor.finalize', 'Finalize')}
+                  {safetyBlocked
+                    ? t('prescriptions.editor.finalizeOverride', 'Override and finalize')
+                    : t('prescriptions.editor.finalize', 'Finalize')}
                 </Button>
               </PermissionGuard>
             </>
@@ -179,6 +202,13 @@ export default function PrescriptionEditorPage() {
           </div>
         </div>
       )}
+
+      <PrescriptionSafetyPanel
+        safety={safety}
+        overrideReason={overrideReason}
+        onOverrideReasonChange={setOverrideReason}
+        readOnly={readOnly}
+      />
 
       <div className="space-y-2">
         <Label>{t('prescriptions.editor.notesLabel', 'Notes')}</Label>

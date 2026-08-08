@@ -22,6 +22,9 @@ export const treatmentSessionsApi = {
   checkIn(id) {
     return api.post(`/treatment-sessions/${id}/check-in`).then((res) => res.data);
   },
+  preflight(id) {
+    return api.get(`/treatment-sessions/${id}/preflight`).then((res) => res.data);
+  },
   start(id, payload = {}) {
     return api.post(`/treatment-sessions/${id}/start`, payload).then((res) => res.data);
   },

@@ -29,7 +29,29 @@ class DoctorBlockedSlotService {
     return rows.map((r) => r.toSafeObject());
   }
 
-  async create(payload, actorId, req = null) {
+  /**
+   * SEC-030 — `DoctorBlockedSlot.branchId` is NULLABLE and null means "blocked at every branch".
+   * For a branch-scoped caller that is an organisation-wide write, so it is not theirs to make or
+   * to edit: their blocks are pinned to their own branch, and a null-branch (or other-branch)
+   * block reads as NOT FOUND rather than 403.
+   */
+  #assertInScope(row, scopeBranchId) {
+    if (!scopeBranchId || !row) return row;
+    if (String(row.branchId ?? '') !== String(scopeBranchId)) {
+      throw ApiError.notFound('Blocked slot not found');
+    }
+    return row;
+  }
+
+  async create(payload, actorId, req = null, { branchId: scopeBranchId = null } = {}) {
+    if (scopeBranchId) {
+      if (payload.branchId && String(payload.branchId) !== String(scopeBranchId)) {
+        throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+      }
+      // An omitted branchId would otherwise persist as null = "blocked at EVERY branch", which is
+      // an organisation-wide effect a branch-scoped user cannot authorise. Pin it to their branch.
+      payload = { ...payload, branchId: scopeBranchId };
+    }
     await this.#assertDoctor(payload.doctorId);
     if (payload.branchId) {
       const branch = await this.branchRepository.findByIdNotDeleted(payload.branchId);
@@ -67,9 +89,13 @@ class DoctorBlockedSlotService {
     return row.toSafeObject();
   }
 
-  async update(id, payload, actorId, req = null) {
+  async update(id, payload, actorId, req = null, { branchId: scopeBranchId = null } = {}) {
     const existing = await this.blockedRepository.findByIdNotDeleted(id);
     if (!existing) throw ApiError.notFound('Blocked slot not found');
+    this.#assertInScope(existing, scopeBranchId);
+    if (scopeBranchId && payload.branchId && String(payload.branchId) !== String(scopeBranchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
 
     const startAt = payload.startAt ? new Date(payload.startAt) : existing.startAt;
     const endAt = payload.endAt ? new Date(payload.endAt) : existing.endAt;
@@ -101,9 +127,10 @@ class DoctorBlockedSlotService {
     return row.toSafeObject();
   }
 
-  async softDelete(id, actorId, req = null) {
+  async softDelete(id, actorId, req = null, { branchId: scopeBranchId = null } = {}) {
     const existing = await this.blockedRepository.findByIdNotDeleted(id);
     if (!existing) throw ApiError.notFound('Blocked slot not found');
+    this.#assertInScope(existing, scopeBranchId);
 
     await this.blockedRepository.updateById(id, {
       deletedAt: new Date(),

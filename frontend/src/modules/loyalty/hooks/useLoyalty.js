@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { loyaltyApi } from '../api/loyaltyApi';
@@ -28,7 +29,11 @@ export const LOYALTY_QUERY_KEYS = {
   PATIENT_LEDGER: (patientId, params) => ['loyalty', 'patient-ledger', patientId, params],
   PATIENT_TIER: (patientId) => ['loyalty', 'patient-tier', patientId],
   DASHBOARD_SUMMARY: (params) => ['loyalty', 'dashboard-summary', params],
+  RULE_PREVIEW: (params) => ['loyalty', 'rule-preview', params],
 };
+
+/** Keystrokes in the rule editor must not fire a request each — see useLoyaltyPreviewCalculation. */
+const PREVIEW_DEBOUNCE_MS = 400;
 
 // --- Settings ---
 
@@ -263,8 +268,36 @@ export function useLoyaltyDashboardSummary(params = {}) {
   });
 }
 
-// --- Client-side preview calculator (see loyaltyApi.getPreviewCalculation) ---
+// --- Rule preview calculator (server-side dry run, LOY-002) ---
 
-export function useLoyaltyPreviewCalculation(ruleDraft, amountInr) {
-  return loyaltyApi.getPreviewCalculation(ruleDraft, amountInr);
+/**
+ * Debounced dry-run preview of a rule-version draft. The editor calls this on every keystroke,
+ * so the draft is held behind a 400ms debounce (same setTimeout-in-useEffect approach as
+ * MedicineSearchInput.jsx / useConsultations.js autosave) and only the settled value becomes part
+ * of the query key. Failures surface as `isError` — never thrown — so the rule editor keeps
+ * rendering while the request is in flight or rejected.
+ */
+export function useLoyaltyPreviewCalculation(ruleDraft, amountInr, simulate = {}) {
+  const [settled, setSettled] = useState(() => ({ draft: ruleDraft, amountInr }));
+  const key = JSON.stringify([ruleDraft, amountInr]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled({ draft: ruleDraft, amountInr }), PREVIEW_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // Keyed on the serialised draft so an object identity change alone does not restart the timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const enabled = Boolean(settled.draft?.formulaType) && Number.isFinite(Number(settled.amountInr));
+
+  return useQuery({
+    queryKey: LOYALTY_QUERY_KEYS.RULE_PREVIEW(settled),
+    queryFn: async () =>
+      (await loyaltyApi.getPreviewCalculation(settled.draft, Number(settled.amountInr) || 0, simulate)).data,
+    enabled,
+    // A dry run for a given draft+amount is deterministic, and the editor re-mounts often.
+    staleTime: 60_000,
+    retry: false,
+    placeholderData: (prev) => prev,
+  });
 }

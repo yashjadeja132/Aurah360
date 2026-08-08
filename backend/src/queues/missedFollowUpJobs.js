@@ -1,6 +1,4 @@
-import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
-import { attachDeadLetterHandler } from './dlq.js';
+import { getQueue, QUEUE_NAMES } from './connection.js';
 import logger from '../libs/logger.js';
 import Consultation from '../models/Consultation.model.js';
 import Appointment from '../models/Appointment.model.js';
@@ -178,36 +176,21 @@ export async function ensureMissedFollowUpScan() {
   }
 }
 
-let worker = null;
-
-export function startMissedFollowUpWorker() {
-  if (worker) return worker;
-
-  worker = new Worker(
-    QUEUE_NAMES.CRM,
-    async (job) => {
-      if (job.name === MISSED_FOLLOW_UP_JOBS.SCAN) {
-        const result = await scanForMissedFollowUps();
-        logger.info('Missed follow-up scan job', result);
-        return result;
-      }
-      return { ignored: true };
-    },
-    { connection: getBullConnection() }
-  );
-
-  attachDeadLetterHandler(worker, QUEUE_NAMES.CRM);
-
-  ensureMissedFollowUpScan().catch(() => {});
-
-  logger.info('Missed follow-up BullMQ worker started');
-  return worker;
-}
+/** Registers onto the shared CRM queue worker — see queues/composeWorker.js. */
+export const missedFollowUpHandlerModule = {
+  jobNames: [MISSED_FOLLOW_UP_JOBS.SCAN],
+  ensure: ensureMissedFollowUpScan,
+  handle: async () => {
+    const result = await scanForMissedFollowUps();
+    logger.info('Missed follow-up scan job', result);
+    return result;
+  },
+};
 
 export default {
   scanForMissedFollowUps,
   ensureMissedFollowUpScan,
-  startMissedFollowUpWorker,
+  missedFollowUpHandlerModule,
   MISSED_FOLLOW_UP_JOBS,
   MISSED_FOLLOW_UP_PURPOSE,
 };

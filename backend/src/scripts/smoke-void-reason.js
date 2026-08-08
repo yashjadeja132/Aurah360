@@ -7,9 +7,10 @@ import Branch from '../models/Branch.model.js';
 import Patient from '../models/Patient.model.js';
 import AuditLog from '../models/AuditLog.model.js';
 import BillingService from '../services/BillingService.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_void_reason'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_void_reason'));
   await mongoose.connection.dropDatabase();
 
   const branch = await Branch.create({

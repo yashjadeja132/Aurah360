@@ -7,13 +7,14 @@ import Notification from '../models/Notification.model.js';
 import TreatmentSafetyService from '../services/TreatmentSafetyService.js';
 import { registerAdverseEventAlertListeners } from '../notifications/adverseEventAlertListener.js';
 import { ROLES } from '../constants/roles.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_adverse_event_alert'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_adverse_event_alert'));
   await mongoose.connection.dropDatabase();
 
   // Register the listener exactly as server.js does at startup.

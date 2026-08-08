@@ -33,6 +33,18 @@ export function useDoctorTreatmentPlans(doctorId, params = {}) {
   });
 }
 
+/** All treatment plans for one patient — GET /treatment-plans/patient/:patientId. */
+export function usePatientTreatmentPlans(patientId) {
+  return useQuery({
+    queryKey: QUERY_KEYS.TREATMENT_PLAN_PATIENT_LIST(patientId),
+    queryFn: async () => {
+      const res = await treatmentPlansApi.listByPatient(patientId);
+      return res.data || [];
+    },
+    enabled: Boolean(patientId),
+  });
+}
+
 export function useProtocols(params = {}) {
   return useQuery({
     queryKey: QUERY_KEYS.TREATMENT_PROTOCOLS(params),

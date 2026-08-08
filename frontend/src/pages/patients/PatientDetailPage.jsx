@@ -10,6 +10,11 @@ import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PatientDocumentsPanel } from '@/modules/patients/components/PatientDocumentsPanel';
 import { PatientTimelinePanel } from '@/modules/patients/components/PatientTimelinePanel';
 import { PatientLoyaltyPanel } from '@/modules/patients/components/PatientLoyaltyPanel';
+import { PatientBillingPanel } from '@/modules/patients/components/PatientBillingPanel';
+import { PatientAppointmentsPanel } from '@/modules/patients/components/PatientAppointmentsPanel';
+import { PatientPrescriptionsPanel } from '@/modules/patients/components/PatientPrescriptionsPanel';
+import { PatientTreatmentsPanel } from '@/modules/patients/components/PatientTreatmentsPanel';
+import { PatientPhotosPanel } from '@/modules/patients/components/PatientPhotosPanel';
 import { HandoffNotePanel } from '@/modules/handoff/components/HandoffNotePanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { hasAnyPermission } from '@/utils/permissions';
@@ -30,12 +35,49 @@ export default function PatientDetailPage() {
     PERMISSIONS.LOYALTY_BALANCE_VIEW,
     PERMISSIONS.LOYALTY_ALL,
   ]);
+  const canViewAppointments = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.APPOINTMENTS_VIEW,
+    PERMISSIONS.APPOINTMENTS_ALL,
+  ]);
+  const canViewBilling = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.BILLING_VIEW,
+    PERMISSIONS.BILLING_ALL,
+  ]);
+  const canViewPrescriptions = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.PRESCRIPTION_VIEW,
+    PERMISSIONS.PRESCRIPTION_ALL,
+  ]);
+  const canViewTreatments = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.TREATMENT_PLAN_VIEW,
+    PERMISSIONS.TREATMENT_PLAN_ALL,
+  ]);
+  // Clinical photos live on the consultation record and are read through the consultation API,
+  // so the photos tab is gated on the same permission that endpoint requires.
+  const canViewPhotos = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.CONSULTATION_VIEW,
+    PERMISSIONS.CONSULTATION_ALL,
+  ]);
 
   const TABS = [
     { id: 'overview', label: t('patients.detail.tabs.overview', 'Overview') },
     { id: 'medical', label: t('patients.detail.tabs.medical', 'Medical') },
     { id: 'documents', label: t('patients.detail.tabs.documents', 'Documents') },
     { id: 'timeline', label: t('patients.detail.tabs.timeline', 'Timeline') },
+    ...(canViewAppointments
+      ? [{ id: 'appointments', label: t('patients.detail.tabs.appointments', 'Appointments') }]
+      : []),
+    ...(canViewBilling
+      ? [{ id: 'billing', label: t('patients.detail.tabs.billing', 'Billing') }]
+      : []),
+    ...(canViewPrescriptions
+      ? [{ id: 'prescriptions', label: t('patients.detail.tabs.prescriptions', 'Prescriptions') }]
+      : []),
+    ...(canViewTreatments
+      ? [{ id: 'treatments', label: t('patients.detail.tabs.treatments', 'Treatments') }]
+      : []),
+    ...(canViewPhotos
+      ? [{ id: 'photos', label: t('patients.detail.tabs.photos', 'Photos') }]
+      : []),
     { id: 'handoff', label: t('patients.detail.tabs.handoff', 'Handoff notes') },
     ...(canViewLoyalty
       ? [{ id: 'loyalty', label: t('patients.detail.tabs.loyalty', 'Loyalty') }]
@@ -205,6 +247,11 @@ export default function PatientDetailPage() {
 
       {tab === 'documents' && <PatientDocumentsPanel patientId={id} />}
       {tab === 'timeline' && <PatientTimelinePanel patientId={id} />}
+      {tab === 'appointments' && canViewAppointments && <PatientAppointmentsPanel patientId={id} />}
+      {tab === 'billing' && canViewBilling && <PatientBillingPanel patientId={id} />}
+      {tab === 'prescriptions' && canViewPrescriptions && <PatientPrescriptionsPanel patientId={id} />}
+      {tab === 'treatments' && canViewTreatments && <PatientTreatmentsPanel patientId={id} />}
+      {tab === 'photos' && canViewPhotos && <PatientPhotosPanel patientId={id} />}
       {tab === 'handoff' && <HandoffNotePanel patientId={id} branchId={patient.primaryBranchId} />}
       {tab === 'loyalty' && canViewLoyalty && <PatientLoyaltyPanel patientId={id} />}
     </section>

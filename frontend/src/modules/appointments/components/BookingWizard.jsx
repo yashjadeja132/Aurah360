@@ -1,20 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useBranchList } from '@/modules/branches/hooks/useBranches';
-import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
-import { useMasterActive } from '@/modules/masters/hooks/useMasters';
-import { usePatientList } from '@/modules/patients/hooks/usePatients';
+import { usePatientDetail } from '@/modules/patients/hooks/usePatients';
+import { useBookingSubmit } from '../hooks/useBookingSubmit';
+// 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
+// and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
+import { todayKey } from '@/utils/date';
 import {
-  useAvailableAppointmentSlots,
-  useAppointmentMutations,
-} from '../hooks/useAppointments';
-import { cn } from '@/utils/cn';
+  BranchPicker,
+  DoctorPicker,
+  ServicePicker,
+  SlotPicker,
+  PatientPicker,
+} from './bookingPickers';
 
 export function BookingWizard({ onCreated, initialPatientId = '' }) {
   const { t } = useTranslation();
@@ -30,34 +30,22 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
   const [branchId, setBranchId] = useState('');
   const [doctorId, setDoctorId] = useState('');
   const [serviceId, setServiceId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayKey());
   const [slot, setSlot] = useState(null);
   const [patientId, setPatientId] = useState(initialPatientId);
   const [patientSearch, setPatientSearch] = useState('');
   const [reasonForVisit, setReasonForVisit] = useState('');
   const [notes, setNotes] = useState('');
 
-  const { data: branchesData } = useBranchList({ limit: 50 });
-  const { data: doctorsData } = useDoctorList({
-    limit: 50,
-    isActive: 'true',
-    ...(branchId ? { branchId } : {}),
-  });
-  const { data: services = [] } = useMasterActive('services');
-  const { data: patientsData } = usePatientList({
-    search: patientSearch,
-    limit: 10,
-    page: 1,
-  });
-  const slotParams = useMemo(
-    () => ({ doctorId, date, branchId }),
-    [doctorId, date, branchId]
-  );
-  const { data: availability, isFetching: loadingSlots } = useAvailableAppointmentSlots(
-    slotParams,
-    step >= 3 && Boolean(doctorId && branchId && date)
-  );
-  const { create } = useAppointmentMutations();
+  const { submit, isPending } = useBookingSubmit(onCreated);
+  // Pre-filled patient (e.g. recall worklist "Booked" hand-off) auto-satisfies the patient step.
+  const skipPatientStep = Boolean(initialPatientId);
+  const PATIENT_STEP = 4;
+  const { data: prefilledPatient } = usePatientDetail(initialPatientId || undefined);
+  const goNext = () =>
+    setStep((s) => (skipPatientStep && s === PATIENT_STEP - 1 ? s + 2 : s + 1));
+  const goBack = () =>
+    setStep((s) => (skipPatientStep && s === PATIENT_STEP + 1 ? s - 2 : s - 1));
 
   useEffect(() => {
     setSlot(null);
@@ -72,117 +60,61 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
     return true;
   };
 
-  const submit = async () => {
-    try {
-      const res = await create.mutateAsync({
-        branchId,
-        doctorId,
-        serviceId,
-        patientId,
-        appointmentDate: date,
-        startTime: slot.start,
-        endTime: slot.end,
-        reasonForVisit: reasonForVisit || null,
-        notes: notes || null,
-        source: 'WALK_IN',
-        appointmentType: 'CONSULTATION',
-      });
-      toast.success(t('appointments.wizard.toastBooked', 'Booked {{number}}', { number: res.data.appointment.appointmentNumber }));
-      onCreated?.(res.data.appointment);
-    } catch (err) {
-      toast.error(err?.response?.data?.message || t('appointments.wizard.bookingFailed', 'Booking failed — slot may be unavailable'));
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
         {STEPS.map((label, i) => (
           <Badge
             key={label}
-            variant={i === step ? 'default' : i < step ? 'success' : 'secondary'}
+            variant={
+              i === step
+                ? 'default'
+                : i < step || (skipPatientStep && i === PATIENT_STEP)
+                  ? 'success'
+                  : 'secondary'
+            }
           >
             {i + 1}. {label}
           </Badge>
         ))}
       </div>
 
-      {step === 0 && (
-        <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-          <option value="">{t('appointments.wizard.selectBranch', 'Select branch')}</option>
-          {(branchesData?.items || []).map((b) => (
-            <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
-          ))}
-        </Select>
+      {skipPatientStep && (
+        <p className="text-sm text-muted-foreground">
+          {t('appointments.wizard.prefilledPatient', 'Booking for {{patient}} — patient step pre-filled.', {
+            patient: prefilledPatient
+              ? `${prefilledPatient.mrn} · ${prefilledPatient.fullName}`
+              : t('appointments.wizard.selectedPatient', 'selected patient'),
+          })}
+        </p>
       )}
+
+      {step === 0 && <BranchPicker value={branchId} onChange={setBranchId} />}
 
       {step === 1 && (
-        <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
-          <option value="">{t('appointments.wizard.selectDoctor', 'Select doctor')}</option>
-          {(doctorsData?.items || []).map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.user?.fullName || d.doctorCode} ({d.doctorCode})
-            </option>
-          ))}
-        </Select>
+        <DoctorPicker value={doctorId} onChange={setDoctorId} branchId={branchId} />
       )}
 
-      {step === 2 && (
-        <Select value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
-          <option value="">{t('appointments.wizard.selectService', 'Select service')}</option>
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </Select>
-      )}
+      {step === 2 && <ServicePicker value={serviceId} onChange={setServiceId} />}
 
       {step === 3 && (
-        <div className="space-y-3">
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          {loadingSlots ? (
-            <Skeleton className="h-24 w-full" />
-          ) : !availability?.available ? (
-            <p className="text-sm text-muted-foreground">
-              {t('appointments.wizard.noSlots', 'No slots — {{reason}}', { reason: availability?.reason || t('appointments.wizard.unavailable', 'unavailable') })}
-            </p>
-          ) : (
-            <div className="flex max-h-56 flex-wrap gap-2 overflow-y-auto">
-              {availability.slots.map((s) => (
-                <button
-                  key={`${s.start}-${s.end}`}
-                  type="button"
-                  onClick={() => setSlot(s)}
-                  className={cn(
-                    'rounded-md border px-2.5 py-1 font-mono text-xs',
-                    slot?.start === s.start
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'bg-secondary'
-                  )}
-                >
-                  {s.start}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <SlotPicker
+          branchId={branchId}
+          doctorId={doctorId}
+          date={date}
+          onDateChange={setDate}
+          slot={slot}
+          onSlotChange={setSlot}
+        />
       )}
 
       {step === 4 && (
-        <div className="space-y-3">
-          <Input
-            placeholder={t('appointments.wizard.searchPatient', 'Search patient MRN / name / phone')}
-            value={patientSearch}
-            onChange={(e) => setPatientSearch(e.target.value)}
-          />
-          <Select value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-            <option value="">{t('appointments.wizard.selectPatient', 'Select patient')}</option>
-            {(patientsData?.items || []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.mrn} · {p.fullName} · {p.mobile}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <PatientPicker
+          value={patientId}
+          onChange={setPatientId}
+          search={patientSearch}
+          onSearchChange={setPatientSearch}
+        />
       )}
 
       {step === 5 && (
@@ -209,17 +141,32 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
           type="button"
           variant="outline"
           disabled={step === 0}
-          onClick={() => setStep((s) => s - 1)}
+          onClick={goBack}
         >
           {t('common.back', 'Back')}
         </Button>
         {step < STEPS.length - 1 ? (
-          <Button type="button" disabled={!canNext()} onClick={() => setStep((s) => s + 1)}>
+          <Button type="button" disabled={!canNext()} onClick={goNext}>
             {t('common.next', 'Next')}
           </Button>
         ) : (
-          <Button type="button" disabled={create.isPending || !canNext()} onClick={submit}>
-            {create.isPending ? t('appointments.wizard.booking', 'Booking…') : t('appointments.wizard.createAppointment', 'Create appointment')}
+          <Button
+            type="button"
+            disabled={isPending || !canNext()}
+            onClick={() =>
+              submit({
+                branchId,
+                doctorId,
+                serviceId,
+                patientId,
+                date,
+                slot,
+                reasonForVisit,
+                notes,
+              })
+            }
+          >
+            {isPending ? t('appointments.wizard.booking', 'Booking…') : t('appointments.wizard.createAppointment', 'Create appointment')}
           </Button>
         )}
       </div>

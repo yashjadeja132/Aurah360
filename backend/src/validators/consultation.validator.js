@@ -85,8 +85,11 @@ export const templateCreateSchema = z.object({
   isShared: z.boolean().optional(),
 });
 
+// SEC-030 — optional: a DOCTOR's own id is resolved server-side from their token. The
+// controller still requires a resolvable doctorId, so other roles must supply one as before.
 export const doctorListQuerySchema = z.object({
-  doctorId: objectId,
+  doctorId: objectId.optional(),
+  branchId: objectId.optional(),
   status: z.enum(CONSULTATION_STATUS_LIST).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -123,5 +126,15 @@ export const updateLabOrderSchema = z.object({
 });
 
 export const labOrderIdParamSchema = z.object({ labOrderId: objectId });
+
+/** A13 — cross-patient Report Review worklist filters. */
+export const labOrderReviewQueueQuerySchema = z.object({
+  status: z.enum(['ORDERED', 'RESULT_RECEIVED', 'REVIEWED', 'CANCELLED']).optional(),
+  patientId: objectId.optional(),
+  doctorId: objectId.optional(),
+  branchId: objectId.optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
 
 export { objectId, emptyToNull };

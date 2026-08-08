@@ -15,6 +15,7 @@ import AuditLog from '../models/AuditLog.model.js';
 import { requirePermissionOrBreakGlass } from '../middlewares/permission.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function runMiddleware(mw, req) {
   return new Promise((resolve, reject) => {
@@ -27,7 +28,7 @@ function runMiddleware(mw, req) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_breakglass'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_breakglass'));
   await mongoose.connection.dropDatabase();
 
   const userId = new mongoose.Types.ObjectId();

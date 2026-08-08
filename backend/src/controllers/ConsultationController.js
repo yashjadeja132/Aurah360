@@ -2,7 +2,21 @@ import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import ConsultationService from '../services/ConsultationService.js';
 import ConsultationClinicalService from '../services/ConsultationClinicalService.js';
+import ApiError from '../libs/ApiError.js';
+import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — `listByDoctor` and `labOrderReviewQueue` are BROWSE lists and are row-scoped to the
+ * caller's branch and, for a DOCTOR, to their own doctorId. Everything keyed to one consultation
+ * or one patient (`getWorkspace`, `getById`, `listByPatient`, `patientSummary`, photos,
+ * SOAP versions) is deliberately left broad and audited: a doctor covering a colleague
+ * must be able to open the record in front of them (the model break-glass assumes).
+ *
+ * LAB ORDERS are the exception to that leniency and ARE row-scoped (`resolveRecordScope`): they
+ * are addressed by an opaque id with no patient context in the URL, so leaving them broad meant
+ * any holder of `consultation.view` could walk another branch's results by id (IDOR). Out-of-scope
+ * ids answer 404 rather than 403 so the endpoint never confirms that the record exists.
+ */
 class ConsultationController {
   constructor() {
     this.consultationService = new ConsultationService();
@@ -30,9 +44,12 @@ class ConsultationController {
   });
 
   listByDoctor = asyncHandler(async (req, res) => {
-    const items = await this.consultationService.listByDoctor(req.query.doctorId, {
-      status: req.query.status,
-      limit: req.query.limit,
+    const scoped = await scopedListQuery(req, { branch: true, doctor: true });
+    if (!scoped.doctorId) throw ApiError.badRequest('doctorId is required');
+    const items = await this.consultationService.listByDoctor(scoped.doctorId, {
+      status: scoped.status,
+      limit: scoped.limit,
+      branchId: scoped.branchId || null,
     });
     return ApiResponse.success(res, { data: items });
   });
@@ -83,13 +100,33 @@ class ConsultationController {
   });
 
   createLabOrder = asyncHandler(async (req, res) => {
-    const order = await this.consultationService.createLabOrder(req.params.id, req.body, req.auth.userId, req);
+    const order = await this.consultationService.createLabOrder(
+      req.params.id,
+      req.body,
+      req.auth.userId,
+      req,
+      await resolveRecordScope(req)
+    );
     return ApiResponse.created(res, { message: 'Lab order created', data: { order } });
   });
 
   listLabOrders = asyncHandler(async (req, res) => {
-    const orders = await this.consultationService.listLabOrders(req.params.id);
+    const orders = await this.consultationService.listLabOrders(
+      req.params.id,
+      await resolveRecordScope(req)
+    );
     return ApiResponse.success(res, { message: 'Lab orders retrieved', data: { orders } });
+  });
+
+  labOrderReviewQueue = asyncHandler(async (req, res) => {
+    const result = await this.consultationService.listLabOrderReviewQueue(
+      await scopedListQuery(req, { branch: true, doctor: true })
+    );
+    return ApiResponse.success(res, {
+      message: 'Report review queue retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
   });
 
   updateLabOrder = asyncHandler(async (req, res) => {
@@ -97,7 +134,8 @@ class ConsultationController {
       req.params.labOrderId,
       req.body,
       req.auth.userId,
-      req
+      req,
+      await resolveRecordScope(req)
     );
     return ApiResponse.success(res, { message: 'Lab order updated', data: { order } });
   });

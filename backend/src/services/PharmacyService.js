@@ -121,9 +121,24 @@ class PharmacyService {
     };
   }
 
-  async getDispense(id) {
+  /**
+   * SEC-030 — a Dispense belongs to the branch that handed the medicine over, so it is scoped on
+   * `branchId`. Out of scope answers NOT FOUND (never 403), so an enumerating caller learns
+   * nothing about which dispense ids exist in other branches.
+   */
+  #assertDispenseInScope(doc, branchId) {
+    if (!branchId || !doc) return doc;
+    const docBranch = doc.branchId?._id || doc.branchId;
+    if (String(docBranch) !== String(branchId)) {
+      throw ApiError.notFound('Dispense not found');
+    }
+    return doc;
+  }
+
+  async getDispense(id, { branchId = null } = {}) {
     const doc = await this.dispenseRepo.findByIdPopulated(id);
     if (!doc) throw ApiError.notFound('Dispense not found');
+    this.#assertDispenseInScope(doc, branchId);
     return this.#mapDispense(doc);
   }
 
@@ -143,9 +158,15 @@ class PharmacyService {
     };
   }
 
-  async startDispense(payload, actorId, req = null) {
+  async startDispense(payload, actorId, req = null, { branchId = null } = {}) {
     const rx = await this.prescriptionRepo.findByIdNotDeleted(payload.prescriptionId);
     if (!rx) throw ApiError.notFound('Prescription not found');
+    // The dispense will be booked against `payload.branchId || rx.branchId`; a branch-scoped
+    // pharmacist may only ever book one against their own branch's stock.
+    const targetBranch = payload.branchId || rx.branchId;
+    if (branchId && String(targetBranch) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
     if (rx.status !== PRESCRIPTION_STATUS.FINALIZED) {
       throw ApiError.forbidden('Only finalized prescriptions can be dispensed');
     }
@@ -192,9 +213,10 @@ class PharmacyService {
    * Dispense items — full or partial.
    * items: [{ itemId|prescriptionItemIndex, inventoryItemId, batchNumber, quantity }]
    */
-  async dispenseItems(id, payload, actorId, req = null) {
+  async dispenseItems(id, payload, actorId, req = null, { branchId = null } = {}) {
     const dispense = await this.dispenseRepo.findById(id);
     if (!dispense || dispense.deletedAt) throw ApiError.notFound('Dispense not found');
+    this.#assertDispenseInScope(dispense, branchId);
     if (dispense.status === DISPENSE_STATUS.COMPLETED) {
       throw ApiError.forbidden('Cannot edit completed dispense');
     }
@@ -317,9 +339,10 @@ class PharmacyService {
     return this.getDispense(id);
   }
 
-  async cancelDispense(id, actorId, req = null) {
+  async cancelDispense(id, actorId, req = null, { branchId = null } = {}) {
     const dispense = await this.dispenseRepo.findById(id);
     if (!dispense || dispense.deletedAt) throw ApiError.notFound('Dispense not found');
+    this.#assertDispenseInScope(dispense, branchId);
     if (dispense.status === DISPENSE_STATUS.COMPLETED) {
       throw ApiError.forbidden('Cannot cancel completed dispense');
     }

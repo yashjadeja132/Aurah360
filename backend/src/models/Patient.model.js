@@ -2,7 +2,11 @@ import mongoose from 'mongoose';
 import { randomUUID } from 'crypto';
 import { ENTITY_STATUS } from '../constants/index.js';
 import { GENDER_LIST } from '../enums/gender.js';
-import { BLOOD_GROUP_LIST, MARITAL_STATUS_LIST } from '../enums/patient.js';
+import {
+  BLOOD_GROUP_LIST,
+  MARITAL_STATUS_LIST,
+  PATIENT_SOURCE_CATEGORY_LIST,
+} from '../enums/patient.js';
 
 const addressSchema = new mongoose.Schema(
   {
@@ -30,6 +34,15 @@ const medicalInfoSchema = new mongoose.Schema(
     heightCm: { type: Number, min: 0, default: null },
     weightKg: { type: Number, min: 0, default: null },
     allergies: { type: String, default: null },
+    /**
+     * RX-SAFETY — positive confirmation that the allergy history was TAKEN and is empty.
+     * Without this, `allergies: null` is ambiguous: it may mean "no allergies" or "nobody asked".
+     * The prescribing safety check treats an empty history with noKnownDrugAllergies=false as
+     * UNCONFIRMED and raises an advisory alert instead of implying "safe".
+     */
+    noKnownDrugAllergies: { type: Boolean, default: false },
+    allergiesConfirmedAt: { type: Date, default: null },
+    allergiesConfirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     chronicDiseases: { type: String, default: null },
     pastMedicalHistory: { type: String, default: null },
     pastSurgicalHistory: { type: String, default: null },
@@ -120,19 +133,7 @@ const patientSchema = new mongoose.Schema(
     /** Source/referral taxonomy (PAT-003, §5.1, §12.5) */
     sourceCategory: {
       type: String,
-      enum: [
-        'GOOGLE',
-        'WEBSITE',
-        'FACEBOOK_AD',
-        'INSTAGRAM_AD',
-        'WHATSAPP',
-        'WALK_IN',
-        'PERSON_REFERRAL',
-        'PATIENT_REFERRAL',
-        'DOCTOR_REFERRAL',
-        'EVENT',
-        'OTHER',
-      ],
+      enum: [...PATIENT_SOURCE_CATEGORY_LIST, null],
       default: null,
     },
     campaign: { type: String, default: null, trim: true },

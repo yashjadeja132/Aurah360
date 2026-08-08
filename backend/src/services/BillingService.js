@@ -6,6 +6,10 @@ import ConsultationRepository from '../repositories/ConsultationRepository.js';
 import PatientRepository from '../repositories/PatientRepository.js';
 import BranchRepository from '../repositories/BranchRepository.js';
 import AuditService from './AuditService.js';
+import FeeScheduleService from './FeeScheduleService.js';
+import OrganizationService from './OrganizationService.js';
+import InventoryItem from '../models/InventoryItem.model.js';
+import { priceInvoice, taxBreakdown } from '../helpers/invoiceTax.helper.js';
 import { eventBus } from '../events/eventBus.js';
 import {
   generateInvoiceNumber,
@@ -14,13 +18,19 @@ import {
   generateCreditNoteNumber,
 } from '../helpers/invoiceNumber.helper.js';
 import {
+  AGING_BUCKET,
+  AGING_BUCKET_LIST,
+  AGING_BUCKET_MAX_DAYS,
+  agingBucketForDays,
   BILLING_EVENTS,
+  DISCOUNT_APPROVAL_STATUS,
   DISCOUNT_TYPE,
   INVOICE_ITEM_TYPE,
   INVOICE_STATUS,
   PAYMENT_METHOD,
   PAYMENT_RECORD_STATUS,
   PAYMENT_STATUS,
+  paymentMethodRequiresReference,
 } from '../enums/billing.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import CreditNote from '../models/CreditNote.model.js';
@@ -43,6 +53,8 @@ class BillingService {
     this.branchRepository = new BranchRepository();
     this.auditService = new AuditService();
     this.loyaltyLedgerService = new LoyaltyLedgerService();
+    this.feeScheduleService = new FeeScheduleService();
+    this.organizationService = new OrganizationService();
   }
 
   #round(n) {
@@ -111,6 +123,9 @@ class BillingService {
       safe.total > 0 ? Math.min(100, this.#round((safe.paidAmount / safe.total) * 100)) : 0;
     safe.paymentProgress = progress;
     safe.outstanding = safe.balanceAmount > 0 && safe.status === INVOICE_STATUS.FINALIZED;
+    // A.5 — surfaced so the billing UI can warn about (and collect a reason for) an
+    // above-threshold discount live, without hardcoding the server's threshold.
+    safe.discountThresholdPercent = config.billing.discountApprovalThresholdPercent;
     return safe;
   }
 
@@ -129,8 +144,9 @@ class BillingService {
       const quantity = Number(raw.quantity) > 0 ? Number(raw.quantity) : 1;
       const unitPrice = Math.max(0, Number(raw.unitPrice) || 0);
       const discount = Math.max(0, Number(raw.discount) || 0);
-      const line = Math.max(0, quantity * unitPrice - discount);
-      const tax = Math.max(0, Number(raw.tax) || 0);
+      // NOTE: `raw.tax` / `raw.taxPercent` / `raw.total` are deliberately DROPPED. Tax is derived
+      // server-side from the item or service master (#resolveLineTaxRates) — a client that could
+      // name its own GST rate could under-declare tax on any invoice.
       return {
         itemType: raw.itemType || INVOICE_ITEM_TYPE.SERVICE,
         referenceId: raw.referenceId || null,
@@ -138,34 +154,118 @@ class BillingService {
         quantity,
         unitPrice,
         discount,
-        tax,
-        total: this.#round(line + tax),
       };
     });
   }
 
   /**
-   * `loyaltyDiscountInr` (LOY-005) is the INR value of an applied loyalty-points redemption —
-   * it is added to the discount total exactly like any other discount, so it flows through
-   * the SAME #computeDiscountApproval percent-of-subtotal check below (a large-enough point
-   * redemption still requires approval, same as a manual discount would).
+   * GST rate resolution, in strict precedence order, per line:
+   *
+   *   1. GST disabled for the branch  → 0% on everything.
+   *   2. MEDICINE / CONSUMABLES with a referenceId → `InventoryItem.gstPercent` (+ `hsnCode`).
+   *      This is the item master's own rate: pharmacy items are commonly 5% or 12% where
+   *      services are 18%, and that difference is the entire point.
+   *   3. CONSULTATION / SERVICE / PACKAGE with a referenceId → the effective `FeeSchedule`
+   *      row's `taxPercent`, when that row sets one (it is nullable, meaning "no opinion").
+   *   4. Otherwise → the branch's `settings.taxPercent` (default 18), i.e. the old behaviour,
+   *      which stays correct for ad-hoc lines that reference no master record.
+   *
+   * The client's input is never consulted at any step.
    */
-  #computeTotals(items, { discountType, discountValue, taxPercent, loyaltyDiscountInr = 0 }) {
-    const subtotal = this.#round(items.reduce((s, i) => s + i.quantity * i.unitPrice, 0));
-    const itemDiscounts = this.#round(items.reduce((s, i) => s + (i.discount || 0), 0));
-    let headerDiscount = 0;
-    const dv = Math.max(0, Number(discountValue) || 0);
-    if (discountType === DISCOUNT_TYPE.PERCENTAGE) {
-      headerDiscount = this.#round((subtotal * Math.min(dv, 100)) / 100);
-    } else {
-      headerDiscount = this.#round(dv);
+  async #resolveLineTaxRates(items, { branchId, doctorId = null, gstEnabled, branchTaxPercent, date }) {
+    if (!gstEnabled) {
+      return items.map((item) => ({ ...item, taxPercent: 0, hsnCode: null }));
     }
-    const loyaltyDiscount = Math.max(0, this.#round(Number(loyaltyDiscountInr) || 0));
-    const discount = this.#round(itemDiscounts + headerDiscount + loyaltyDiscount);
-    const taxable = Math.max(0, subtotal - discount);
-    const tax = this.#round((taxable * (Number(taxPercent) || 0)) / 100);
-    const total = this.#round(taxable + tax);
-    return { subtotal, discount, tax, total };
+
+    return Promise.all(
+      items.map(async (item) => {
+        const type = item.itemType;
+        if (item.referenceId
+          && (type === INVOICE_ITEM_TYPE.MEDICINE || type === INVOICE_ITEM_TYPE.CONSUMABLES)) {
+          const inventoryItem = await InventoryItem.findById(item.referenceId)
+            .select('gstPercent hsnCode')
+            .lean()
+            .exec();
+          if (inventoryItem && inventoryItem.gstPercent != null) {
+            return {
+              ...item,
+              taxPercent: Number(inventoryItem.gstPercent),
+              hsnCode: inventoryItem.hsnCode || null,
+            };
+          }
+        }
+
+        if (item.referenceId
+          && (type === INVOICE_ITEM_TYPE.SERVICE
+            || type === INVOICE_ITEM_TYPE.CONSULTATION
+            || type === INVOICE_ITEM_TYPE.PACKAGE)) {
+          const fee = await this.feeScheduleService.resolvePrice(item.referenceId, {
+            branchId,
+            doctorId,
+            date,
+          });
+          if (fee && fee.taxPercent != null) {
+            return { ...item, taxPercent: Number(fee.taxPercent), hsnCode: item.hsnCode || null };
+          }
+        }
+
+        return { ...item, taxPercent: Number(branchTaxPercent) || 0, hsnCode: item.hsnCode || null };
+      })
+    );
+  }
+
+  /**
+   * Re-price stored invoice lines WITHOUT re-resolving rates from the masters.
+   *
+   * Used by the loyalty apply/remove paths, which change only the discount. Rates must come from
+   * what is on the invoice (`item.taxPercent`), because a later edit to an item master must not
+   * change an invoice that was already priced. Lines written before per-line GST existed have no
+   * rate; they fall back to the invoice's header rate, which is precisely what they were charged.
+   */
+  #repriceStoredItems(invoice, { loyaltyDiscountInr = 0 } = {}) {
+    const items = (invoice.items || []).map((item) => ({
+      itemType: item.itemType,
+      referenceId: item.referenceId || null,
+      description: item.description,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: item.discount || 0,
+      taxPercent: item.taxPercent ?? invoice.taxPercent ?? 0,
+      hsnCode: item.hsnCode ?? null,
+    }));
+    return priceInvoice(items, {
+      discountType: invoice.discountType,
+      discountValue: invoice.discountValue,
+      loyaltyDiscountInr,
+    });
+  }
+
+  /** Strip the priced result into the exact field set persisted on `Invoice.items`. */
+  #toInvoiceItems(pricedItems) {
+    return pricedItems.map((item) => ({
+      itemType: item.itemType,
+      referenceId: item.referenceId || null,
+      description: item.description,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: item.discount,
+      taxPercent: item.taxPercent,
+      hsnCode: item.hsnCode ?? null,
+      taxableAmount: item.taxableAmount,
+      tax: item.tax,
+      total: item.total,
+    }));
+  }
+
+  /** The invoice-level money fields derived from a priced result. */
+  #totalsOf(priced) {
+    return {
+      subtotal: priced.subtotal,
+      discount: priced.discount,
+      tax: priced.tax,
+      total: priced.total,
+      taxPercent: priced.taxPercent,
+    };
   }
 
   /** LOY-005 — the redeemable base for cap calculations excludes categories the loyalty
@@ -206,17 +306,77 @@ class BillingService {
   }
 
   /**
-   * Discount approval is computed server-side from the actual totals — callers cannot
-   * set discountApprovalRequired/discountApproved directly via create/updateDraft payloads,
-   * which would otherwise let anyone bypass the threshold check in finalize().
+   * A.5 — the STAFF-GRANTED discount only: line-item discounts plus the header discount.
+   *
+   * A loyalty redemption (LOY-005) is deliberately excluded. It is not a revenue concession
+   * granted at a cashier's discretion — it is a system-computed conversion of points the patient
+   * already earned, and it carries its own independent controls (minimumPointsToRedeem,
+   * redemptionStepPoints, per-invoice caps, available-balance validation and a full ledger audit
+   * trail in LoyaltyLedgerService). Routing it through the manual-discount approval queue would
+   * double-govern it and, worse, block a cashier from letting a patient spend their own points
+   * until a manager intervenes. Approval therefore gates only what a human chose to give away.
    */
-  #computeDiscountApproval(subtotal, discount, previouslyApproved = false, discountChanged = true) {
+  #manualDiscountTotal(items = [], { discountType, discountValue } = {}) {
+    const subtotal = this.#round(
+      items.reduce((s, i) => s + (i.quantity || 0) * (i.unitPrice || 0), 0)
+    );
+    const itemDiscounts = this.#round(items.reduce((s, i) => s + (i.discount || 0), 0));
+    const dv = Math.max(0, Number(discountValue) || 0);
+    const headerDiscount =
+      discountType === DISCOUNT_TYPE.PERCENTAGE
+        ? this.#round((subtotal * Math.min(dv, 100)) / 100)
+        : this.#round(dv);
+    return this.#round(itemDiscounts + headerDiscount);
+  }
+
+  /**
+   * Discount approval is computed server-side from the actual totals — callers cannot
+   * set discountApprovalStatus/discountApprovalRequired/discountApproved directly via
+   * create/updateDraft payloads, which would otherwise let anyone bypass the finalize() gate.
+   *
+   * An existing APPROVED/REJECTED decision survives an edit only while the manual discount
+   * amount is unchanged; changing the amount is a new ask and returns the invoice to
+   * PENDING_APPROVAL (so an approver can never be bound by a decision on different numbers).
+   */
+  #computeDiscountApproval(subtotal, manualDiscount, previousStatus = null, previousManualDiscount = null) {
     const threshold = config.billing.discountApprovalThresholdPercent;
-    const percent = this.#discountPercentOf(subtotal, discount);
-    const approvalRequired = percent > threshold;
-    // If the discount changed since it was last approved, approval no longer applies.
-    const approved = approvalRequired && !discountChanged ? previouslyApproved : false;
-    return { discountApprovalRequired: approvalRequired, discountApproved: approved };
+    const percent = this.#discountPercentOf(subtotal, manualDiscount);
+    if (percent <= threshold) {
+      return {
+        discountApprovalStatus: DISCOUNT_APPROVAL_STATUS.NOT_REQUIRED,
+        discountApprovalRequired: false,
+        discountApproved: false,
+      };
+    }
+    const unchanged =
+      previousManualDiscount !== null &&
+      Math.abs(Number(previousManualDiscount) - Number(manualDiscount)) < 0.005;
+    const decided =
+      previousStatus === DISCOUNT_APPROVAL_STATUS.APPROVED ||
+      previousStatus === DISCOUNT_APPROVAL_STATUS.REJECTED;
+    const status =
+      unchanged && decided ? previousStatus : DISCOUNT_APPROVAL_STATUS.PENDING_APPROVAL;
+    return {
+      discountApprovalStatus: status,
+      discountApprovalRequired: true,
+      discountApproved: status === DISCOUNT_APPROVAL_STATUS.APPROVED,
+    };
+  }
+
+  /**
+   * A.5 — a manual discount above the threshold is a control event, so it must carry the
+   * requester's justification. Enforced here (not only in the validator) so every caller path,
+   * including internal ones, captures it.
+   */
+  #assertDiscountReason(subtotal, manualDiscount, reason) {
+    const threshold = config.billing.discountApprovalThresholdPercent;
+    if (this.#discountPercentOf(subtotal, manualDiscount) <= threshold) return null;
+    if (!String(reason ?? '').trim()) {
+      throw ApiError.badRequest(
+        `A discount reason is required when the discount exceeds ${threshold}% of the subtotal`
+      );
+    }
+    return String(reason).trim();
   }
 
   #paymentStatusFrom(paidAmount, total, status) {
@@ -278,31 +438,37 @@ class BillingService {
     if (!patient || patient.deletedAt) throw ApiError.notFound('Patient not found');
 
     const { taxPercent, gstEnabled } = await this.#taxPercentForBranch(payload.branchId);
-    const items = this.#normalizeItems(payload.items || []);
+    const normalized = this.#normalizeItems(payload.items || []);
     const discountType = payload.discountType || DISCOUNT_TYPE.FLAT;
     const discountValue = payload.discountValue || 0;
-    const totals = this.#computeTotals(items, {
-      discountType,
-      discountValue,
-      taxPercent: payload.taxPercent ?? taxPercent,
-    });
+    const invoiceDate = payload.invoiceDate ? new Date(payload.invoiceDate) : new Date();
 
-    // Recompute item tax proportionally for display (GST placeholder)
-    const taxableBase = Math.max(0, totals.subtotal - totals.discount);
-    const itemsWithTax = items.map((item) => {
-      const line = item.quantity * item.unitPrice - (item.discount || 0);
-      const share = taxableBase > 0 ? line / taxableBase : 0;
-      const tax = this.#round(totals.tax * share);
-      return { ...item, tax, total: this.#round(line + tax) };
+    // GST is derived from the item/service master — `payload.taxPercent` and any per-line `tax`
+    // the caller sent are ignored entirely.
+    const rated = await this.#resolveLineTaxRates(normalized, {
+      branchId: payload.branchId,
+      doctorId: payload.doctorId || null,
+      gstEnabled,
+      branchTaxPercent: taxPercent,
+      date: invoiceDate,
     });
+    const priced = priceInvoice(rated, { discountType, discountValue });
+    const totals = this.#totalsOf(priced);
+    const itemsWithTax = this.#toInvoiceItems(priced.items);
+    const items = normalized;
 
-    // discountApprovalRequired/discountApproved are computed server-side from the
-    // actual totals — the caller cannot set these directly (would bypass the threshold check).
-    const discountApproval = this.#computeDiscountApproval(totals.subtotal, totals.discount);
+    // The discount-approval fields are computed server-side from the actual totals — the caller
+    // cannot set these directly (would bypass the finalize() threshold gate).
+    const manualDiscount = this.#manualDiscountTotal(items, { discountType, discountValue });
+    // Mandatory above the threshold; still recorded when volunteered below it.
+    const discountReason =
+      this.#assertDiscountReason(totals.subtotal, manualDiscount, payload.discountReason) ??
+      (String(payload.discountReason ?? '').trim() || null);
+    const discountApproval = this.#computeDiscountApproval(totals.subtotal, manualDiscount);
 
     const invoice = await this.invoiceRepository.create({
       invoiceNumber: await generateInvoiceNumber(),
-      invoiceDate: payload.invoiceDate ? new Date(payload.invoiceDate) : new Date(),
+      invoiceDate,
       patientId: payload.patientId,
       branchId: payload.branchId,
       doctorId: payload.doctorId || null,
@@ -316,9 +482,8 @@ class BillingService {
       ...totals,
       discountType,
       discountValue,
-      discountApprovalRequired: discountApproval.discountApprovalRequired,
-      discountApproved: discountApproval.discountApproved,
-      taxPercent: payload.taxPercent ?? taxPercent,
+      ...discountApproval,
+      discountReason,
       gstPlaceholder: gstEnabled,
       paidAmount: 0,
       balanceAmount: totals.total,
@@ -428,49 +593,60 @@ class BillingService {
     if (!invoice) throw ApiError.notFound('Invoice not found');
     this.#assertDraft(invoice);
 
-    const { taxPercent } = await this.#taxPercentForBranch(invoice.branchId);
-    const items = payload.items ? this.#normalizeItems(payload.items) : invoice.items;
+    const { taxPercent, gstEnabled } = await this.#taxPercentForBranch(invoice.branchId);
     const discountType = payload.discountType ?? invoice.discountType ?? DISCOUNT_TYPE.FLAT;
     const discountValue = payload.discountValue ?? invoice.discountValue ?? 0;
-    const effectiveTax = payload.taxPercent ?? invoice.taxPercent ?? taxPercent;
     // Preserve any already-applied loyalty redemption's INR value across draft edits so
     // editing items/discount doesn't silently drop it from the discount-approval check.
     const loyaltyDiscountInr = invoice.loyaltyRedemption?.valueInr || 0;
-    const totals = this.#computeTotals(
-      items.map((i) => ({
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-        discount: i.discount || 0,
-      })),
-      { discountType, discountValue, taxPercent: effectiveTax, loyaltyDiscountInr }
-    );
 
-    const taxableBase = Math.max(0, totals.subtotal - totals.discount);
-    const itemsWithTax = items.map((item) => {
-      const line = item.quantity * item.unitPrice - (item.discount || 0);
-      const share = taxableBase > 0 ? line / taxableBase : 0;
-      const tax = this.#round(totals.tax * share);
-      return {
-        itemType: item.itemType,
-        referenceId: item.referenceId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discount: item.discount || 0,
-        tax,
-        total: this.#round(line + tax),
-      };
+    // New lines are re-rated from the masters; untouched lines keep the rate already on the
+    // invoice, so an edit to the notes never silently re-prices what was already agreed.
+    const items = payload.items ? this.#normalizeItems(payload.items) : invoice.items;
+    const rated = payload.items
+      ? await this.#resolveLineTaxRates(items, {
+          branchId: invoice.branchId,
+          doctorId: payload.doctorId ?? invoice.doctorId ?? null,
+          gstEnabled,
+          branchTaxPercent: taxPercent,
+          date: invoice.invoiceDate || new Date(),
+        })
+      : items.map((i) => ({
+          itemType: i.itemType,
+          referenceId: i.referenceId || null,
+          description: i.description,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          discount: i.discount || 0,
+          taxPercent: i.taxPercent ?? invoice.taxPercent ?? 0,
+          hsnCode: i.hsnCode ?? null,
+        }));
+    const priced = priceInvoice(rated, { discountType, discountValue, loyaltyDiscountInr });
+    const totals = this.#totalsOf(priced);
+    const effectiveTax = totals.taxPercent;
+
+    const itemsWithTax = this.#toInvoiceItems(priced.items);
+
+    // The discount-approval fields are computed server-side — the caller cannot set them
+    // directly via the payload (would bypass the finalize() threshold gate).
+    const manualDiscount = this.#manualDiscountTotal(items, { discountType, discountValue });
+    const previousManualDiscount = this.#manualDiscountTotal(invoice.items, {
+      discountType: invoice.discountType,
+      discountValue: invoice.discountValue,
     });
-
-    // discountApprovalRequired/discountApproved are computed server-side — the caller
-    // cannot set these directly via the payload (would bypass the threshold check in finalize()).
-    const discountChanged =
-      discountType !== invoice.discountType || Number(discountValue) !== Number(invoice.discountValue || 0);
+    // An edit may keep an already-captured reason; it only has to be supplied afresh when the
+    // invoice crosses the threshold without one on file. Dropping below the threshold does not
+    // erase the reason already recorded — only an explicit new value replaces it.
+    const suppliedReason =
+      payload.discountReason !== undefined ? payload.discountReason : invoice.discountReason;
+    const discountReason =
+      this.#assertDiscountReason(totals.subtotal, manualDiscount, suppliedReason) ??
+      (String(suppliedReason ?? '').trim() || null);
     const discountApproval = this.#computeDiscountApproval(
       totals.subtotal,
-      totals.discount,
-      invoice.discountApproved,
-      discountChanged
+      manualDiscount,
+      invoice.discountApprovalStatus,
+      previousManualDiscount
     );
 
     const updates = {
@@ -482,13 +658,20 @@ class BillingService {
       balanceAmount: totals.total,
       paidAmount: 0,
       paymentStatus: PAYMENT_STATUS.PENDING,
-      discountApprovalRequired: discountApproval.discountApprovalRequired,
-      discountApproved: discountApproval.discountApproved,
+      ...discountApproval,
+      discountReason,
       updatedBy: actorId,
       $push: {
         timeline: { at: new Date(), action: 'UPDATED', note: 'Draft updated', actorId },
       },
     };
+    // A superseded request carries no decision: clear the approver's note/stamp whenever the
+    // invoice is back to PENDING_APPROVAL or no longer needs approval at all.
+    if (discountApproval.discountApprovalStatus !== invoice.discountApprovalStatus) {
+      updates.discountDecisionNote = null;
+      updates.discountApprovalDecidedBy = null;
+      updates.discountApprovalDecidedAt = null;
+    }
     if (payload.notes !== undefined) updates.notes = payload.notes;
     if (payload.doctorId !== undefined) updates.doctorId = payload.doctorId;
     if (payload.consultationId !== undefined) updates.consultationId = payload.consultationId;
@@ -588,21 +771,34 @@ class BillingService {
   }
 
   /**
-   * LOY-005 — apply a loyalty-points redemption to a DRAFT invoice as a discount. The
-   * discount INR value flows through the SAME #computeDiscountApproval threshold check as
-   * any manual discount, and is capped by the program's redemption caps computed against the
-   * redeemable base (excludedRedemptionCategories line items are excluded from that base).
+   * LOY-005 — apply a loyalty-points redemption to a DRAFT invoice as a discount, capped by the
+   * program's redemption caps computed against the redeemable base
+   * (excludedRedemptionCategories line items are excluded from that base).
+   *
+   * A redemption never changes the discount-approval state: it is not a manual discount (see
+   * #manualDiscountTotal), so it cannot push an invoice into the approval queue, and it cannot
+   * invalidate an approval already granted on the staff-granted portion.
    *
    * Ledger write happens AFTER invoice-side validation passes but BEFORE the final invoice
    * save; if the invoice save then fails, the ledger debit is compensated with a
-   * CREDIT_REVERSAL (this codebase does not use Mongo transactions anywhere — see
-   * TreatmentSessionService's sequential-compensation pattern for the same technique).
+   * CREDIT_REVERSAL (see TreatmentSessionService's sequential-compensation pattern).
+   *
+   * Double-apply control: the "already redeemed?" check below is a CONDITIONAL claim on the
+   * invoice, not a read-then-write — two concurrent applies to the same invoice cannot both
+   * pass it. Client retries are handled by `payload.idempotencyKey`, which is replayed against
+   * both the invoice claim (here) and the ledger (LoyaltyLedgerService.redeem).
    */
   async applyLoyaltyRedemption(id, payload, actorId, req = null) {
     const invoice = await this.invoiceRepository.findByIdNotDeleted(id);
     if (!invoice) throw ApiError.notFound('Invoice not found');
     this.#assertDraft(invoice);
+
+    const idempotencyKey = String(payload.idempotencyKey ?? '').trim() || null;
     if (invoice.loyaltyRedemption) {
+      // A replay of the request that applied THIS redemption is a benign no-op, not a 400.
+      if (idempotencyKey && invoice.loyaltyRedemption.idempotencyKey === idempotencyKey) {
+        return this.getById(id);
+      }
       throw ApiError.badRequest(
         'A loyalty redemption is already applied to this invoice. Remove it before applying a new one.'
       );
@@ -623,80 +819,91 @@ class BillingService {
       );
     }
 
-    const totals = this.#computeTotals(invoice.items, {
-      discountType: invoice.discountType,
-      discountValue: invoice.discountValue,
-      taxPercent: invoice.taxPercent,
-      loyaltyDiscountInr: discountInr,
-    });
-    // Applying a redemption always changes the discount total, so any prior approval is
-    // invalidated — same rule as editing a manual discount.
-    const discountApproval = this.#computeDiscountApproval(
-      totals.subtotal,
-      totals.discount,
-      invoice.discountApproved,
-      true
-    );
+    // Re-price at the invoice's OWN stored per-line rates: a redemption changes the discount,
+    // which changes each line's taxable base and therefore its tax. The lines are rewritten too,
+    // so sum(line.tax) still equals invoice.tax after a redemption.
+    const pricedRedeemed = this.#repriceStoredItems(invoice, { loyaltyDiscountInr: discountInr });
+    const totals = {
+      ...this.#totalsOf(pricedRedeemed),
+      items: this.#toInvoiceItems(pricedRedeemed.items),
+    };
+    // Deliberately no #computeDiscountApproval call here — the manual discount is untouched, so
+    // the approval state carries over as-is.
 
-    // Ledger write first (source of truth for the points side) — validates
-    // minimumPointsToRedeem/redemptionStepPoints/available balance internally.
-    const debitEntries = await this.loyaltyLedgerService.redeem({
-      branchId: invoice.branchId,
-      patientId: invoice.patientId,
-      points,
-      invoiceId: invoice._id,
-      redeemedValueInr: discountInr,
-      createdBy: actorId,
-      actorReq: req,
+    // Claim the invoice's single redemption slot BEFORE debiting the ledger. Whoever loses this
+    // conditional write never spends the patient's points at all, so a concurrent double-apply
+    // has nothing to compensate — unlike the old read-then-write check, which both callers passed.
+    const operationKey = idempotencyKey || `invoice-redeem:${id}:${Date.now()}`;
+    const claimed = await this.invoiceRepository.claimLoyaltyRedemptionSlot(id, {
+      loyaltyRedemption: {
+        points,
+        valueInr: discountInr,
+        ledgerEntryIds: [],
+        patientId: invoice.patientId,
+        appliedAt: new Date(),
+        appliedBy: actorId,
+        idempotencyKey: operationKey,
+      },
+      ...totals,
+      balanceAmount: totals.total,
+      updatedBy: actorId,
     });
+    if (!claimed) {
+      throw ApiError.badRequest(
+        'A loyalty redemption is already applied to this invoice. Remove it before applying a new one.'
+      );
+    }
 
+    let debitEntries;
     try {
-      await this.invoiceRepository.updateById(id, {
-        loyaltyRedemption: {
-          points,
-          valueInr: discountInr,
-          ledgerEntryIds: debitEntries.map((e) => e.id),
-          patientId: invoice.patientId,
-          appliedAt: new Date(),
-          appliedBy: actorId,
-        },
-        ...totals,
-        discountApprovalRequired: discountApproval.discountApprovalRequired,
-        discountApproved: discountApproval.discountApproved,
-        balanceAmount: totals.total,
-        updatedBy: actorId,
-        $push: {
-          timeline: {
-            at: new Date(),
-            action: 'LOYALTY_REDEMPTION_APPLIED',
-            note: `Redeemed ${points} points for ₹${discountInr} discount`,
-            actorId,
-          },
-        },
+      // Validates minimumPointsToRedeem/redemptionStepPoints/available balance internally, and
+      // is itself transactional and idempotent on operationKey.
+      debitEntries = await this.loyaltyLedgerService.redeem({
+        branchId: invoice.branchId,
+        patientId: invoice.patientId,
+        points,
+        invoiceId: invoice._id,
+        redeemedValueInr: discountInr,
+        idempotencyKey: operationKey,
+        createdBy: actorId,
+        actorReq: req,
       });
     } catch (err) {
-      // Compensate: the invoice never ended up reflecting the redemption, so reverse the
-      // ledger debit rather than leaving the patient's points silently spent.
+      // Release the claim: no points were spent, so the invoice must not keep showing a
+      // redemption. Nothing to reverse on the ledger side — redeem() is all-or-nothing.
       try {
-        await this.loyaltyLedgerService.credit({
-          branchId: invoice.branchId,
-          patientId: invoice.patientId,
-          points,
-          entryType: 'CREDIT_REVERSAL',
-          sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
-          sourceRefId: invoice._id,
-          note: 'Compensating reversal — invoice save failed after loyalty redemption',
-          createdBy: actorId,
-          actorReq: req,
+        const pricedRestored = this.#repriceStoredItems(invoice, { loyaltyDiscountInr: 0 });
+        const restored = {
+          ...this.#totalsOf(pricedRestored),
+          items: this.#toInvoiceItems(pricedRestored.items),
+        };
+        await this.invoiceRepository.updateById(id, {
+          loyaltyRedemption: null,
+          ...restored,
+          balanceAmount: restored.total,
+          updatedBy: actorId,
         });
-      } catch (compErr) {
-        logger.error(
-          'BillingService.applyLoyaltyRedemption: compensating CREDIT_REVERSAL failed after invoice save error',
-          { invoiceId: id, points, error: compErr.message }
-        );
+      } catch (releaseErr) {
+        logger.error('BillingService.applyLoyaltyRedemption: failed to release the redemption claim', {
+          invoiceId: id,
+          points,
+          error: releaseErr.message,
+        });
       }
       throw err;
     }
+
+    await this.invoiceRepository.updateById(id, {
+      'loyaltyRedemption.ledgerEntryIds': debitEntries.map((e) => e.id),
+      $push: {
+        timeline: {
+          at: new Date(),
+          action: 'LOYALTY_REDEMPTION_APPLIED',
+          note: `Redeemed ${points} points for ₹${discountInr} discount`,
+          actorId,
+        },
+      },
+    });
 
     await this.auditService.record(AUDIT_ACTIONS.LOYALTY_POINTS_REDEEMED, {
       actorId,
@@ -736,24 +943,17 @@ class BillingService {
       actorReq: req,
     });
 
-    const totals = this.#computeTotals(invoice.items, {
-      discountType: invoice.discountType,
-      discountValue: invoice.discountValue,
-      taxPercent: invoice.taxPercent,
-      loyaltyDiscountInr: 0,
-    });
-    const discountApproval = this.#computeDiscountApproval(
-      totals.subtotal,
-      totals.discount,
-      invoice.discountApproved,
-      true
-    );
+    const pricedRemoved = this.#repriceStoredItems(invoice, { loyaltyDiscountInr: 0 });
+    const totals = {
+      ...this.#totalsOf(pricedRemoved),
+      items: this.#toInvoiceItems(pricedRemoved.items),
+    };
+    // As with applying one, removing a redemption leaves the manual discount — and therefore the
+    // approval state — untouched.
 
     await this.invoiceRepository.updateById(id, {
       loyaltyRedemption: null,
       ...totals,
-      discountApprovalRequired: discountApproval.discountApprovalRequired,
-      discountApproved: discountApproval.discountApproved,
       balanceAmount: totals.total,
       updatedBy: actorId,
       $push: {
@@ -779,48 +979,245 @@ class BillingService {
   }
 
   /**
-   * Explicit discount approval — required before finalize() when discountApprovalRequired
-   * is true (discount exceeds config.billing.discountApprovalThresholdPercent). Permission-gated
-   * at the route layer via BILLING_DISCOUNT_APPROVE. A mandatory reason is recorded on the
-   * timeline and audit trail.
+   * A.5 — the approver's worklist: draft invoices whose manual discount is waiting on a
+   * decision. Defaults to PENDING_APPROVAL; pass another status to review past decisions.
+   * Permission-gated at the route layer via BILLING_DISCOUNT_APPROVE.
    */
-  async approveDiscount(id, payload, actorId, req = null) {
-    if (!payload?.reason?.trim()) {
-      throw ApiError.badRequest('A reason is required to approve a discount');
+  async listDiscountApprovalQueue(query = {}) {
+    const limit = Math.min(Number(query.limit) || 50, 100);
+    const page = Math.max(Number(query.page) || 1, 1);
+    const { items, total } = await this.invoiceRepository.listByDiscountApprovalStatus({
+      status: query.status || DISCOUNT_APPROVAL_STATUS.PENDING_APPROVAL,
+      branchId: query.branchId || null,
+      limit,
+      skip: (page - 1) * limit,
+    });
+    // Populated so the approver sees patient/branch names, not raw ObjectIds.
+    const mapped = await Promise.all(
+      items.map(async (row) => {
+        const populated = await this.invoiceRepository.findByIdPopulated(row._id);
+        const safe = this.#mapInvoice(populated);
+        return {
+          ...safe,
+          discountPercent: this.#round(
+            this.#discountPercentOf(
+              safe.subtotal,
+              this.#manualDiscountTotal(populated.items, {
+                discountType: populated.discountType,
+                discountValue: populated.discountValue,
+              })
+            )
+          ),
+          thresholdPercent: config.billing.discountApprovalThresholdPercent,
+        };
+      })
+    );
+    return {
+      items: mapped,
+      meta: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    };
+  }
+
+  /** Start-of-day N days ago, in server-local time. */
+  #daysAgo(days) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - days);
+    return d;
+  }
+
+  /** End-of-day N days ago. */
+  #endOfDaysAgo(days) {
+    const d = this.#daysAgo(days);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }
+
+  /** A bucket key -> the invoiceDate window that produces it. */
+  #agingWindow(bucket) {
+    if (bucket === AGING_BUCKET.CURRENT) {
+      return { invoiceDateFrom: this.#daysAgo(AGING_BUCKET_MAX_DAYS[AGING_BUCKET.CURRENT]) };
     }
+    if (bucket === AGING_BUCKET.DAYS_8_30) {
+      return {
+        invoiceDateFrom: this.#daysAgo(AGING_BUCKET_MAX_DAYS[AGING_BUCKET.DAYS_8_30]),
+        invoiceDateTo: this.#endOfDaysAgo(AGING_BUCKET_MAX_DAYS[AGING_BUCKET.CURRENT] + 1),
+      };
+    }
+    if (bucket === AGING_BUCKET.DAYS_31_60) {
+      return {
+        invoiceDateFrom: this.#daysAgo(AGING_BUCKET_MAX_DAYS[AGING_BUCKET.DAYS_31_60]),
+        invoiceDateTo: this.#endOfDaysAgo(AGING_BUCKET_MAX_DAYS[AGING_BUCKET.DAYS_8_30] + 1),
+      };
+    }
+    if (bucket === AGING_BUCKET.DAYS_60_PLUS) {
+      return { invoiceDateTo: this.#endOfDaysAgo(AGING_BUCKET_MAX_DAYS[AGING_BUCKET.DAYS_31_60] + 1) };
+    }
+    return {};
+  }
+
+  /**
+   * A.4 — the cashier's due-payments worklist: every finalized invoice still carrying a balance,
+   * OLDEST FIRST, each row annotated with its age in days and aging bucket. Bucket totals cover
+   * the whole filtered set (not just the current page) so the header numbers are the real
+   * exposure. `checkedInToday` narrows to patients who have a CHECKED_IN appointment today —
+   * the highest-yield collection list, because the patient is physically at the desk.
+   */
+  async listDuePayments(query = {}) {
+    const limit = Math.min(Number(query.limit) || 50, 100);
+    const page = Math.max(Number(query.page) || 1, 1);
+
+    let patientIds = null;
+    if (query.checkedInToday) {
+      const { default: Appointment } = await import('../models/Appointment.model.js');
+      const apptFilter = {
+        deletedAt: null,
+        status: 'CHECKED_IN',
+        appointmentDate: { $gte: this.#daysAgo(0), $lte: this.#endOfDaysAgo(0) },
+      };
+      if (query.branchId) apptFilter.branchId = query.branchId;
+      patientIds = await Appointment.distinct('patientId', apptFilter);
+      // No one checked in yet: an explicitly empty worklist, not an unfiltered one.
+      if (!patientIds.length) {
+        return {
+          items: [],
+          meta: { page, limit, total: 0, pages: 1, totalOutstanding: 0, buckets: this.#emptyBuckets() },
+        };
+      }
+    }
+
+    const bucket = AGING_BUCKET_LIST.includes(query.bucket) ? query.bucket : null;
+    const baseFilter = {
+      branchId: query.branchId || null,
+      patientId: query.patientId || null,
+      patientIds,
+      search: query.search || null,
+    };
+
+    const { items, total, totalOutstanding } = await this.invoiceRepository.listOutstanding({
+      ...baseFilter,
+      ...this.#agingWindow(bucket),
+      limit,
+      skip: (page - 1) * limit,
+    });
+
+    // Bucket totals: one narrow count/sum per bucket over the same filter set.
+    const buckets = this.#emptyBuckets();
+    await Promise.all(
+      AGING_BUCKET_LIST.map(async (key) => {
+        const res = await this.invoiceRepository.listOutstanding({
+          ...baseFilter,
+          ...this.#agingWindow(key),
+          limit: 1,
+          skip: 0,
+        });
+        buckets[key] = { count: res.total, outstanding: this.#round(res.totalOutstanding) };
+      })
+    );
+
+    const now = Date.now();
+    const mapped = await Promise.all(
+      items.map(async (row) => {
+        const populated = await this.invoiceRepository.findByIdPopulated(row._id);
+        const safe = this.#mapInvoice(populated);
+        const invoiceDate = populated.invoiceDate || populated.createdAt;
+        const ageDays = Math.max(0, Math.floor((now - new Date(invoiceDate).getTime()) / 86400000));
+        return { ...safe, ageDays, agingBucket: agingBucketForDays(ageDays) };
+      })
+    );
+
+    return {
+      items: mapped,
+      meta: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+        totalOutstanding: this.#round(totalOutstanding),
+        buckets,
+      },
+    };
+  }
+
+  #emptyBuckets() {
+    return AGING_BUCKET_LIST.reduce((acc, key) => {
+      acc[key] = { count: 0, outstanding: 0 };
+      return acc;
+    }, {});
+  }
+
+  /**
+   * Shared approve/reject body — both decisions require a note, are recorded on the invoice
+   * timeline, and are audited. Mirrors LoyaltyAdminService.approveAdjustment/rejectAdjustment.
+   */
+  async #decideDiscount(id, payload, actorId, req, { approve }) {
+    const verb = approve ? 'approve' : 'reject';
+    // `reason` is the long-standing field name on this endpoint; `decisionNote` matches the
+    // approval-queue vocabulary used elsewhere (loyalty). Accept either.
+    const note = String(payload?.decisionNote ?? payload?.reason ?? '').trim();
+    if (!note) throw ApiError.badRequest(`A reason is required to ${verb} a discount`);
+
     const invoice = await this.invoiceRepository.findByIdNotDeleted(id);
     if (!invoice) throw ApiError.notFound('Invoice not found');
     this.#assertDraft(invoice);
-    if (!invoice.discountApprovalRequired) {
-      throw ApiError.badRequest('This invoice discount does not require approval');
+    if (invoice.discountApprovalStatus !== DISCOUNT_APPROVAL_STATUS.PENDING_APPROVAL) {
+      throw ApiError.badRequest(
+        invoice.discountApprovalStatus === DISCOUNT_APPROVAL_STATUS.NOT_REQUIRED
+          ? 'This invoice discount does not require approval'
+          : `Only pending discount approvals can be ${approve ? 'approved' : 'rejected'}`
+      );
     }
 
+    const action = approve ? 'DISCOUNT_APPROVED' : 'DISCOUNT_REJECTED';
     await this.invoiceRepository.updateById(id, {
-      discountApproved: true,
+      discountApprovalStatus: approve
+        ? DISCOUNT_APPROVAL_STATUS.APPROVED
+        : DISCOUNT_APPROVAL_STATUS.REJECTED,
+      discountApproved: approve,
+      discountDecisionNote: note,
+      discountApprovalDecidedBy: actorId,
+      discountApprovalDecidedAt: new Date(),
       updatedBy: actorId,
-      $push: {
-        timeline: {
-          at: new Date(),
-          action: 'DISCOUNT_APPROVED',
-          note: payload.reason.trim(),
-          actorId,
-        },
-      },
+      $push: { timeline: { at: new Date(), action, note, actorId } },
     });
 
-    await this.auditService.record(AUDIT_ACTIONS.DISCOUNT_APPROVED, {
-      actorId,
-      metadata: {
-        invoiceId: id,
-        invoiceNumber: invoice.invoiceNumber,
-        discount: invoice.discount,
-        subtotal: invoice.subtotal,
-        reason: payload.reason.trim(),
-      },
-      req,
-    });
+    await this.auditService.record(
+      approve ? AUDIT_ACTIONS.DISCOUNT_APPROVED : AUDIT_ACTIONS.DISCOUNT_REJECTED,
+      {
+        actorId,
+        metadata: {
+          invoiceId: id,
+          invoiceNumber: invoice.invoiceNumber,
+          discount: invoice.discount,
+          subtotal: invoice.subtotal,
+          discountReason: invoice.discountReason,
+          reason: note,
+        },
+        branchId: invoice.branchId,
+        resourceType: 'Invoice',
+        resourceId: id,
+        req,
+      }
+    );
 
     return this.getById(id);
+  }
+
+  /**
+   * Explicit discount approval — required before finalize() when the manual discount exceeds
+   * config.billing.discountApprovalThresholdPercent. Permission-gated at the route layer via
+   * BILLING_DISCOUNT_APPROVE. A mandatory note is recorded on the timeline and audit trail.
+   */
+  async approveDiscount(id, payload, actorId, req = null) {
+    return this.#decideDiscount(id, payload, actorId, req, { approve: true });
+  }
+
+  /**
+   * Rejecting leaves the invoice unfinalizable until the cashier edits the discount down (which
+   * returns it to PENDING_APPROVAL if still above threshold, or clears the gate entirely).
+   */
+  async rejectDiscount(id, payload, actorId, req = null) {
+    return this.#decideDiscount(id, payload, actorId, req, { approve: false });
   }
 
   async finalize(id, actorId, req = null) {
@@ -829,9 +1226,15 @@ class BillingService {
     this.#assertDraft(invoice);
     if (!invoice.items?.length) throw ApiError.badRequest('Cannot finalize empty invoice');
     if (invoice.total < 0) throw ApiError.badRequest('Invalid invoice total');
-    if (invoice.discountApprovalRequired && !invoice.discountApproved) {
+    // A.5 — the hard stop. Only NOT_REQUIRED and APPROVED may proceed.
+    if (invoice.discountApprovalStatus === DISCOUNT_APPROVAL_STATUS.PENDING_APPROVAL) {
       throw ApiError.forbidden(
-        'This invoice discount exceeds the approval threshold and must be approved before finalization'
+        `This invoice discount exceeds the ${config.billing.discountApprovalThresholdPercent}% approval threshold and is awaiting approval — it cannot be finalized yet`
+      );
+    }
+    if (invoice.discountApprovalStatus === DISCOUNT_APPROVAL_STATUS.REJECTED) {
+      throw ApiError.forbidden(
+        `This invoice discount was rejected${invoice.discountDecisionNote ? ` — ${invoice.discountDecisionNote}` : ''}. Reduce the discount to at or below ${config.billing.discountApprovalThresholdPercent}% or request approval again before finalizing.`
       );
     }
 
@@ -892,6 +1295,18 @@ class BillingService {
     }
 
     if (amount <= 0) throw ApiError.badRequest('Payment amount must be greater than zero');
+
+    // PAY-04 — non-cash modes are unreconcilable without a reference number.
+    if (method === PAYMENT_METHOD.SPLIT) {
+      const unreferenced = splits.find(
+        (s) => paymentMethodRequiresReference(s.method) && !String(s.reference ?? '').trim()
+      );
+      if (unreferenced) {
+        throw ApiError.badRequest(`Reference is required for ${unreferenced.method} payments`);
+      }
+    } else if (paymentMethodRequiresReference(method) && !String(payload.reference ?? '').trim()) {
+      throw ApiError.badRequest(`Reference is required for ${method} payments`);
+    }
 
     const isAdvance = Boolean(payload.isAdvance);
     const balance = this.#round(invoice.balanceAmount);
@@ -1106,6 +1521,17 @@ class BillingService {
       req,
     });
 
+    // Loyalty accrual keys off InvoicePaid, so an invoice settled entirely by a credit note has
+    // to announce itself the same way one settled by cash does.
+    if (balanceAmount <= 0) {
+      eventBus.emitDomain(BILLING_EVENTS.INVOICE_PAID, {
+        invoiceId: invoiceId.toString(),
+        invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total,
+        patientId: invoice.patientId.toString(),
+      });
+    }
+
     return { creditNote: creditNote.toSafeObject(), invoice: await this.getById(invoiceId) };
   }
 
@@ -1131,10 +1557,19 @@ class BillingService {
       req,
     });
 
+    const printed = await this.getById(id);
+    // ORG-001 — the configured footer note is part of the printed document, not decoration.
+    const { invoiceFooterNote } = await this.organizationService.getInvoiceSettings();
+
     return {
-      invoice: await this.getById(id),
+      invoice: printed,
+      // GST grouped by rate: what a mixed-rate invoice must show and what GSTR-1 needs. It sums
+      // back to `invoice.tax` exactly, because both come from the same per-line figures.
+      taxBreakdown: taxBreakdown(printed.items || []),
+      footerNote: invoiceFooterNote,
       printMeta: {
         printedAt: new Date().toISOString(),
+        invoiceFooterNote,
         clinicLogoPlaceholder: true,
         qrPlaceholder: true,
         emailPlaceholder: true,
@@ -1157,11 +1592,15 @@ class BillingService {
       req,
     });
     const invoice = await this.getById(payment.invoiceId.toString());
+    const { invoiceFooterNote } = await this.organizationService.getInvoiceSettings();
     return {
       payment: (await this.paymentRepository.findByIdNotDeleted(paymentId)).toSafeObject(),
       invoice,
+      taxBreakdown: taxBreakdown(invoice.items || []),
+      footerNote: invoiceFooterNote,
       printMeta: {
         printedAt: new Date().toISOString(),
+        invoiceFooterNote,
         qrPlaceholder: true,
       },
     };

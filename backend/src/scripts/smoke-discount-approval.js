@@ -7,9 +7,10 @@ import Branch from '../models/Branch.model.js';
 import Patient from '../models/Patient.model.js';
 import BillingService from '../services/BillingService.js';
 import { DISCOUNT_TYPE } from '../enums/billing.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_discount'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_discount'));
   await mongoose.connection.dropDatabase();
 
   const branch = await Branch.create({
@@ -63,15 +64,39 @@ async function main() {
       items: [{ description: 'Consultation', quantity: 1, unitPrice: 1000, discount: 0 }],
       discountType: DISCOUNT_TYPE.PERCENTAGE,
       discountValue: 50, // over threshold
+      discountReason: 'Corporate tie-up rate',
       discountApprovalRequired: false, // attempted bypass — must be ignored
       discountApproved: true, // attempted bypass — must be ignored
+      discountApprovalStatus: 'APPROVED', // attempted bypass — must be ignored
     },
     actorId
   );
-  if (!bypassAttempt.discountApprovalRequired || bypassAttempt.discountApproved) {
+  if (
+    !bypassAttempt.discountApprovalRequired ||
+    bypassAttempt.discountApproved ||
+    bypassAttempt.discountApprovalStatus !== 'PENDING_APPROVAL'
+  ) {
     throw new Error('Caller-supplied discount approval flags must be ignored');
   }
   console.log('caller cannot bypass approval flags on create: PASS');
+
+  // An above-threshold discount with NO reason must be refused outright.
+  try {
+    await billing.create(
+      {
+        patientId: patient._id.toString(),
+        branchId: branch._id.toString(),
+        items: [{ description: 'Package', quantity: 1, unitPrice: 1000, discount: 0 }],
+        discountType: DISCOUNT_TYPE.PERCENTAGE,
+        discountValue: 40,
+      },
+      actorId
+    );
+    throw new Error('Above-threshold discount without a reason should have been rejected!');
+  } catch (err) {
+    if (err.message.startsWith('Above-threshold discount without a reason')) throw err;
+    console.log('above-threshold discount without a reason rejected: PASS —', err.message);
+  }
 
   // (b) Large discount (over threshold) blocks finalize until approved.
   const bigInvoice = await billing.create(
@@ -81,9 +106,15 @@ async function main() {
       items: [{ description: 'Package', quantity: 1, unitPrice: 1000, discount: 0 }],
       discountType: DISCOUNT_TYPE.PERCENTAGE,
       discountValue: 50, // 50% — over the default 20% threshold
+      discountReason: 'Long-standing patient goodwill',
     },
     actorId
   );
+  if (bigInvoice.discountApprovalStatus !== 'PENDING_APPROVAL') {
+    throw new Error(
+      `Large discount should sit PENDING_APPROVAL, got ${bigInvoice.discountApprovalStatus}`
+    );
+  }
   if (!bigInvoice.discountApprovalRequired) {
     throw new Error('Large discount should require approval');
   }
@@ -121,6 +152,56 @@ async function main() {
     throw new Error('Approved large-discount invoice should finalize');
   }
   console.log('(c) approving with reason then allows finalize: PASS');
+
+  // (e) Reject path — a rejected discount keeps finalize blocked, with the rejection surfaced.
+  const rejectedInvoice = await billing.create(
+    {
+      patientId: patient._id.toString(),
+      branchId: branch._id.toString(),
+      items: [{ description: 'Package', quantity: 1, unitPrice: 1000, discount: 0 }],
+      discountType: DISCOUNT_TYPE.PERCENTAGE,
+      discountValue: 60,
+      discountReason: 'Patient asked for a bigger cut',
+    },
+    actorId
+  );
+  const afterReject = await billing.rejectDiscount(
+    rejectedInvoice.id,
+    { decisionNote: 'Too deep for this service — cap at 20%' },
+    actorId
+  );
+  if (afterReject.discountApprovalStatus !== 'REJECTED' || afterReject.discountApproved) {
+    throw new Error('Rejected discount should be REJECTED and not approved');
+  }
+  try {
+    await billing.finalize(rejectedInvoice.id, actorId);
+    throw new Error('Finalize should have been blocked for a rejected discount!');
+  } catch (err) {
+    if (err.message.startsWith('Finalize should have been blocked for a rejected')) throw err;
+    console.log('(e) rejected discount keeps finalize blocked: PASS —', err.message);
+  }
+
+  // Editing the discount back under the threshold clears the gate entirely.
+  const reduced = await billing.updateDraft(
+    rejectedInvoice.id,
+    { discountType: DISCOUNT_TYPE.PERCENTAGE, discountValue: 10 },
+    actorId
+  );
+  if (reduced.discountApprovalStatus !== 'NOT_REQUIRED') {
+    throw new Error(`Reduced discount should be NOT_REQUIRED, got ${reduced.discountApprovalStatus}`);
+  }
+  const finalizedReduced = await billing.finalize(rejectedInvoice.id, actorId);
+  if (finalizedReduced.status !== 'FINALIZED') {
+    throw new Error('Invoice reduced under threshold should finalize');
+  }
+  console.log('(f) reducing the discount under threshold clears the gate: PASS');
+
+  // The queue lists what is genuinely pending — nothing here, everything above was decided.
+  const queue = await billing.listDiscountApprovalQueue({});
+  if (queue.items.some((i) => i.discountApprovalStatus !== 'PENDING_APPROVAL')) {
+    throw new Error('Queue must only contain PENDING_APPROVAL invoices');
+  }
+  console.log(`(g) pending queue returns ${queue.items.length} pending invoice(s): PASS`);
 
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();

@@ -12,21 +12,41 @@ class CrmExtensionsService {
   }
 
   // --- Recall worklist -------------------------------------------------------------
-  async createRecallEntry(payload, actorId) {
-    const entry = await RecallEntry.create({ ...payload, createdBy: actorId });
+  async createRecallEntry(payload, actorId, { branchId = null } = {}) {
+    // A branch-scoped user files recalls against their own branch. 403 (not 404) — the caller
+    // named a branch id, not a record id.
+    if (branchId && payload.branchId && String(payload.branchId) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
+    const entry = await RecallEntry.create({
+      ...payload,
+      ...(branchId ? { branchId } : {}),
+      createdBy: actorId,
+    });
     return entry.toSafeObject();
   }
 
   async listRecallWorklist(query = {}) {
     const filter = { status: 'PENDING', dueDate: { $lte: query.asOf ? new Date(query.asOf) : new Date() } };
-    if (query.branchId) filter.branchId = query.branchId;
+    // `branchId` is nullable on RecallEntry: null means "not tied to a site", so an unassigned
+    // entry stays on every worklist rather than vanishing from all of them.
+    if (query.branchId) filter.branchId = { $in: [query.branchId, null] };
     if (query.assignedTo) filter.assignedTo = query.assignedTo;
     const rows = await RecallEntry.find(filter).sort({ priority: -1, dueDate: 1 }).exec();
     return rows.map((r) => r.toSafeObject());
   }
 
-  async recordRecallOutcome(id, { status, outcomeNotes, resultingAppointmentId }, actorId, req = null) {
-    const entry = await RecallEntry.findById(id);
+  async recordRecallOutcome(
+    id,
+    { status, outcomeNotes, resultingAppointmentId },
+    actorId,
+    req = null,
+    { branchId = null } = {}
+  ) {
+    // Branch is folded into the lookup — an out-of-branch entry reads as 404, never 403.
+    const entry = await RecallEntry.findOne(
+      branchId ? { _id: id, branchId: { $in: [branchId, null] } } : { _id: id }
+    );
     if (!entry) throw ApiError.notFound('Recall entry not found');
     entry.status = status;
     entry.outcomeNotes = outcomeNotes || null;
@@ -44,14 +64,39 @@ class CrmExtensionsService {
   }
 
   // --- Offer board -------------------------------------------------------------
-  async createOffer(payload, actorId, req = null) {
-    const offer = await Offer.create({ ...payload, createdBy: actorId });
+  /**
+   * SEC-030 — `branchIds: []` means "every branch", so a branch-scoped user must not be able to
+   * publish one: that is an org-wide broadcast from a single site. Their offers are pinned to
+   * their own branch, and any other branch id in the array is refused.
+   */
+  #assertOfferBranches(branchIds, branchId) {
+    if (!branchId) return branchIds;
+    const requested = branchIds || [];
+    if (requested.some((id) => String(id) !== String(branchId))) {
+      throw ApiError.forbidden('branchIds is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
+    return [branchId];
+  }
+
+  async createOffer(payload, actorId, req = null, { branchId = null } = {}) {
+    const offer = await Offer.create({
+      ...payload,
+      branchIds: this.#assertOfferBranches(payload.branchIds, branchId) || payload.branchIds,
+      createdBy: actorId,
+    });
     await this.auditService.record(AUDIT_ACTIONS.OFFER_CREATED, { actorId, metadata: { offerId: offer._id.toString() }, req });
     return offer.toSafeObject();
   }
 
-  async updateOffer(id, payload, actorId, req = null) {
-    const offer = await Offer.findByIdAndUpdate(id, payload, { new: true });
+  async updateOffer(id, payload, actorId, req = null, { branchId = null } = {}) {
+    // Scoped callers may only touch an offer that is theirs alone. An org-wide offer
+    // (branchIds: []) is NOT editable from a single branch — editing it would change what every
+    // other site shows. Out of scope reads as 404, never 403.
+    const filter = branchId ? { _id: id, branchIds: [branchId] } : { _id: id };
+    const updates = branchId
+      ? { ...payload, ...(payload.branchIds ? { branchIds: this.#assertOfferBranches(payload.branchIds, branchId) } : {}) }
+      : payload;
+    const offer = await Offer.findOneAndUpdate(filter, updates, { new: true });
     if (!offer) throw ApiError.notFound('Offer not found');
     await this.auditService.record(AUDIT_ACTIONS.OFFER_UPDATED, { actorId, metadata: { offerId: id }, req });
     return offer.toSafeObject();
@@ -64,6 +109,8 @@ class CrmExtensionsService {
       filter.validFrom = { $lte: new Date() };
       filter.validTo = { $gte: new Date() };
     }
+    // `branchIds: []` = every branch, so a scoped caller sees their branch's offers PLUS the
+    // org-wide ones — and nothing that belongs only to another site.
     if (query.branchId) filter.$or = [{ branchIds: query.branchId }, { branchIds: { $size: 0 } }];
     const rows = await Offer.find(filter).sort({ createdAt: -1 }).exec();
     return rows.map((r) => r.toSafeObject());

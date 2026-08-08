@@ -102,6 +102,10 @@ class PatientImportService {
             sourceRecordId: row.sourceRecordId || null,
             importBatchId: batch._id,
             importConfidence: 'UNVERIFIED',
+            // PAT-DUP — a migration batch carries its own provenance (sourceSystem/sourceRecordId)
+            // and is reconciled by the merge workflow afterwards, so the interactive
+            // "is this the same person?" prompt does not apply and must not abort the batch.
+            allowDuplicate: true,
           },
           actorId,
           req

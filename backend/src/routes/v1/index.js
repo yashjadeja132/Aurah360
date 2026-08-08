@@ -35,6 +35,7 @@ import notificationWebhooksRoutes from './notificationWebhooks.routes.js';
 import crmExtensionsRoutes from './crmExtensions.routes.js';
 import aiRoutes from './ai.routes.js';
 import privacyRoutes from './privacy.routes.js';
+import loyaltyRoutes from './loyalty.routes.js';
 
 const router = Router();
 
@@ -74,5 +75,6 @@ router.use('/webhooks', notificationWebhooksRoutes);
 router.use('/crm-extensions', crmExtensionsRoutes);
 router.use('/ai', aiRoutes);
 router.use('/privacy', privacyRoutes);
+router.use('/loyalty', loyaltyRoutes);
 
 export default router;

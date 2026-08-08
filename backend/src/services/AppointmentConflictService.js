@@ -82,24 +82,74 @@ class AppointmentConflictService {
     return true;
   }
 
-  /** APT-001 — a room/device cannot be double-booked at an overlapping time (§18.3 edge case). */
-  async assertResourceAvailable({ field, resourceId, date, startTime, endTime, excludeId = null }) {
+  /**
+   * APT-001 — a room/device cannot be double-booked at an overlapping time (§18.3 edge case).
+   *
+   * RSC-001 adds the two room settings that used to be inert:
+   *
+   *  - `capacity` — how many bookings may occupy the resource at the same time. The default is 1,
+   *    which reproduces the previous "any overlap is a conflict" behaviour exactly; a room
+   *    configured for 3 now genuinely holds 3.
+   *  - `bufferMinutes` (the room's `cleaningBufferMinutes`) — turnover time that must separate two
+   *    bookings of the same resource. 0 (or unset) means no turnover requirement and is a no-op,
+   *    so this can never block a clinic that has not configured one.
+   *
+   * Buffer is applied by widening the candidate window on both sides; a booking that only collides
+   * once the buffer is applied gets its own error code so staff can see it is turnover, not a real
+   * double-booking, and know which knob to change.
+   */
+  async assertResourceAvailable({
+    field,
+    resourceId,
+    date,
+    startTime,
+    endTime,
+    excludeId = null,
+    capacity = 1,
+    bufferMinutes = 0,
+  }) {
     if (!resourceId) return true;
     const dayAppts = await this.appointmentRepository.findActiveForResourceDay(field, resourceId, date);
     const newStart = timeToMinutes(startTime);
     const newEnd = timeToMinutes(endTime);
-    const overlap = dayAppts.some((appt) => {
-      if (excludeId && appt._id.toString() === excludeId.toString()) return false;
+    const limit = Math.max(1, Number(capacity) || 1);
+    const buffer = Math.max(0, Number(bufferMinutes) || 0);
+
+    const others = dayAppts.filter(
+      (appt) => !(excludeId && appt._id.toString() === excludeId.toString())
+    );
+    const overlapsWith = (appt, pad) => {
       const aStart = timeToMinutes(appt.startTime);
       const aEnd = timeToMinutes(appt.endTime);
-      return newStart < aEnd && newEnd > aStart;
-    });
-    if (overlap) {
+      return newStart - pad < aEnd && newEnd + pad > aStart;
+    };
+
+    const label = field === 'roomId' ? 'room' : 'device';
+    const code = field === 'roomId' ? 'ROOM_UNAVAILABLE' : 'DEVICE_UNAVAILABLE';
+
+    const hardOverlaps = others.filter((appt) => overlapsWith(appt, 0)).length;
+    if (hardOverlaps >= limit) {
       throw ApiError.conflict(
-        `Selected ${field === 'roomId' ? 'room' : 'device'} is already booked in this time range`,
-        field === 'roomId' ? 'ROOM_UNAVAILABLE' : 'DEVICE_UNAVAILABLE'
+        limit > 1
+          ? `Selected ${label} is at its capacity of ${limit} concurrent bookings in this time `
+            + `range — raise the ${label}'s capacity or choose another time`
+          : `Selected ${label} is already booked in this time range`,
+        code
       );
     }
+
+    if (buffer > 0) {
+      const bufferedOverlaps = others.filter((appt) => overlapsWith(appt, buffer)).length;
+      if (bufferedOverlaps >= limit) {
+        throw ApiError.conflict(
+          `Selected ${label} needs ${buffer} minutes of cleaning turnover between bookings — this `
+            + `slot is too close to another booking. Choose a later time or reduce the ${label}'s `
+            + 'cleaningBufferMinutes',
+          'ROOM_CLEANING_BUFFER'
+        );
+      }
+    }
+
     return true;
   }
 

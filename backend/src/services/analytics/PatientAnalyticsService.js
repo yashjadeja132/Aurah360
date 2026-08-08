@@ -1,6 +1,7 @@
 import Patient from '../../models/Patient.model.js';
 import Appointment from '../../models/Appointment.model.js';
 import { parseReportFilters, pct, daysAgo } from '../../helpers/reportFilters.helper.js';
+import { dayBucket } from '../../utils/date.util.js';
 
 class PatientAnalyticsService {
   async report(query = {}) {
@@ -59,12 +60,8 @@ class PatientAnalyticsService {
           { $match: match },
           {
             $group: {
-              _id: {
-                $dateToString: {
-                  format: '%Y-%m-%d',
-                  date: { $ifNull: ['$registrationDate', '$createdAt'] },
-                },
-              },
+              // Registrations are counted per clinic day, not per UTC day.
+              _id: dayBucket({ $ifNull: ['$registrationDate', '$createdAt'] }),
               count: { $sum: 1 },
             },
           },

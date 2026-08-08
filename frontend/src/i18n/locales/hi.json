@@ -81,7 +81,39 @@
     "yourRole": "आपकी भूमिका",
     "permissions": "प्रभावी अनुमतियां",
     "branch": "ब्रांच",
-    "session": "सेशन"
+    "session": "सेशन",
+    "thereFallback": "मित्र",
+    "accessScope": "इस लॉगिन के लिए एक्सेस स्कोप",
+    "grantedToAccount": "इस खाते को दी गई",
+    "allBranches": "सभी ब्रांच",
+    "currentScope": "वर्तमान कार्य दायरा",
+    "secure": "सुरक्षित",
+    "sessionHint": "एन्क्रिप्टेड सेशन द्वारा सुरक्षित",
+    "open": "खोलें",
+    "quickLinks": {
+      "patients": {
+        "label": "पेशेंट्स",
+        "description": "मरीज़ों को रजिस्टर करें और उनके रिकॉर्ड खोलें."
+      },
+      "appointments": {
+        "label": "अपॉइंटमेंट्स",
+        "description": "विज़िट बुक करें, बदलें और ट्रैक करें."
+      },
+      "billing": {
+        "label": "बिलिंग",
+        "description": "इनवॉइस बनाएं और भुगतान लें."
+      },
+      "staff": {
+        "label": "स्टाफ",
+        "description": "स्टाफ खाते और भूमिकाएं प्रबंधित करें."
+      }
+    },
+    "yourAccountDescription": "अपनी प्रोफ़ाइल जानकारी और साइन इन पासवर्ड अपडेट करें.",
+    "viewProfile": "प्रोफ़ाइल देखें",
+    "changePassword": "पासवर्ड बदलें",
+    "needSomethingElse": "कुछ और चाहिए?",
+    "useSidebar": "हर मॉड्यूल तक पहुंचने के लिए साइडबार का उपयोग करें.",
+    "sidebarGroupsDescription": "मॉड्यूल ओवरव्यू, फ्रंट डेस्क, क्लिनिकल, ऑपरेशन्स, ग्रोथ और एडमिनिस्ट्रेशन समूहों में व्यवस्थित हैं."
   },
   "crm": {
     "leadStatus": {
@@ -313,6 +345,11 @@
     "transfer": {
       "title": "कतार स्थानांतरित करें",
       "reasonPlaceholder": "कारण (आवश्यक)"
+    },
+    "moveUp": {
+      "title": "कतार में ऊपर ले जाएं",
+      "reasonRequired": "प्राथमिकता बदलने के लिए कारण आवश्यक है।",
+      "reasonPlaceholder": "कारण (कम से कम 3 अक्षर)"
     },
     "checkIn": {
       "button": "चेक-इन",
@@ -700,6 +737,12 @@
       "noShow": "अनुपस्थित",
       "complete": "पूर्ण करें",
       "reschedule": "पुनर्निर्धारित करें",
+      "cancelTitle": "अपॉइंटमेंट रद्द करें",
+      "cancelReasonRequired": "रद्द करने का कारण अनिवार्य है।",
+      "cancelReasonSelect": "कारण चुनें…",
+      "cancelNotePlaceholder": "कारण लिखें (आवश्यक)",
+      "confirmCancel": "रद्दीकरण की पुष्टि करें",
+      "cancelFailed": "रद्द करना विफल",
       "cancelReasonPrompt": "रद्द करने का कारण",
       "deleteConfirm": "इस अपॉइंटमेंट को सॉफ्ट-डिलीट करें?",
       "details": "विवरण",
@@ -1369,6 +1412,7 @@
       "diagnosis": "डायग्नोसिस",
       "photos": "फोटो",
       "followup": "फॉलो-अप",
+      "labs": "लैब ऑर्डर",
       "ai": "AI असिस्ट"
     },
     "statusLabels": {
@@ -1455,6 +1499,32 @@
         "OTHER": "अन्य"
       }
     },
+    "labs": {
+      "title": "लैब ऑर्डर",
+      "hint": "जाँच ऑर्डर करें, आने वाले परिणाम दर्ज करें, फिर डॉक्टर द्वारा समीक्षित चिह्नित करें।",
+      "testName": "टेस्ट का नाम",
+      "provider": "लैब / प्रोवाइडर",
+      "dueDate": "नियत तारीख",
+      "reason": "क्लिनिकल कारण",
+      "order": "टेस्ट ऑर्डर करें",
+      "loadFailed": "लैब ऑर्डर लोड नहीं हो सके",
+      "emptyTitle": "अभी कोई लैब ऑर्डर नहीं",
+      "emptyDescription": "इस कंसल्टेशन के लिए ऑर्डर की गई जाँचें यहाँ ट्रैक होंगी।",
+      "noProvider": "कोई प्रोवाइडर नहीं",
+      "due": "नियत",
+      "resultReceivedAt": "परिणाम प्राप्त",
+      "reviewedAt": "समीक्षित",
+      "reviewCommentPlaceholder": "समीक्षा टिप्पणी (वैकल्पिक)",
+      "markResultReceived": "परिणाम प्राप्त चिह्नित करें",
+      "markReviewed": "डॉक्टर द्वारा समीक्षित चिह्नित करें",
+      "cancel": "ऑर्डर रद्द करें",
+      "statusLabels": {
+        "ORDERED": "ऑर्डर किया",
+        "RESULT_RECEIVED": "परिणाम प्राप्त",
+        "REVIEWED": "डॉक्टर द्वारा समीक्षित",
+        "CANCELLED": "रद्द"
+      }
+    },
     "ai": {
       "title": "AI असिस्ट",
       "description": "केवल सुझाव — जब तक आप स्वीकार न करें तब तक कुछ भी सेव नहीं होता।",
@@ -1508,6 +1578,111 @@
       "timelineSubtitle": "पेशेंट की घटनाएं और मुलाकातें",
       "noTimelineEvents": "कोई टाइमलाइन इवेंट नहीं",
       "previousVisits": "पूर्व मुलाकातें"
+    }
+  },
+  "notFound": {
+    "title": "पेज नहीं मिला",
+    "description": "आप जो पेज खोज रहे हैं वह मौजूद नहीं है या हटा दिया गया है.",
+    "backToDashboard": "डैशबोर्ड पर वापस जाएं"
+  },
+  "users": {
+    "list": {
+      "title": "स्टाफ",
+      "subtitle": "क्लिनिक के स्टाफ लॉगिन, भूमिकाएं और एक्सेस प्रबंधित करें.",
+      "addStaff": "स्टाफ जोड़ें",
+      "loadFailed": "स्टाफ सूची लोड नहीं हो सकी.",
+      "activateSuccess": "{{name}} सक्रिय किए गए",
+      "activateFailed": "इस स्टाफ सदस्य को सक्रिय नहीं किया जा सका.",
+      "deactivateSuccess": "{{name}} निष्क्रिय किए गए",
+      "deactivateFailed": "इस स्टाफ सदस्य को निष्क्रिय नहीं किया जा सका."
+    },
+    "table": {
+      "nameHeader": "नाम",
+      "roleHeader": "भूमिका",
+      "employeeIdHeader": "कर्मचारी ID",
+      "statusHeader": "स्टेटस",
+      "actionsHeader": "कार्रवाई",
+      "active": "सक्रिय",
+      "inactive": "निष्क्रिय",
+      "view": "देखें",
+      "edit": "संपादित करें",
+      "activate": "सक्रिय करें",
+      "deactivate": "निष्क्रिय करें",
+      "emptyTitle": "कोई स्टाफ नहीं मिला",
+      "emptyDescription": "फ़िल्टर बदलें या शुरू करने के लिए नया स्टाफ सदस्य जोड़ें."
+    },
+    "filters": {
+      "searchPlaceholder": "नाम, ईमेल या कर्मचारी ID से खोजें",
+      "allRoles": "सभी भूमिकाएं",
+      "ownerRole": "मालिक",
+      "allStatuses": "सभी स्टेटस",
+      "active": "सक्रिय",
+      "inactive": "निष्क्रिय",
+      "sortNewest": "नए पहले",
+      "sortFirstName": "पहला नाम",
+      "sortLastName": "अंतिम नाम",
+      "sortRole": "भूमिका",
+      "sortLastLogin": "अंतिम लॉगिन"
+    },
+    "form": {
+      "firstNameLabel": "पहला नाम",
+      "lastNameLabel": "अंतिम नाम",
+      "emailLabel": "ईमेल",
+      "phoneLabel": "फोन",
+      "passwordLabel": "पासवर्ड",
+      "roleLabel": "भूमिका",
+      "genderLabel": "जेंडर",
+      "selectPlaceholder": "चुनें",
+      "employeeIdLabel": "कर्मचारी ID",
+      "departmentLabel": "विभाग",
+      "designationLabel": "पदनाम",
+      "saving": "सेव हो रहा है…",
+      "createStaff": "स्टाफ बनाएं",
+      "saveChanges": "बदलाव सेव करें"
+    },
+    "create": {
+      "title": "स्टाफ जोड़ें",
+      "subtitle": "नए स्टाफ सदस्य के लिए लॉगिन बनाएं.",
+      "detailsTitle": "स्टाफ विवरण",
+      "detailsDescription": "व्यक्तिगत विवरण, भूमिका और साइन इन क्रेडेंशियल्स.",
+      "success": "स्टाफ सदस्य बनाया गया",
+      "failed": "स्टाफ सदस्य नहीं बनाया जा सका."
+    },
+    "edit": {
+      "title": "स्टाफ संपादित करें",
+      "detailsTitle": "स्टाफ विवरण",
+      "success": "स्टाफ सदस्य अपडेट हुआ",
+      "failed": "स्टाफ सदस्य अपडेट नहीं हो सका.",
+      "notFound": "स्टाफ सदस्य नहीं मिला."
+    },
+    "detail": {
+      "backToStaff": "स्टाफ",
+      "edit": "संपादित करें",
+      "resetPassword": "पासवर्ड रीसेट करें",
+      "delete": "हटाएं",
+      "profileTitle": "प्रोफ़ाइल",
+      "roleLabel": "भूमिका",
+      "statusLabel": "स्टेटस",
+      "phoneLabel": "फोन",
+      "employeeIdLabel": "कर्मचारी ID",
+      "departmentLabel": "विभाग",
+      "designationLabel": "पदनाम",
+      "genderLabel": "जेंडर",
+      "lastLoginLabel": "अंतिम लॉगिन",
+      "permissionsTitle": "अनुमतियां",
+      "noPermissions": "कोई अनुमति नहीं दी गई है.",
+      "refresh": "रिफ्रेश करें",
+      "resetPasswordTitle": "पासवर्ड रीसेट करें",
+      "resetPasswordDescription": "{{name}} के लिए नया साइन इन पासवर्ड सेट करें.",
+      "newPasswordLabel": "नया पासवर्ड",
+      "cancel": "रद्द करें",
+      "reset": "पासवर्ड रीसेट करें",
+      "resetSuccess": "पासवर्ड सफलतापूर्वक रीसेट हुआ",
+      "resetFailed": "पासवर्ड रीसेट नहीं हो सका.",
+      "confirmDelete": "इस स्टाफ सदस्य को हटाना है? उनका लॉगिन निष्क्रिय कर दिया जाएगा.",
+      "deleteSuccess": "स्टाफ सदस्य हटाया गया",
+      "deleteFailed": "स्टाफ सदस्य को हटाया नहीं जा सका.",
+      "notFound": "स्टाफ सदस्य नहीं मिला."
     }
   }
 }

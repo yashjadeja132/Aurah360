@@ -59,10 +59,13 @@ const envSchema = z.object({
   BILLING_DISCOUNT_APPROVAL_THRESHOLD_PERCENT: z.coerce.number().default(20),
 
   /** AI clinical copilot gateway (Module 9) — provider-neutral; MOCK is safe default. */
-  AI_PROVIDER: z.enum(['MOCK', 'OPENAI_COMPATIBLE']).default('MOCK'),
+  AI_PROVIDER: z.enum(['MOCK', 'OPENAI_COMPATIBLE', 'ANTHROPIC']).default('MOCK'),
   AI_API_KEY: z.string().optional().default(''),
   AI_API_BASE_URL: z.string().optional().default(''),
   AI_MODEL: z.string().default('mock-clinical-copilot-v1'),
+  /** Anthropic provider — key is read from env only, never logged, never committed. */
+  ANTHROPIC_API_KEY: z.string().optional().default(''),
+  ANTHROPIC_MODEL: z.string().default('claude-sonnet-5'),
   AI_TIMEOUT_MS: z.coerce.number().default(8000),
   AI_MONTHLY_BUDGET_USD: z.coerce.number().default(50),
   AI_ENABLED: z

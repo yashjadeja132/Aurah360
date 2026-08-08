@@ -62,7 +62,8 @@ export default function PatientDashboardPage() {
           <ul className="space-y-1">
             {(data?.treatmentProgress || []).map((p) => (
               <li key={p.planId}>
-                {t('portal.dashboard.plan', 'Plan')} {String(p.planId).slice(-6)} · {p.completedSessions ?? p.completed ?? 0}/
+                {/* Patients see the treatment name, never an id — not even a truncated one. */}
+                {p.planTitle || t('portal.dashboard.plan', 'Plan')} · {p.completedSessions ?? p.completed ?? 0}/
                 {p.totalSessions ?? p.total ?? '?'} {t('portal.dashboard.done', 'done')}
               </li>
             ))}

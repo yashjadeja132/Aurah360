@@ -1,12 +1,14 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
-import { BookingWizard } from '@/modules/appointments/components/BookingWizard';
+import { QuickBookingPanel } from '@/modules/appointments/components/QuickBookingPanel';
 import { APP_ROUTES, appointmentDetailPath } from '@/constants/routes';
 
 export default function AppointmentBookPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const patientFromQuery = searchParams.get('patientId') || '';
 
   return (
     <section className="space-y-6">
@@ -18,10 +20,14 @@ export default function AppointmentBookPage() {
           {t('appointments.book.title', 'Book appointment')}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t('appointments.book.subtitle', 'Branch → Doctor → Service → Slots → Patient → Confirm')}
+          {t(
+            'appointments.book.quickSubtitle',
+            'Pick the patient, then just the time — returning patients reuse their last visit.'
+          )}
         </p>
       </div>
-      <BookingWizard
+      <QuickBookingPanel
+        initialPatientId={patientFromQuery}
         onCreated={(appointment) => navigate(appointmentDetailPath(appointment.id))}
       />
     </section>

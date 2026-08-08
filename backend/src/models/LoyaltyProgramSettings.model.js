@@ -34,8 +34,19 @@ const loyaltyProgramSettingsSchema = new mongoose.Schema(
     earnOnRedeemedPortion: { type: Boolean, default: false },
 
     tiersEnabled: { type: Boolean, default: false },
-    /** Owner approval required for rule-value changes above this % delta from current value. */
+    /** Owner approval required for rule-value changes above this % delta from current value.
+     *  null = no threshold, any rule-value change goes through unchallenged.
+     *  Enforced by LoyaltyAdminService.addRuleVersion. */
     ruleChangeApprovalThresholdPercent: { type: Number, default: null, min: 0 },
+
+    /**
+     * LOY-008 — the largest manual adjustment a given role may apply on its own authority, keyed
+     * by role name. A request above the requester's limit is queued for approval even when the
+     * requester would otherwise be allowed to auto-apply. Roles absent from the map are
+     * unlimited (which is the empty default: no limit until an owner configures one).
+     * Enforced by LoyaltyAdminService.createPatientAdjustment.
+     */
+    manualAdjustmentPointLimitsByRole: { type: Map, of: Number, default: undefined },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
@@ -63,6 +74,9 @@ loyaltyProgramSettingsSchema.methods.toSafeObject = function toSafeObject(extra 
     earnOnRedeemedPortion: this.earnOnRedeemedPortion,
     tiersEnabled: this.tiersEnabled,
     ruleChangeApprovalThresholdPercent: this.ruleChangeApprovalThresholdPercent,
+    manualAdjustmentPointLimitsByRole: this.manualAdjustmentPointLimitsByRole
+      ? Object.fromEntries(this.manualAdjustmentPointLimitsByRole)
+      : {},
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
     ...extra,

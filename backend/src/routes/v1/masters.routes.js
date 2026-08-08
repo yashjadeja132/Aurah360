@@ -28,9 +28,17 @@ const validateUpdateBody = (req, res, next) => {
   return validate({ params: masterIdParamSchema, body: schema })(req, res, next);
 };
 
+// SEC-030 — this dropdown-population endpoint additionally accepts the narrow MASTERS_LOOKUP
+// grant, so clinical roles can fill service/lead-source pickers without holding MASTERS_VIEW
+// (which also unlocks the admin Masters browse/detail reads). Existing MASTERS_VIEW /
+// MASTERS_ALL holders are unaffected.
 router.get(
   '/:masterType/active',
-  requirePermission(PERMISSIONS.MASTERS_VIEW, PERMISSIONS.MASTERS_ALL),
+  requirePermission(
+    PERMISSIONS.MASTERS_LOOKUP,
+    PERMISSIONS.MASTERS_VIEW,
+    PERMISSIONS.MASTERS_ALL
+  ),
   validate({ params: masterTypeParamSchema }),
   masterController.listActive
 );

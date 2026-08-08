@@ -7,12 +7,14 @@ import TreatmentPlanRepository from '../repositories/TreatmentPlanRepository.js'
 import { InvoiceRepository } from '../repositories/BillingRepository.js';
 import { ClinicalPhotoRepository } from '../repositories/ConsultationClinicalRepository.js';
 import AuditService from './AuditService.js';
+import ClinicalPhotoPolicyService from './ClinicalPhotoPolicyService.js';
 import ResourceService from './ResourceService.js';
 import InventoryService from './InventoryService.js';
 import LocalStorage from '../storage/LocalStorage.js';
 import ConsentRecord from '../models/ConsentRecord.model.js';
 import PatchTest from '../models/PatchTest.model.js';
 import TreatmentProtocol from '../models/TreatmentProtocol.model.js';
+import Patient from '../models/Patient.model.js';
 import logger from '../libs/logger.js';
 import LoyaltyLedgerEntry from '../models/LoyaltyLedgerEntry.model.js';
 import LoyaltyLedgerService from './LoyaltyLedgerService.js';
@@ -25,6 +27,7 @@ import {
   TREATMENT_SESSION_EVENTS,
   TREATMENT_SESSION_STATUS,
   HARD_STOP_TYPE,
+  PREFLIGHT_GATE,
 } from '../enums/treatmentSession.js';
 import { TREATMENT_PLAN_STATUS, CONSENT_STATUS } from '../enums/treatmentPlan.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
@@ -49,6 +52,8 @@ class TreatmentSessionService {
     this.invoiceRepository = new InvoiceRepository();
     this.photoRepository = new ClinicalPhotoRepository();
     this.auditService = new AuditService();
+    // IMG-003/PRV-001 — the same capture policy the consultation path uses (single implementation).
+    this.photoPolicy = new ClinicalPhotoPolicyService();
     this.storage = new LocalStorage();
     this.resourceService = new ResourceService();
     this.inventoryService = new InventoryService();
@@ -56,20 +61,486 @@ class TreatmentSessionService {
   }
 
   /**
-   * TRT-006 — hard-stop preflight before a session may start. Returns the list of blocking
-   * stops; an authorized override (with reason) is recorded on the session and audited.
+   * TRT-006 — is a signed treatment consent REQUIRED for this session?
+   *
+   * This is knowable from the data: TreatmentProtocol.items[].consentRequired (default true) is the
+   * declared requirement, and every protocol reachable from the session or the plan (session.protocolId,
+   * plan.protocolId, plan.items[].protocolId) is consulted. A protocol that exists but declares no
+   * items is treated as requiring consent — an unpopulated protocol is not a statement that consent
+   * is unnecessary.
+   *
+   * When NO protocol is reachable at all the requirement is genuinely undeclared. The safe default
+   * is REQUIRED: a protocol-less plan is exactly the case where nobody has asserted that the
+   * procedure is consent-free, and the alternative default silently reopens the P0 hole. Operational
+   * consequence: a protocol-less plan with no consent record on file becomes unstartable until the
+   * consent record is created — or until a user holding TREATMENT_HARD_STOP_OVERRIDE starts it with
+   * a written, audited reason (this gate stays overridable, like the other hard stops).
    */
-  async #assertHardStops(session, plan, actorId, req, override) {
-    const stops = [];
+  async #resolveConsentRequirement(session, plan, sessionProtocol = null) {
+    const ids = [session.protocolId, plan.protocolId, ...(plan.items || []).map((i) => i.protocolId)]
+      .filter(Boolean)
+      .map((v) => v.toString());
+    const unique = [...new Set(ids)];
+    if (!unique.length) {
+      return { required: true, source: 'clinic default (no protocol is attached to this plan)' };
+    }
 
+    const protocols = [];
+    for (const id of unique) {
+      const doc =
+        sessionProtocol && sessionProtocol._id.toString() === id
+          ? sessionProtocol
+          : await TreatmentProtocol.findById(id).exec();
+      if (doc) protocols.push(doc);
+    }
+    if (!protocols.length) {
+      return { required: true, source: 'clinic default (protocol referenced by this plan no longer exists)' };
+    }
+
+    const requiring = protocols.find((p) =>
+      (p.items || []).length ? (p.items || []).some((i) => i.consentRequired !== false) : true
+    );
+    if (requiring) {
+      return { required: true, source: `protocol ${requiring.protocolCode || requiring.name}` };
+    }
+    return { required: false, source: 'protocol (consent not required)' };
+  }
+
+  /**
+   * Every TreatmentProtocol reachable from this session/plan (session.protocolId, plan.protocolId,
+   * plan.items[].protocolId). Same id set the consent requirement uses — eligibility rules
+   * (contraindications, age limits) must be read from exactly the protocols that govern the work.
+   */
+  async #reachableProtocols(session, plan, sessionProtocol = null) {
+    const ids = [session.protocolId, plan.protocolId, ...(plan.items || []).map((i) => i.protocolId)]
+      .filter(Boolean)
+      .map((v) => v.toString());
+    const docs = [];
+    for (const id of [...new Set(ids)]) {
+      const doc =
+        sessionProtocol && sessionProtocol._id.toString() === id
+          ? sessionProtocol
+          : await TreatmentProtocol.findById(id).exec();
+      if (doc) docs.push(doc);
+    }
+    return docs;
+  }
+
+  /**
+   * Normalize a contraindication screening payload ({ answers: [{question, answer, note}] }) into
+   * the stored shape, stamping who screened and when. Returns null when nothing usable was sent.
+   */
+  #normalizeScreening(input, actorId) {
+    const rows = Array.isArray(input) ? input : input?.answers;
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const answers = rows
+      .filter((a) => a && a.question)
+      .map((a) => ({
+        question: String(a.question).trim(),
+        answer: a.answer === null || a.answer === undefined ? null : Boolean(a.answer),
+        note: a.note ? String(a.note) : null,
+      }));
+    if (!answers.length) return null;
+    return { screenedAt: new Date(), screenedBy: actorId || null, answers };
+  }
+
+  /**
+   * TRT-006 — CONTRAINDICATION gate. The protocol's configured contraindicationQuestions were
+   * previously copied around and never evaluated; they are now a real screening requirement.
+   *
+   * Three outcomes:
+   *  - no protocol declares any question → applicable:false (do not invent a screening burden);
+   *  - questions declared but unanswered (no screening recorded, or some question left blank) →
+   *    blocking CONTRAINDICATION_SCREENING_MISSING, naming the unanswered questions;
+   *  - any question answered "yes" (the contraindication IS present) → blocking CONTRAINDICATION.
+   *
+   * Overridable: a doctor may knowingly proceed with an audited reason (e.g. a contraindication
+   * that has since been resolved), exactly like the consent gate.
+   */
+  #evaluateContraindicationGate(session, protocols) {
+    const questions = [
+      ...new Set(
+        protocols.flatMap((p) => (p.contraindicationQuestions || []).map((q) => String(q).trim()).filter(Boolean))
+      ),
+    ];
+
+    if (!questions.length) {
+      return {
+        key: PREFLIGHT_GATE.CONTRAINDICATION,
+        label: 'Contraindication screening',
+        applicable: false,
+        passed: true,
+        stopType: null,
+        detail: null,
+        questions: [],
+        resolvedBy: 'No contraindication questions are configured on this protocol',
+      };
+    }
+
+    const answers = session.contraindicationScreening?.answers || [];
+    const byQuestion = new Map(answers.map((a) => [String(a.question).trim(), a]));
+    const unanswered = questions.filter((q) => {
+      const a = byQuestion.get(q);
+      return !a || a.answer === null || a.answer === undefined;
+    });
+    const positives = questions.filter((q) => byQuestion.get(q)?.answer === true);
+
+    let stop = null;
+    if (positives.length) {
+      stop = {
+        type: HARD_STOP_TYPE.CONTRAINDICATION,
+        message: `Contraindication present: ${positives.join('; ')}`,
+      };
+    } else if (unanswered.length) {
+      stop = {
+        type: HARD_STOP_TYPE.CONTRAINDICATION_SCREENING_MISSING,
+        message:
+          `Contraindication screening is incomplete — ${unanswered.length} of ${questions.length} ` +
+          `question(s) unanswered: ${unanswered.join('; ')}`,
+      };
+    }
+
+    return {
+      key: PREFLIGHT_GATE.CONTRAINDICATION,
+      label: 'Contraindication screening',
+      applicable: true,
+      passed: !stop,
+      stopType: stop?.type || null,
+      detail: stop?.message || null,
+      questions,
+      resolvedBy: positives.length
+        ? 'Doctor — review the flagged contraindication before this treatment proceeds'
+        : 'Technician or doctor — record the contraindication screening answers on this session',
+    };
+  }
+
+  /**
+   * TRT-006 — AGE_RESTRICTION gate for TreatmentProtocol.ageRestrictionMin/Max.
+   *
+   * Restrictions from several reachable protocols are combined conservatively (highest declared
+   * minimum, lowest declared maximum): if any governing protocol says "18+", the session is 18+.
+   * When no protocol declares either bound the gate is applicable:false — an unrestricted protocol
+   * must not be turned into an outage.
+   *
+   * MISSING DATE OF BIRTH → BLOCK (overridable). Skipping would make "not for under-18s" silently
+   * unenforceable for exactly the records where age is unverified, which is the failure this whole
+   * task exists to remove. It is overridable so front desk can proceed on a documented reason while
+   * the DOB is being collected.
+   */
+  async #evaluateAgeGate(session, protocols) {
+    let min = null;
+    let max = null;
+    for (const p of protocols) {
+      if (typeof p.ageRestrictionMin === 'number') min = min === null ? p.ageRestrictionMin : Math.max(min, p.ageRestrictionMin);
+      if (typeof p.ageRestrictionMax === 'number') max = max === null ? p.ageRestrictionMax : Math.min(max, p.ageRestrictionMax);
+    }
+
+    const base = {
+      key: PREFLIGHT_GATE.AGE_RESTRICTION,
+      label: 'Patient within protocol age limits',
+      ageRestrictionMin: min,
+      ageRestrictionMax: max,
+    };
+
+    if (min === null && max === null) {
+      return {
+        ...base,
+        applicable: false,
+        passed: true,
+        stopType: null,
+        detail: null,
+        resolvedBy: 'No age restriction is configured on this protocol',
+      };
+    }
+
+    const window = [
+      min !== null ? `${min}+` : null,
+      max !== null ? `up to ${max}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    const patient = await Patient.findById(session.patientId).exec();
+    const age = patient ? patient.computeAge() : null;
+
+    if (age === null) {
+      return {
+        ...base,
+        applicable: true,
+        passed: false,
+        stopType: HARD_STOP_TYPE.AGE_UNKNOWN,
+        detail:
+          `This protocol is restricted by age (${window}) but the patient's date of birth is not ` +
+          'recorded, so eligibility cannot be verified',
+        resolvedBy: 'Front desk — record the patient date of birth on the patient record',
+      };
+    }
+
+    const tooYoung = min !== null && age < min;
+    const tooOld = max !== null && age > max;
+    const stop = tooYoung || tooOld;
+
+    return {
+      ...base,
+      applicable: true,
+      patientAge: age,
+      passed: !stop,
+      stopType: stop ? HARD_STOP_TYPE.AGE_RESTRICTION : null,
+      detail: stop
+        ? `Patient is ${age}; this protocol is restricted to ${window}`
+        : null,
+      resolvedBy: 'Doctor — this protocol is not approved for this patient age; select another protocol',
+    };
+  }
+
+  /**
+   * TRT-006 / revenue — PACKAGE_VALIDITY gate for TreatmentPackage.validityDays.
+   *
+   * ANCHOR: plan acceptance (plan.acceptedAt), falling back to plan.createdAt when a legacy plan
+   * has no acceptedAt. TreatmentPackage.validityDays is documented on the model as "validity in
+   * days from plan acceptance", and acceptance — not the invoice date, and not the first session —
+   * is the moment the patient owns the package, so it is the only anchor that cannot be pushed
+   * back indefinitely by simply never booking. Anchoring on the first session would make an
+   * unused package immortal, which is the leak being closed.
+   *
+   * applicable:false for pay-per-session plans and for packages that carry no validityDays.
+   */
+  #evaluatePackageValidityGate(plan) {
+    const snapshot = plan.packageSnapshot || null;
+    const validityDays = Number(snapshot?.validityDays);
+    const base = {
+      key: PREFLIGHT_GATE.PACKAGE_VALIDITY,
+      label: 'Package still within validity',
+    };
+
+    if (!snapshot || !Number.isFinite(validityDays) || validityDays <= 0) {
+      return {
+        ...base,
+        applicable: false,
+        passed: true,
+        stopType: null,
+        detail: null,
+        resolvedBy: 'This plan is not package-booked, or the package carries no validity period',
+      };
+    }
+
+    const anchor = plan.acceptedAt || plan.createdAt || null;
+    if (!anchor) {
+      // Nothing to measure from — report it rather than silently passing or blocking.
+      return {
+        ...base,
+        applicable: true,
+        passed: true,
+        blocking: false,
+        detail: 'Package validity could not be measured — the plan has no acceptance or creation date',
+        stopType: null,
+        resolvedBy: 'Front desk — re-accept the plan so the validity window has a start date',
+      };
+    }
+
+    const expiresAt = new Date(new Date(anchor).getTime() + validityDays * 24 * 60 * 60 * 1000);
+    const expired = Date.now() > expiresAt.getTime();
+
+    return {
+      ...base,
+      applicable: true,
+      passed: !expired,
+      stopType: expired ? HARD_STOP_TYPE.PACKAGE_EXPIRED : null,
+      packageExpiresAt: expiresAt,
+      detail: expired
+        ? `Package "${snapshot.packageName || 'package'}" expired on ${expiresAt.toISOString().slice(0, 10)} ` +
+          `(${validityDays}-day validity from plan acceptance on ${new Date(anchor).toISOString().slice(0, 10)})`
+        : null,
+      resolvedBy: 'Cashier / front desk — renew or re-sell the package, or extend its validity',
+    };
+  }
+
+  /**
+   * TRT-006 — the parameters configured on TreatmentProtocol.items[].parameters, surfaced so the
+   * execution screen stops inventing its own values. Returned per protocol item and as a merged
+   * map used to pre-fill deviceUsage.settings at start() when the caller sends none.
+   */
+  #protocolParameters(protocols) {
+    const items = [];
+    const merged = {};
+    for (const p of protocols) {
+      for (const item of p.items || []) {
+        const params = item.parameters && typeof item.parameters === 'object' ? item.parameters : {};
+        if (!Object.keys(params).length) continue;
+        items.push({
+          protocolId: p._id.toString(),
+          protocolCode: p.protocolCode || null,
+          procedureName: item.procedureName,
+          parameters: params,
+        });
+        Object.assign(merged, params);
+      }
+    }
+    return { items, merged };
+  }
+
+  /**
+   * TRT-003 — turn whatever the caller supplied (an explicit roomRef/deviceRef ObjectId, or the
+   * free-text roomId/deviceId label) into real Room/Device references, scoped to the branch.
+   * An explicitly supplied ref must exist — a bad id is rejected rather than silently dropped,
+   * because a dropped ref is exactly what made these gates dead code in the first place.
+   */
+  async #resolveResourceRefs(payload = {}, branchId = null) {
+    let roomRef = null;
+    let deviceRef = null;
+
+    if (payload.roomRef) {
+      const room = await this.resourceService.resolveRoom(payload.roomRef, null);
+      if (!room) throw ApiError.badRequest('Room not found for roomRef');
+      roomRef = room._id;
+    } else if (payload.roomId) {
+      const room = await this.resourceService.resolveRoom(payload.roomId, branchId);
+      roomRef = room ? room._id : null;
+    }
+
+    if (payload.deviceRef) {
+      const device = await this.resourceService.resolveDevice(payload.deviceRef, null);
+      if (!device) throw ApiError.badRequest('Device not found for deviceRef');
+      deviceRef = device._id;
+    } else if (payload.deviceId) {
+      const device = await this.resourceService.resolveDevice(payload.deviceId, branchId);
+      deviceRef = device ? device._id : null;
+    }
+
+    return { roomRef, deviceRef };
+  }
+
+  /**
+   * TRT-003 — shared evaluator for the ROOM and DEVICE gates.
+   *
+   * Three outcomes:
+   *  - a managed resource is assigned (via ref, or resolved from the legacy free-text label) →
+   *    blocking gate, hard-stops when the resource is out of service;
+   *  - free text is assigned but names no managed resource → evaluated, non-blocking advisory, so
+   *    the technician sees that the status could not be verified instead of the gate silently
+   *    passing (making this blocking would strand every pre-existing session whose room/device was
+   *    only ever typed in as text);
+   *  - nothing assigned → not applicable, as before.
+   */
+  async #evaluateResourceGate({
+    key,
+    label,
+    noun,
+    ref,
+    freeText,
+    branchId,
+    resolve,
+    isAvailable,
+    stopType,
+    unavailableDetail,
+    resolvedBy,
+  }) {
+    let resourceId = ref ? ref.toString() : null;
+    let resourceLabel = null;
+
+    if (!resourceId && freeText) {
+      const resolved = await resolve(freeText, branchId);
+      if (resolved) {
+        resourceId = resolved._id.toString();
+        resourceLabel = resolved.name;
+      }
+    }
+
+    if (!resourceId) {
+      if (freeText) {
+        return {
+          key,
+          label,
+          applicable: true,
+          evaluated: true,
+          passed: true,
+          blocking: false,
+          overridable: false,
+          stopType: null,
+          detail: `${noun} "${freeText}" is not a managed resource — its in-service status could not be verified`,
+          resolvedBy: `Branch admin — register "${freeText}" in Settings › Resources and re-assign it to this session`,
+        };
+      }
+      return {
+        key,
+        label,
+        applicable: false,
+        passed: true,
+        stopType: null,
+        detail: null,
+        resolvedBy,
+      };
+    }
+
+    const available = await isAvailable(resourceId);
+    return {
+      key,
+      label,
+      applicable: true,
+      evaluated: true,
+      passed: available,
+      stopType: available ? null : stopType,
+      detail: available
+        ? null
+        : `${unavailableDetail}${resourceLabel ? ` (${resourceLabel})` : ''}`,
+      resolvedBy,
+    };
+  }
+
+  /**
+   * TRT-006 — THE single source of truth for the treatment hard-stop rules. Pure/read-only:
+   * evaluates every hard-stop gate and returns them as structured descriptors (in the exact
+   * order the stop messages are joined for the blocking error). Both the read-only pre-flight
+   * endpoint (getPreflight) and the real start() consume this one method — nothing re-implements
+   * the rules, so the checklist the technician sees can never drift from what start() enforces.
+   */
+  async #evaluateHardStopGates(session, plan) {
+    const gates = [];
+    const push = (g) => gates.push({ overridable: true, blocking: true, evaluated: true, ...g });
+
+    const protocol = session.protocolId ? await TreatmentProtocol.findById(session.protocolId).exec() : null;
+
+    // TRT-006 (P0) — an ABSENT consent record is not the same as "consent not required". The old
+    // `applicable: consents.length > 0` made a plan with no consent record at all pass the gate,
+    // so the check only ever caught an *unsigned* consent and never a *missing* one. The
+    // requirement is read from the protocol (TreatmentProtocol.items[].consentRequired), and the
+    // two failure modes are reported distinctly so the technician knows what to chase.
     const consents = await ConsentRecord.find({ treatmentPlanId: plan._id, deletedAt: null }).exec();
+    const { required: consentRequired, source: consentRequirementSource } =
+      await this.#resolveConsentRequirement(session, plan, protocol);
     const hasUnsignedConsent = consents.length > 0 && consents.some((c) => c.status !== CONSENT_STATUS.ACCEPTED);
-    if (hasUnsignedConsent) stops.push({ type: 'CONSENT_MISSING', message: 'Treatment consent is not signed' });
+    const consentAbsent = consents.length === 0;
 
-    let protocol = null;
+    let consentStop = null;
+    if (consentRequired && consentAbsent) {
+      consentStop = {
+        type: HARD_STOP_TYPE.CONSENT_ABSENT,
+        message:
+          'No treatment consent record exists for this plan — consent has never been captured, ' +
+          `so there is nothing to sign (consent required by ${consentRequirementSource})`,
+      };
+    } else if (hasUnsignedConsent) {
+      consentStop = {
+        type: HARD_STOP_TYPE.CONSENT_MISSING,
+        message: 'Treatment consent is not signed',
+      };
+    }
+    push({
+      key: PREFLIGHT_GATE.CONSENT,
+      label: 'Treatment consent signed',
+      applicable: consentRequired || consents.length > 0,
+      passed: !consentStop,
+      stopType: consentStop?.type || null,
+      detail: consentStop?.message || null,
+      resolvedBy: consentAbsent
+        ? 'Doctor or front desk — create the consent record for this plan, then have the patient sign it'
+        : 'Doctor or front desk — capture the patient consent for this plan',
+    });
+
+    let requiresPatchTest = false;
+    let patchTestStop = null;
     if (session.protocolId) {
-      protocol = await TreatmentProtocol.findById(session.protocolId).exec();
-      const requiresPatchTest = (protocol?.items || []).some((i) => i.patchTestRequired);
+      requiresPatchTest = (protocol?.items || []).some((i) => i.patchTestRequired);
       if (requiresPatchTest) {
         const patchTest = await PatchTest.findOne({
           patientId: session.patientId,
@@ -78,52 +549,158 @@ class TreatmentSessionService {
           .sort({ testedAt: -1 })
           .exec();
         if (!patchTest) {
-          stops.push({ type: 'PATCH_TEST_MISSING', message: 'A patch test is required before this treatment' });
+          patchTestStop = {
+            type: HARD_STOP_TYPE.PATCH_TEST_MISSING,
+            message: 'A patch test is required before this treatment',
+          };
         } else if (patchTest.result === 'POSITIVE') {
-          stops.push({ type: 'PATCH_TEST_POSITIVE', message: 'Patch test reaction was positive' });
+          patchTestStop = {
+            type: HARD_STOP_TYPE.PATCH_TEST_POSITIVE,
+            message: 'Patch test reaction was positive',
+          };
         } else if (!patchTest.isValidNow()) {
-          stops.push({ type: 'PATCH_TEST_MISSING', message: 'Patch test result is missing, pending or expired' });
+          patchTestStop = {
+            type: HARD_STOP_TYPE.PATCH_TEST_MISSING,
+            message: 'Patch test result is missing, pending or expired',
+          };
         }
       }
     }
+    push({
+      key: PREFLIGHT_GATE.PATCH_TEST,
+      label: 'Patch test valid',
+      applicable: requiresPatchTest,
+      passed: !patchTestStop,
+      stopType: patchTestStop?.type || null,
+      detail: patchTestStop?.message || null,
+      resolvedBy: 'Doctor or technician — record/repeat the patch test for this protocol',
+    });
 
-    if (session.roomRef && !(await this.resourceService.isRoomAvailable(session.roomRef))) {
-      stops.push({ type: 'ROOM_UNAVAILABLE', message: 'Assigned room is not in service' });
-    }
-    if (session.deviceRef && !(await this.resourceService.isDeviceAvailable(session.deviceRef))) {
-      stops.push({ type: 'DEVICE_UNAVAILABLE', message: 'Assigned device is not in service' });
-    }
+    // TRT-003 (P0) — these gates used to key off roomRef/deviceRef only, and nothing ever wrote
+    // those fields (create() only stored the free-text roomId/deviceId), so both hard stops were
+    // dead code that trivially "passed". The refs are now written on create/update, and the free
+    // text of pre-existing sessions is resolved to a managed resource here at evaluation time so
+    // historical rows evaluate too.
+    push(
+      await this.#evaluateResourceGate({
+        key: PREFLIGHT_GATE.ROOM,
+        label: 'Assigned room in service',
+        noun: 'Room',
+        ref: session.roomRef,
+        freeText: session.roomId,
+        branchId: session.branchId,
+        resolve: (v, b) => this.resourceService.resolveRoom(v, b),
+        isAvailable: (id) => this.resourceService.isRoomAvailable(id),
+        stopType: HARD_STOP_TYPE.ROOM_UNAVAILABLE,
+        unavailableDetail: 'Assigned room is not in service',
+        resolvedBy: 'Branch admin — set the room back to Available in Settings › Resources',
+      })
+    );
+
+    push(
+      await this.#evaluateResourceGate({
+        key: PREFLIGHT_GATE.DEVICE,
+        label: 'Assigned device in service',
+        noun: 'Device',
+        ref: session.deviceRef,
+        freeText: session.deviceId,
+        branchId: session.branchId,
+        resolve: (v, b) => this.resourceService.resolveDevice(v, b),
+        isAvailable: (id) => this.resourceService.isDeviceAvailable(id),
+        stopType: HARD_STOP_TYPE.DEVICE_UNAVAILABLE,
+        unavailableDetail: 'Assigned device is not in service',
+        resolvedBy: 'Branch admin — set the device back to Available in Settings › Resources',
+      })
+    );
 
     const requiredSkillCode = (protocol?.items || []).find((i) => i.requiredSkillCode)?.requiredSkillCode;
+    let skillStop = null;
+    let skillApplicable = false;
     if (requiredSkillCode) {
       // technicianId is a direct User ref; doctorId refers to a Doctor document (not User),
       // so only technicianId can be checked against StaffSkill.userId here.
       const operatorUserId = session.technicianId || null;
       if (operatorUserId) {
+        skillApplicable = true;
         try {
           await this.resourceService.assertOperatorSkilled(operatorUserId, requiredSkillCode, session.branchId);
         } catch (err) {
           if (err?.code === 'OPERATOR_SKILL_MISSING') {
-            stops.push({ type: HARD_STOP_TYPE.OPERATOR_SKILL_MISSING, message: err.message });
+            skillStop = { type: HARD_STOP_TYPE.OPERATOR_SKILL_MISSING, message: err.message };
           } else if (err?.code === 'OPERATOR_SKILL_EXPIRED') {
-            stops.push({ type: HARD_STOP_TYPE.OPERATOR_SKILL_EXPIRED, message: err.message });
+            skillStop = { type: HARD_STOP_TYPE.OPERATOR_SKILL_EXPIRED, message: err.message };
           } else {
             throw err;
           }
         }
       }
     }
+    push({
+      key: PREFLIGHT_GATE.OPERATOR_CREDENTIAL,
+      label: 'Operator credentialed for protocol',
+      applicable: skillApplicable,
+      passed: !skillStop,
+      stopType: skillStop?.type || null,
+      detail: skillStop?.message || null,
+      requiredSkillCode: requiredSkillCode || null,
+      resolvedBy: 'Branch admin — grant/renew the staff skill, or reassign a credentialed technician',
+    });
 
-    if (!stops.length) return { protocol, overrides: [] };
+    // TRT-006 (P0) — protocol eligibility. contraindicationQuestions / ageRestrictionMin / Max and
+    // the package validityDays were all configured, persisted and shown in the admin UI while no
+    // code path read them: staff were told a safety control existed that enforced nothing.
+    const protocols = await this.#reachableProtocols(session, plan, protocol);
+    push(this.#evaluateContraindicationGate(session, protocols));
+    push(await this.#evaluateAgeGate(session, protocols));
+    push(this.#evaluatePackageValidityGate(plan));
+
+    return { protocol, protocols, gates, protocolParameters: this.#protocolParameters(protocols) };
+  }
+
+  /** Strip internal-only fields so a gate can be returned over HTTP. */
+  #publicGate(gate) {
+    return {
+      key: gate.key,
+      label: gate.label,
+      applicable: gate.applicable !== false,
+      evaluated: gate.evaluated !== false,
+      passed: Boolean(gate.passed),
+      blocking: gate.blocking !== false,
+      overridable: Boolean(gate.overridable),
+      detail: gate.detail ?? null,
+      resolvedBy: gate.resolvedBy ?? null,
+      hardStopType: gate.stopType ?? null,
+      ...(gate.requiredSkillCode !== undefined ? { requiredSkillCode: gate.requiredSkillCode } : {}),
+      // TRT-006 — eligibility context the execution screen needs to act on the gate.
+      ...(gate.questions !== undefined ? { questions: gate.questions } : {}),
+      ...(gate.ageRestrictionMin !== undefined ? { ageRestrictionMin: gate.ageRestrictionMin } : {}),
+      ...(gate.ageRestrictionMax !== undefined ? { ageRestrictionMax: gate.ageRestrictionMax } : {}),
+      ...(gate.patientAge !== undefined ? { patientAge: gate.patientAge } : {}),
+      ...(gate.packageExpiresAt !== undefined ? { packageExpiresAt: gate.packageExpiresAt } : {}),
+    };
+  }
+
+  /**
+   * TRT-006 — hard-stop enforcement for start(). Delegates the rules to #evaluateHardStopGates
+   * (single source of truth); an authorized override (with reason) is recorded on the session
+   * and audited. The blocking error carries the failed gates in `errors` so the UI can render
+   * an item-by-item breakdown instead of a generic message.
+   */
+  async #assertHardStops(session, plan, actorId, req, override) {
+    const { protocol, gates, protocolParameters } = await this.#evaluateHardStopGates(session, plan);
+    const failed = gates.filter((g) => g.blocking !== false && !g.passed);
+    const stops = failed.map((g) => ({ type: g.stopType, message: g.detail }));
+
+    if (!stops.length) return { protocol, protocolParameters, overrides: [] };
 
     const canOverride = hasAnyPermission(req?.auth?.permissions || [], [
       PERMISSIONS.TREATMENT_HARD_STOP_OVERRIDE,
     ]);
     if (!override?.reason || !canOverride) {
-      throw ApiError.conflict(
-        `Treatment cannot start: ${stops.map((s) => s.message).join('; ')}`,
-        'HARD_STOP_BLOCKED'
-      );
+      throw new ApiError(409, `Treatment cannot start: ${stops.map((s) => s.message).join('; ')}`, {
+        code: 'HARD_STOP_BLOCKED',
+        errors: failed.map((g) => this.#publicGate(g)),
+      });
     }
 
     const overrides = stops.map((s) => ({
@@ -139,7 +716,7 @@ class TreatmentSessionService {
       req,
     });
 
-    return { protocol, overrides };
+    return { protocol, protocolParameters, overrides };
   }
 
   #map(doc, logs = null, progress = null) {
@@ -212,21 +789,92 @@ class TreatmentSessionService {
     return fromItems > 0 ? fromItems : 1;
   }
 
-  async #assertPaymentGate(plan, invoiceId) {
-    if (plan.status !== TREATMENT_PLAN_STATUS.ACCEPTED) {
-      throw ApiError.forbidden('Treatment plan must be Accepted before sessions can start');
-    }
-    if (!invoiceId) throw ApiError.badRequest('invoiceId is required');
+  /**
+   * Single source of truth for the plan-accepted + invoice payment gates. Evaluates them in the
+   * same order and with the same short-circuit semantics as the original #assertPaymentGate: once
+   * a gate fails the later ones are reported as not-evaluated (they cannot be evaluated without
+   * the earlier result). Each failure carries the exact ApiError #assertPaymentGate must throw.
+   */
+  async #evaluatePaymentGates(plan, invoiceId) {
+    let invoice = null;
+    const specs = [
+      {
+        key: PREFLIGHT_GATE.PLAN_ACCEPTED,
+        label: 'Treatment plan accepted',
+        resolvedBy: 'Doctor / front desk — get the plan accepted by the patient',
+        check: () =>
+          plan.status !== TREATMENT_PLAN_STATUS.ACCEPTED
+            ? ApiError.forbidden('Treatment plan must be Accepted before sessions can start')
+            : null,
+      },
+      {
+        key: PREFLIGHT_GATE.INVOICE_LINKED,
+        label: 'Invoice linked to this session',
+        resolvedBy: 'Cashier / billing desk — raise or re-link the invoice for this plan',
+        check: async () => {
+          if (!invoiceId) return ApiError.badRequest('invoiceId is required');
+          invoice = await this.invoiceRepository.findByIdNotDeleted(invoiceId);
+          if (!invoice) return ApiError.badRequest('Invoice does not exist');
+          if (String(invoice.patientId) !== String(plan.patientId)) {
+            return ApiError.badRequest('Invoice patient does not match treatment plan');
+          }
+          return null;
+        },
+      },
+      {
+        key: PREFLIGHT_GATE.INVOICE_PAYMENT,
+        label: 'Invoice paid or partially paid',
+        resolvedBy: 'Cashier — collect payment against the invoice',
+        check: () =>
+          !SESSION_ALLOWED_PAYMENT_STATUSES.includes(invoice.paymentStatus)
+            ? ApiError.forbidden(
+                `Invoice payment status must be Paid or Partial (got ${invoice.paymentStatus})`
+              )
+            : null,
+      },
+    ];
 
-    const invoice = await this.invoiceRepository.findByIdNotDeleted(invoiceId);
-    if (!invoice) throw ApiError.badRequest('Invoice does not exist');
-    if (String(invoice.patientId) !== String(plan.patientId)) {
-      throw ApiError.badRequest('Invoice patient does not match treatment plan');
+    const gates = [];
+    let blocked = false;
+    for (const spec of specs) {
+      if (blocked) {
+        gates.push({
+          key: spec.key,
+          label: spec.label,
+          resolvedBy: spec.resolvedBy,
+          evaluated: false,
+          passed: false,
+          overridable: false,
+          blocking: true,
+          detail: 'Not evaluated — an earlier check failed',
+        });
+        continue;
+      }
+      const error = await spec.check();
+      if (error) blocked = true;
+      gates.push({
+        key: spec.key,
+        label: spec.label,
+        resolvedBy: spec.resolvedBy,
+        evaluated: true,
+        passed: !error,
+        overridable: false,
+        blocking: true,
+        detail: error?.message || null,
+        error: error || null,
+      });
     }
-    if (!SESSION_ALLOWED_PAYMENT_STATUSES.includes(invoice.paymentStatus)) {
-      throw ApiError.forbidden(
-        `Invoice payment status must be Paid or Partial (got ${invoice.paymentStatus})`
-      );
+
+    return { invoice, gates };
+  }
+
+  async #assertPaymentGate(plan, invoiceId) {
+    const { invoice, gates } = await this.#evaluatePaymentGates(plan, invoiceId);
+    const failed = gates.find((g) => g.error);
+    if (failed) {
+      // Same statusCode/message/code as before — additionally machine-readable for the UI.
+      failed.error.errors = failed.error.errors ?? [this.#publicGate(failed)];
+      throw failed.error;
     }
     return invoice;
   }
@@ -321,6 +969,12 @@ class TreatmentSessionService {
     const invoiceId = payload.invoiceId || null;
     const { used } = await this.#assertCanCreateSession(plan, invoiceId);
 
+    // TRT-003 — resolve the room/device assignment to a real managed resource so the ROOM/DEVICE
+    // hard stops can actually evaluate. An explicit roomRef/deviceRef wins; otherwise the
+    // free-text label is resolved by code/name within the branch. Unresolvable text is kept as
+    // text (the gate then reports it as unverifiable rather than silently passing).
+    const { roomRef, deviceRef } = await this.#resolveResourceRefs(payload, plan.branchId);
+
     const session = await this.sessionRepository.create({
       sessionNumber: await generateSessionNumber(),
       treatmentPlanId: plan._id,
@@ -336,6 +990,8 @@ class TreatmentSessionService {
       scheduledDate: payload.scheduledDate ? new Date(payload.scheduledDate) : null,
       roomId: payload.roomId || null,
       deviceId: payload.deviceId || null,
+      roomRef,
+      deviceRef,
       remarks: payload.remarks || null,
       notes: payload.notes || null,
       followUp: {
@@ -387,8 +1043,32 @@ class TreatmentSessionService {
     ]) {
       if (payload[f] !== undefined) updates[f] = payload[f];
     }
+    // TRT-003 — keep roomRef/deviceRef in step with any room/device re-assignment so the
+    // ROOM/DEVICE hard stops keep evaluating against the real resource.
+    if (payload.roomId !== undefined || payload.roomRef !== undefined) {
+      updates.roomRef = (
+        await this.#resolveResourceRefs(
+          { roomId: payload.roomId ?? session.roomId, roomRef: payload.roomRef },
+          session.branchId
+        )
+      ).roomRef;
+    }
+    if (payload.deviceId !== undefined || payload.deviceRef !== undefined) {
+      updates.deviceRef = (
+        await this.#resolveResourceRefs(
+          { deviceId: payload.deviceId ?? session.deviceId, deviceRef: payload.deviceRef },
+          session.branchId
+        )
+      ).deviceRef;
+    }
     if (payload.scheduledDate !== undefined) {
       updates.scheduledDate = payload.scheduledDate ? new Date(payload.scheduledDate) : null;
+    }
+    // TRT-006 — contraindication screening can also be recorded ahead of time (so the pre-flight
+    // checklist the technician reads is already green before they walk into the room).
+    if (payload.contraindicationScreening !== undefined) {
+      updates.contraindicationScreening =
+        this.#normalizeScreening(payload.contraindicationScreening, actorId);
     }
     if (payload.consumables) {
       updates.consumables = Array.isArray(payload.consumables)
@@ -432,6 +1112,89 @@ class TreatmentSessionService {
     return this.getById(id);
   }
 
+  /**
+   * TRT-006 — READ-ONLY start pre-flight. Runs exactly the checks start() runs, in the same
+   * order, by calling the very same evaluators (#evaluatePaymentGates + #evaluateHardStopGates),
+   * and returns them as a structured per-gate checklist. Nothing here is duplicated logic: if a
+   * rule changes in the evaluator, both this endpoint and start() change with it.
+   */
+  async getPreflight(id, req = null) {
+    const session = await this.sessionRepository.findByIdNotDeleted(id);
+    if (!session) throw ApiError.notFound('Treatment session not found');
+    const plan = await this.planRepository.findByIdNotDeleted(session.treatmentPlanId);
+    if (!plan) throw ApiError.notFound('Treatment plan not found');
+
+    const statusOk = [
+      TREATMENT_SESSION_STATUS.SCHEDULED,
+      TREATMENT_SESSION_STATUS.CHECKED_IN,
+    ].includes(session.status);
+    const statusGate = {
+      key: PREFLIGHT_GATE.SESSION_STATUS,
+      label: 'Session is startable',
+      passed: statusOk,
+      overridable: false,
+      blocking: true,
+      detail: statusOk ? null : 'Session cannot be started from current status',
+      resolvedBy: 'Technician / front desk — check the patient in first',
+    };
+
+    const { gates: paymentGates, } = await this.#evaluatePaymentGates(plan, session.invoiceId);
+    const { gates: hardStopGates, protocolParameters } = await this.#evaluateHardStopGates(session, plan);
+
+    // Advisory only (start() does not enforce it) — flagged blocking:false so it never gates the
+    // Begin-procedure button; surfaced because the technician needs to see the package balance.
+    const limit = this.#sessionLimit(plan);
+    const used = await this.sessionRepository.countForPlan(plan._id);
+    const balanceOk = used <= limit;
+    const packageGate = {
+      key: PREFLIGHT_GATE.PACKAGE_BALANCE,
+      label: 'Package / plan sessions remaining',
+      passed: balanceOk,
+      overridable: false,
+      blocking: false,
+      detail: balanceOk
+        ? `${Math.max(0, limit - used)} of ${limit} session(s) remaining`
+        : `Session limit reached (${used}/${limit})`,
+      resolvedBy: 'Cashier / front desk — sell or extend the package',
+    };
+
+    const gates = [statusGate, ...paymentGates, ...hardStopGates, packageGate].map((g) =>
+      this.#publicGate(g)
+    );
+    const blocking = gates.filter((g) => g.blocking && !g.passed);
+    const canOverride = hasAnyPermission(req?.auth?.permissions || [], [
+      PERMISSIONS.TREATMENT_HARD_STOP_OVERRIDE,
+    ]);
+    const allBlockersOverridable = blocking.length > 0 && blocking.every((g) => g.overridable);
+
+    return {
+      sessionId: session._id.toString(),
+      sessionNumber: session.sessionNumber,
+      status: session.status,
+      gates,
+      /**
+       * TRT-006 — the protocol's configured execution parameters, surfaced so the execution screen
+       * pre-fills them instead of inventing values (the UI previously hardcoded machine: 'Unit 1').
+       * `suggestedSettings` is what start() writes into deviceUsage.settings when the caller sends
+       * no settings of its own.
+       */
+      protocolParameters: protocolParameters?.items || [],
+      suggestedSettings: protocolParameters?.merged || {},
+      blockingGates: blocking.map((g) => g.key),
+      canStart: blocking.length === 0,
+      requiresOverride: allBlockersOverridable,
+      canOverride,
+      canStartWithOverride: allBlockersOverridable && canOverride,
+      override: {
+        permission: PERMISSIONS.TREATMENT_HARD_STOP_OVERRIDE,
+        reasonRequired: true,
+        endpoint: `/treatment-sessions/${session._id.toString()}/start`,
+        field: 'override.reason',
+      },
+      evaluatedAt: new Date().toISOString(),
+    };
+  }
+
   async start(id, payload = {}, actorId, req = null) {
     const session = await this.sessionRepository.findByIdNotDeleted(id);
     if (!session) throw ApiError.notFound('Treatment session not found');
@@ -447,7 +1210,22 @@ class TreatmentSessionService {
     const plan = await this.planRepository.findByIdNotDeleted(session.treatmentPlanId);
     await this.#assertPaymentGate(plan, session.invoiceId);
 
-    const { protocol, overrides } = await this.#assertHardStops(session, plan, actorId, req, payload.override);
+    // TRT-006 — screening answers may be captured as part of the start call (the technician answers
+    // the protocol's contraindication questions on the execution screen). Record them BEFORE the
+    // gates run so the CONTRAINDICATION gate evaluates what was just answered.
+    const screening = this.#normalizeScreening(payload.contraindicationScreening, actorId);
+    if (screening) {
+      session.contraindicationScreening = screening;
+      await this.sessionRepository.updateById(id, { contraindicationScreening: screening });
+    }
+
+    const { protocol, protocolParameters, overrides } = await this.#assertHardStops(
+      session,
+      plan,
+      actorId,
+      req,
+      payload.override
+    );
 
     const startedAt = new Date();
     await this.sessionRepository.updateById(id, {
@@ -458,14 +1236,19 @@ class TreatmentSessionService {
         ? { protocolId: protocol._id.toString(), version: protocol.version, snapshotAt: new Date() }
         : session.protocolVersionSnapshot,
       ...(overrides.length ? { $push: { hardStopOverrides: { $each: overrides } } } : {}),
-      deviceUsage: payload.deviceUsage
-        ? {
-            device: payload.deviceUsage.device || null,
-            machine: payload.deviceUsage.machine || null,
-            laserHead: payload.deviceUsage.laserHead || null,
-            settings: payload.deviceUsage.settings || {},
-          }
-        : session.deviceUsage,
+      // TRT-006 — when the caller supplies no machine settings, fall back to the parameters the
+      // protocol actually configures rather than leaving them blank (or letting the UI invent them).
+      deviceUsage: {
+        device: payload.deviceUsage?.device ?? session.deviceUsage?.device ?? null,
+        machine: payload.deviceUsage?.machine ?? session.deviceUsage?.machine ?? null,
+        laserHead: payload.deviceUsage?.laserHead ?? session.deviceUsage?.laserHead ?? null,
+        settings:
+          payload.deviceUsage?.settings && Object.keys(payload.deviceUsage.settings).length
+            ? payload.deviceUsage.settings
+            : session.deviceUsage?.settings && Object.keys(session.deviceUsage.settings).length
+              ? session.deviceUsage.settings
+              : protocolParameters?.merged || {},
+      },
       updatedBy: actorId,
     });
 
@@ -891,10 +1674,30 @@ class TreatmentSessionService {
     return this.getById(id);
   }
 
-  async uploadPhoto(id, { file, photoType = 'BEFORE', title }, actorId, req = null) {
+  async uploadPhoto(id, { file, photoType = 'BEFORE', title, bodyRegion = null }, actorId, req = null) {
     const session = await this.sessionRepository.findByIdNotDeleted(id);
     if (!session) throw ApiError.notFound('Treatment session not found');
     if (!file?.buffer) throw ApiError.badRequest('File is required');
+
+    const plan = await this.planRepository.findByIdNotDeleted(session.treatmentPlanId);
+
+    // IMG-003/PRV-001 (P0) — the session capture path used to write patient imagery with NO consent
+    // check, NO restricted-body-area check and NO image-type screen, leaving consentVerified at the
+    // model default of false. It now goes through exactly the same shared policy as the consultation
+    // capture path (ClinicalPhotoPolicyService — one implementation, no copy-paste to drift), gated
+    // on the same CONSENT_PURPOSE.CLINICAL_PHOTOGRAPHY grant. Enforced BEFORE any bytes are stored.
+    const verified = await this.photoPolicy.assertCaptureAllowed({
+      patientId: session.patientId,
+      bodyRegion,
+      file,
+      actorId,
+      req,
+      metadata: {
+        treatmentSessionId: id,
+        treatmentPlanId: session.treatmentPlanId?.toString?.() || null,
+        consultationId: plan?.consultationId?.toString?.() || null,
+      },
+    });
 
     const type = String(photoType).toUpperCase() === 'AFTER' ? 'AFTER' : 'BEFORE';
     const saved = await this.storage.save(file.buffer, {
@@ -905,18 +1708,20 @@ class TreatmentSessionService {
 
     // Reuse ClinicalPhoto model when plan has consultationId (additive metadata only)
     let photoId = null;
-    const plan = await this.planRepository.findByIdNotDeleted(session.treatmentPlanId);
     if (plan?.consultationId) {
       const photo = await this.photoRepository.create({
         consultationId: plan.consultationId,
         patientId: session.patientId,
         photoType: type === 'AFTER' ? PHOTO_TYPE.AFTER : PHOTO_TYPE.BEFORE,
         title: title || file.originalname,
+        bodyRegion: bodyRegion || null,
         storageKey: saved.key,
         originalName: file.originalname,
         mimeType: saved.mimeType,
         size: saved.size,
         metadata: { treatmentSessionId: id, source: 'treatment_session' },
+        // Verified against the real ConsentGrant log above — never a caller-supplied flag.
+        ...verified,
         uploadedBy: actorId,
       });
       photoId = photo._id;

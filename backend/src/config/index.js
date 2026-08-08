@@ -70,6 +70,8 @@ export const config = Object.freeze({
     apiKey: env.AI_API_KEY,
     apiBaseUrl: env.AI_API_BASE_URL,
     model: env.AI_MODEL,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
+    anthropicModel: env.ANTHROPIC_MODEL,
     timeoutMs: env.AI_TIMEOUT_MS,
     monthlyBudgetUsd: env.AI_MONTHLY_BUDGET_USD,
   },

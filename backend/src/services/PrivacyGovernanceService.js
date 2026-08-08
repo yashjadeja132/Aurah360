@@ -1,6 +1,7 @@
 import ApiError from '../libs/ApiError.js';
 import BreakGlassAccess from '../models/BreakGlassAccess.model.js';
 import PrivacyRequest from '../models/PrivacyRequest.model.js';
+import Patient from '../models/Patient.model.js';
 import AuditService from './AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { PRIVACY_REQUEST_STATUS } from '../enums/privacy.js';
@@ -55,7 +56,33 @@ class PrivacyGovernanceService {
     if (query.userId) filter.userId = query.userId;
     if (query.patientId) filter.patientId = query.patientId;
     const rows = await BreakGlassAccess.find(filter).sort({ createdAt: -1 }).limit(200).exec();
-    return rows.map((r) => r.toSafeObject());
+    const grants = rows.map((r) => r.toSafeObject());
+
+    /**
+     * Resolve each grant's patient to MRN + name.
+     *
+     * The audit table previously rendered "Patient #<ObjectId>". An auditor reviewing emergency
+     * access needs to know WHICH patient was opened, so the id could not simply be dropped — it had
+     * to be replaced with the identifier the clinic actually uses. MRN is that identifier.
+     */
+    const patientIds = [...new Set(grants.map((g) => g.patientId).filter(Boolean))];
+    if (patientIds.length) {
+      const patients = await Patient.find({ _id: { $in: patientIds } })
+        .select('mrn firstName lastName')
+        .lean();
+      const byId = new Map(
+        patients.map((p) => [
+          p._id.toString(),
+          { mrn: p.mrn, name: [p.firstName, p.lastName].filter(Boolean).join(' ') },
+        ])
+      );
+      for (const grant of grants) {
+        const patient = byId.get(grant.patientId) || null;
+        grant.patientMrn = patient?.mrn || null;
+        grant.patientName = patient?.name || null;
+      }
+    }
+    return grants;
   }
 
   // --- Privacy / data-subject rights -------------------------------------------------------------
@@ -80,9 +107,16 @@ class PrivacyGovernanceService {
     return rows.map((r) => r.toSafeObject());
   }
 
-  async verifyIdentity(id, actorId, req = null) {
+  /**
+   * SEC-030 — `assertPatientAccess` is the caller's patient-scope check (see
+   * PrivacyGovernanceController). It is injected rather than resolved here because scope is a
+   * property of the HTTP request, not of the service. Null = unrestricted (OWNER/ADMIN, or an
+   * internal/background caller).
+   */
+  async verifyIdentity(id, actorId, req = null, assertPatientAccess = null) {
     const request = await PrivacyRequest.findById(id);
     if (!request) throw ApiError.notFound('Privacy request not found');
+    if (assertPatientAccess) await assertPatientAccess(request.patientId);
     request.identityVerifiedBy = actorId;
     request.identityVerifiedAt = new Date();
     request.status = PRIVACY_REQUEST_STATUS.IN_REVIEW;
@@ -91,9 +125,16 @@ class PrivacyGovernanceService {
     return request.toSafeObject();
   }
 
-  async resolveRequest(id, { status, resolutionNotes, denialReason, exceptionReasoned }, actorId, req = null) {
+  async resolveRequest(
+    id,
+    { status, resolutionNotes, denialReason, exceptionReasoned },
+    actorId,
+    req = null,
+    assertPatientAccess = null
+  ) {
     const request = await PrivacyRequest.findById(id);
     if (!request) throw ApiError.notFound('Privacy request not found');
+    if (assertPatientAccess) await assertPatientAccess(request.patientId);
 
     request.status = status;
     request.resolutionNotes = resolutionNotes || null;

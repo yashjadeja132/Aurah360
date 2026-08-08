@@ -32,6 +32,26 @@ const prescriptionItemSchema = new mongoose.Schema(
   { _id: true }
 );
 
+/**
+ * RX-SAFETY — immutable trail of blocking safety alerts that a prescriber overrode in order to
+ * finalize. Shaped after TreatmentSession.hardStopOverrides (the in-repo precedent) so the same
+ * "block, then allow an audited override" story reads the same way in both modules.
+ */
+const safetyOverrideSchema = new mongoose.Schema(
+  {
+    type: { type: String, required: true },
+    severity: { type: String, default: null },
+    medicineName: { type: String, default: null },
+    medicineId: { type: mongoose.Schema.Types.ObjectId, ref: 'Medicine', default: null },
+    detail: { type: String, default: null },
+    matchedTerm: { type: String, default: null },
+    reason: { type: String, required: true },
+    overriddenBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    overriddenAt: { type: Date, default: () => new Date() },
+  },
+  { _id: true }
+);
+
 const prescriptionSchema = new mongoose.Schema(
   {
     prescriptionNumber: {
@@ -74,6 +94,7 @@ const prescriptionSchema = new mongoose.Schema(
     },
     notes: { type: String, default: null },
     items: { type: [prescriptionItemSchema], default: [] },
+    safetyOverrides: { type: [safetyOverrideSchema], default: [] },
     finalizedAt: { type: Date, default: null },
     finalizedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     printedAt: { type: Date, default: null },
@@ -126,6 +147,18 @@ prescriptionSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
       beforeFood: item.beforeFood,
       afterFood: item.afterFood,
       remarks: item.remarks,
+    })),
+    safetyOverrides: (this.safetyOverrides || []).map((o) => ({
+      id: o._id?.toString?.() || undefined,
+      type: o.type,
+      severity: o.severity,
+      medicineName: o.medicineName,
+      medicineId: o.medicineId ? o.medicineId.toString() : null,
+      detail: o.detail,
+      matchedTerm: o.matchedTerm,
+      reason: o.reason,
+      overriddenBy: o.overriddenBy ? o.overriddenBy.toString() : null,
+      overriddenAt: o.overriddenAt,
     })),
     finalizedAt: this.finalizedAt,
     finalizedBy: this.finalizedBy ? this.finalizedBy.toString() : null,

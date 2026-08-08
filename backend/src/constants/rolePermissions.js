@@ -41,6 +41,9 @@ const ALL_MODULE_WILDCARDS = [
   PERMISSIONS.ADVERSE_EVENT_CREATE,
   PERMISSIONS.ADVERSE_EVENT_RESOLVE,
   PERMISSIONS.TREATMENT_HARD_STOP_OVERRIDE,
+  PERMISSIONS.PRESCRIPTION_SAFETY_OVERRIDE,
+  PERMISSIONS.PRESCRIPTION_SAFETY_RULES_VIEW,
+  PERMISSIONS.PRESCRIPTION_SAFETY_RULES_MANAGE,
   PERMISSIONS.BILLING_CASH_CLOSE,
   PERMISSIONS.BILLING_CASH_CLOSE_APPROVE,
   PERMISSIONS.BILLING_CREDIT_NOTE,
@@ -136,6 +139,8 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.CONSULTATION_VIEW,
     PERMISSIONS.CONSULTATION_CREATE,
     PERMISSIONS.CONSULTATION_EDIT,
+    // Retains the diagnosis-authoring reach it already had under the old, wider CONSULTATION_EDIT.
+    PERMISSIONS.CONSULTATION_DIAGNOSE,
     PERMISSIONS.PRESCRIPTION_VIEW,
     PERMISSIONS.PRESCRIPTION_CREATE,
     PERMISSIONS.PRESCRIPTION_EDIT,
@@ -181,6 +186,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.AI_GOVERNANCE_MANAGE,
     PERMISSIONS.LOYALTY_SETTINGS_VIEW,
     PERMISSIONS.LOYALTY_RULES_VIEW,
+    PERMISSIONS.LOYALTY_RULES_MANAGE,
     PERMISSIONS.LOYALTY_BALANCE_VIEW,
     PERMISSIONS.LOYALTY_ADJUST,
     PERMISSIONS.LOYALTY_ADJUST_APPROVE,
@@ -189,8 +195,16 @@ export const ROLE_PERMISSIONS = Object.freeze({
   ],
 
   [ROLES.DOCTOR]: [
+    // Same gap that broke the nurse's queue (see the NURSE note below): the doctor's queue,
+    // appointment and patient screens all resolve their branch from `GET /branches` and 403'd
+    // without this. Branch scoping of the actual rows is enforced separately by resolveBranchScope.
+    PERMISSIONS.BRANCHES_VIEW,
     PERMISSIONS.PATIENTS_VIEW,
     PERMISSIONS.PATIENTS_EDIT,
+    // SEC-030 — the prescriber legitimately takes copies of reports/photos out of the viewer
+    // (referrals, second opinions), so the new download gate must not narrow them. Roles that
+    // only ever needed to LOOK at a file (NURSE, TECHNICIAN) deliberately do not get this.
+    PERMISSIONS.PATIENTS_DOCUMENTS_DOWNLOAD,
     PERMISSIONS.APPOINTMENTS_VIEW,
     PERMISSIONS.APPOINTMENTS_EDIT,
     PERMISSIONS.APPOINTMENTS_COMPLETE,
@@ -201,7 +215,12 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.TREATMENT_SESSION_ALL,
     PERMISSIONS.REPORTS_VIEW,
     PERMISSIONS.DASHBOARD_VIEW,
-    PERMISSIONS.MASTERS_VIEW,
+    // SEC-030 — was MASTERS_VIEW, which unlocked the admin Masters browse/detail reads (and so
+    // surfaced a Settings entry for doctors). Doctor-facing screens only ever call
+    // GET /masters/:masterType/active to populate pickers when booking or editing a patient
+    // (frontend: modules/appointments/components/bookingPickers.jsx, pages/patients/Patient*Page),
+    // so the grant is narrowed to the lookup-only permission that backs exactly that call.
+    PERMISSIONS.MASTERS_LOOKUP,
     PERMISSIONS.DOCTORS_VIEW,
     PERMISSIONS.DOCTOR_SCHEDULE_VIEW,
     PERMISSIONS.DOCTOR_LEAVE_VIEW,
@@ -209,7 +228,10 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.HOLIDAYS_VIEW,
     PERMISSIONS.QUEUE_VIEW,
     PERMISSIONS.QUEUE_MANAGE,
-    PERMISSIONS.RESOURCES_VIEW,
+    // SEC-030 — RESOURCES_VIEW removed: rooms/devices/skills are read only by the admin
+    // Settings > Resources screen (frontend: modules/resources/**, pages/settings/ResourcesPage).
+    // The doctor's Appointment Detail card renders resource names already embedded in the
+    // appointment payload and makes no /resources call, so nothing doctor-facing regresses.
     PERMISSIONS.HANDOFF_VIEW,
     PERMISSIONS.HANDOFF_ACKNOWLEDGE,
     PERMISSIONS.CONSENT_VIEW,
@@ -222,11 +244,19 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.ADVERSE_EVENT_CREATE,
     PERMISSIONS.ADVERSE_EVENT_RESOLVE,
     PERMISSIONS.TREATMENT_HARD_STOP_OVERRIDE,
+    // RX-SAFETY — the prescriber is the only role that may override an allergy/interaction block.
+    // Rule *authoring* stays with OWNER/ADMIN; a doctor can read the rules that gate them.
+    PERMISSIONS.PRESCRIPTION_SAFETY_OVERRIDE,
+    PERMISSIONS.PRESCRIPTION_SAFETY_RULES_VIEW,
     PERMISSIONS.AI_USE,
     PERMISSIONS.LOYALTY_BALANCE_VIEW,
   ],
 
   [ROLES.RECEPTIONIST]: [
+    // The reception dashboard and queue board are branch-scoped views that must resolve a branch
+    // before they can load anything, and ReceptionController now hard-requires a branchId — so
+    // without BRANCHES_VIEW the receptionist's two primary screens could never populate.
+    PERMISSIONS.BRANCHES_VIEW,
     PERMISSIONS.PATIENTS_VIEW,
     PERMISSIONS.PATIENTS_CREATE,
     PERMISSIONS.PATIENTS_EDIT,
@@ -264,6 +294,19 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.LOYALTY_REDEEM,
   ],
 
+  /**
+   * NURSE was broken in both directions.
+   *
+   * Too little: the Queue screen — the nurse's working list — resolves its branch from
+   * `GET /branches`, which 403'd without BRANCHES_VIEW, so the board never loaded any rows even
+   * though QUEUE_VIEW was granted. BRANCHES_VIEW is org structure, not patient data, and the
+   * nurse's own queue rows stay pinned to their branch by resolveBranchScope regardless.
+   *
+   * Too much: CONSULTATION_EDIT used to gate the diagnosis endpoint as well as vitals/notes, so
+   * an intake grant implied a licence to author a diagnosis. Diagnosis now sits behind
+   * CONSULTATION_DIAGNOSE, which NURSE deliberately does not hold; prescribing was already out of
+   * reach (PRESCRIPTION_VIEW only, no PRESCRIPTION_CREATE) and stays that way.
+   */
   [ROLES.NURSE]: [
     PERMISSIONS.PATIENTS_VIEW,
     PERMISSIONS.PATIENTS_EDIT,
@@ -276,6 +319,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.TREATMENT_PLAN_VIEW,
     PERMISSIONS.MASTERS_VIEW,
     PERMISSIONS.DOCTORS_VIEW,
+    PERMISSIONS.BRANCHES_VIEW,
     PERMISSIONS.QUEUE_VIEW,
     PERMISSIONS.HANDOFF_VIEW,
     PERMISSIONS.PATCH_TEST_VIEW,
@@ -310,6 +354,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.BILLING_CREDIT_NOTE,
     PERMISSIONS.LOYALTY_BALANCE_VIEW,
     PERMISSIONS.LOYALTY_REDEEM,
+    PERMISSIONS.LOYALTY_ADJUST,
   ],
 
   [ROLES.PHARMACIST]: [

@@ -47,6 +47,39 @@ const SEED_ADMIN = {
   lastName: 'Admin',
 };
 
+/**
+ * Front-of-house roles. These were missing from the seed, which meant the receptionist, cashier
+ * and branch-manager landing screens had never been opened by an account actually holding those
+ * roles — every check ran as OWNER, which passes every permission and therefore proves nothing.
+ * That is how the nurse's permanently-403ing queue went unnoticed.
+ */
+const SEED_ROLE_STAFF = [
+  {
+    email: process.env.SEED_RECEPTIONIST_EMAIL || 'reception@aurah360.local',
+    password: process.env.SEED_RECEPTIONIST_PASSWORD || 'ChangeMe@12345',
+    firstName: 'Kavya',
+    lastName: 'Front Desk',
+    role: ROLES.RECEPTIONIST,
+    employeeId: 'EMP-RECEPTION-001',
+  },
+  {
+    email: process.env.SEED_CASHIER_EMAIL || 'cashier@aurah360.local',
+    password: process.env.SEED_CASHIER_PASSWORD || 'ChangeMe@12345',
+    firstName: 'Nikhil',
+    lastName: 'Cash Desk',
+    role: ROLES.CASHIER,
+    employeeId: 'EMP-CASHIER-001',
+  },
+  {
+    email: process.env.SEED_BRANCH_MANAGER_EMAIL || 'manager@aurah360.local',
+    password: process.env.SEED_BRANCH_MANAGER_PASSWORD || 'ChangeMe@12345',
+    firstName: 'Meera',
+    lastName: 'Branch Manager',
+    role: ROLES.BRANCH_MANAGER,
+    employeeId: 'EMP-MANAGER-001',
+  },
+];
+
 async function seedPermissions() {
   for (const item of PERMISSION_CATALOG) {
     await Permission.findOneAndUpdate(
@@ -83,6 +116,32 @@ async function seedRoles() {
     );
   }
   logger.info('Roles seeded', { count: ROLE_LIST.length });
+}
+
+/**
+ * SEC-030 — assigns every non-OWNER/ADMIN staff account to a branch. OWNER/ADMIN are
+ * deliberately left branch-less: they are the two roles that legitimately see all branches.
+ * Idempotent; only fills accounts that have no branch yet.
+ */
+async function assignBranchesToStaff() {
+  const { default: Branch } = await import('../models/Branch.model.js');
+  const branch = await Branch.findOne({ deletedAt: null }).sort({ createdAt: 1 }).select('_id');
+  if (!branch) {
+    logger.warn('No branch found — staff accounts left unassigned; branch-scoped lists will 409');
+    return;
+  }
+  const result = await User.updateMany(
+    {
+      deletedAt: null,
+      role: { $nin: [ROLES.OWNER, ROLES.ADMIN] },
+      $or: [{ branch: null }, { branch: { $exists: false } }],
+    },
+    { $set: { branch: branch._id } }
+  );
+  logger.info('Staff branches assigned', {
+    modified: result.modifiedCount,
+    branchId: branch._id.toString(),
+  });
 }
 
 async function upsertStaffUser({ email, password, firstName, lastName, role, employeeId }) {
@@ -142,6 +201,13 @@ async function seed() {
     employeeId: 'EMP-ADMIN-001',
   });
 
+  // Branch assignment happens in assignBranchesToStaff() at the end of the run — these roles are
+  // branch-scoped, and an unassigned branch now returns 409 BRANCH_SCOPE_UNASSIGNED rather than
+  // silently showing them the whole organisation.
+  for (const staff of SEED_ROLE_STAFF) {
+    await upsertStaffUser(staff);
+  }
+
   await seedModule2();
   await seedModule3();
   await seedModule4();
@@ -160,6 +226,11 @@ async function seed() {
   await seedModule17();
   await seedModule18();
   await seedModule19();
+
+  // SEC-030 — staff accounts must carry a branch or every branch-scoped list refuses them
+  // (row-level scoping is fail-closed; see helpers/scope.helper.js). Runs last because branches
+  // and doctor/appointment data only exist once the module seeds above have completed.
+  await assignBranchesToStaff();
 
   logger.warn('Change seed passwords immediately after first login');
   await database.disconnect();

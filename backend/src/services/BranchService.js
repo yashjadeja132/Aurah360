@@ -4,11 +4,13 @@ import AuditService from './AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { ENTITY_STATUS, PAGINATION } from '../constants/index.js';
 import { DEFAULT_WEEKLY } from '../models/Branch.model.js';
+import OrganizationService from './OrganizationService.js';
 
 class BranchService {
   constructor() {
     this.branchRepository = new BranchRepository();
     this.auditService = new AuditService();
+    this.organizationService = new OrganizationService();
   }
 
   async #assertUniqueCode(branchCode, excludeId = null) {
@@ -57,9 +59,19 @@ class BranchService {
     return branch.toSafeObject();
   }
 
-  async update(id, payload, actorId, req = null) {
+  /**
+   * SEC-030 — a branch-scoped actor may only write to their OWN branch. Expressed as a lookup
+   * so another branch's id answers 404, not 403.
+   */
+  async #findScoped(id, branchId) {
+    if (branchId && String(id) !== String(branchId)) throw ApiError.notFound('Branch not found');
     const branch = await this.branchRepository.findByIdNotDeleted(id);
     if (!branch) throw ApiError.notFound('Branch not found');
+    return branch;
+  }
+
+  async update(id, payload, actorId, req = null, { branchId = null } = {}) {
+    const branch = await this.#findScoped(id, branchId);
 
     if (payload.branchCode && payload.branchCode !== branch.branchCode) {
       await this.#assertUniqueCode(payload.branchCode, id);
@@ -67,6 +79,10 @@ class BranchService {
     if (payload.email && payload.email !== branch.email) {
       await this.#assertUniqueEmail(payload.email, id);
     }
+
+    // ORG-006 — a branch may only diverge from the organization on fields the organization has
+    // opened for override (Organization.branchOverridableFields).
+    await this.organizationService.assertBranchOverridesAllowed(Object.keys(payload || {}));
 
     const updates = { ...payload, updatedBy: actorId };
     if (updates.branchCode) updates.branchCode = updates.branchCode.toUpperCase().trim();
@@ -84,9 +100,14 @@ class BranchService {
     return updated.toSafeObject();
   }
 
-  async updateSettings(id, settings, actorId, req = null) {
-    const branch = await this.branchRepository.findByIdNotDeleted(id);
-    if (!branch) throw ApiError.notFound('Branch not found');
+  async updateSettings(id, settings, actorId, req = null, { branchId = null } = {}) {
+    const branch = await this.#findScoped(id, branchId);
+
+    // ORG-006 — the whole settings sub-document is one overridable unit ('settings'); a
+    // holidayCalendar write additionally touches the branch-level 'holidayCalendar' field.
+    const touched = ['settings'];
+    if (settings?.holidayCalendar) touched.push('holidayCalendar');
+    await this.organizationService.assertBranchOverridesAllowed(touched);
 
     const merged = {
       ...branch.settings?.toObject?.() || branch.settings || {},
@@ -151,9 +172,8 @@ class BranchService {
     };
   }
 
-  async activate(id, actorId, req = null) {
-    const branch = await this.branchRepository.findByIdNotDeleted(id);
-    if (!branch) throw ApiError.notFound('Branch not found');
+  async activate(id, actorId, req = null, { branchId = null } = {}) {
+    const branch = await this.#findScoped(id, branchId);
 
     const updated = await this.branchRepository.updateById(id, {
       isActive: true,
@@ -170,9 +190,8 @@ class BranchService {
     return updated.toSafeObject();
   }
 
-  async deactivate(id, actorId, req = null) {
-    const branch = await this.branchRepository.findByIdNotDeleted(id);
-    if (!branch) throw ApiError.notFound('Branch not found');
+  async deactivate(id, actorId, req = null, { branchId = null } = {}) {
+    const branch = await this.#findScoped(id, branchId);
 
     const updated = await this.branchRepository.updateById(id, {
       isActive: false,
@@ -189,9 +208,8 @@ class BranchService {
     return updated.toSafeObject();
   }
 
-  async softDelete(id, actorId, req = null) {
-    const branch = await this.branchRepository.findByIdNotDeleted(id);
-    if (!branch) throw ApiError.notFound('Branch not found');
+  async softDelete(id, actorId, req = null, { branchId = null } = {}) {
+    const branch = await this.#findScoped(id, branchId);
 
     const updated = await this.branchRepository.updateById(id, {
       deletedAt: new Date(),
@@ -217,7 +235,13 @@ class BranchService {
    * branch without deleting history. Historical (past/completed/cancelled) appointments keep
    * their original branchId so reporting stays reconcilable.
    */
-  async transferToBranch(fromBranchId, toBranchId, actorId, req = null) {
+  async transferToBranch(fromBranchId, toBranchId, actorId, req = null, { branchId = null } = {}) {
+    // Both ends must be in scope: moving data OUT of another branch is as much a cross-branch
+    // write as moving it in.
+    if (branchId) {
+      await this.#findScoped(fromBranchId, branchId);
+      await this.#findScoped(toBranchId, branchId);
+    }
     if (fromBranchId === toBranchId) {
       throw ApiError.badRequest('Source and target branch must differ');
     }

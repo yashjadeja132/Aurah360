@@ -16,6 +16,9 @@ export const treatmentPlansApi = {
   listByDoctor(params) {
     return api.get('/treatment-plans/doctor', { params }).then((res) => res.data);
   },
+  listByPatient(patientId) {
+    return api.get(`/treatment-plans/patient/${patientId}`).then((res) => res.data);
+  },
   listByConsultation(consultationId) {
     return api.get(`/treatment-plans/consultation/${consultationId}`).then((res) => res.data);
   },

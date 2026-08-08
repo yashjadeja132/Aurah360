@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { orgFinancialYearStartMonth } from '../config/orgRuntime.js';
 
 export function startOfDay(d = new Date()) {
   const x = new Date(d);
@@ -25,6 +26,34 @@ export function daysAgo(n, from = new Date()) {
   x.setDate(x.getDate() - n);
   return x;
 }
+
+/**
+ * ORG-001 — the clinic's financial year, per `Organization.financialYearStartMonth`.
+ *
+ * India's FY runs April–March, so a calendar-year report is the wrong period for anything a
+ * clinic files. `offsetYears` steps whole financial years backwards (0 = the FY containing
+ * `on`, -1 = the previous one).
+ *
+ * Returns local-time bounds, matching startOfDay/endOfDay used everywhere else in this helper.
+ */
+export function financialYearRange(on = new Date(), offsetYears = 0) {
+  const startMonth = orgFinancialYearStartMonth(); // 1..12
+  const monthIndex = startMonth - 1; // Date months are 0-based
+  // The FY labelled by its starting year: before the start month we are still in the FY that
+  // began last calendar year.
+  const startYear = (on.getMonth() < monthIndex ? on.getFullYear() - 1 : on.getFullYear())
+    + offsetYears;
+  const from = new Date(startYear, monthIndex, 1, 0, 0, 0, 0);
+  // Day 0 of the start month one year on = the last day of the financial year.
+  const to = new Date(startYear + 1, monthIndex, 0, 23, 59, 59, 999);
+  return { from, to, startMonth, startYear, label: `FY${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}` };
+}
+
+/**
+ * Named reporting periods. An explicit dateFrom/dateTo always wins over `period`.
+ * `FY` = the current financial year, `FY_PREV` = the one before it.
+ */
+export const REPORT_PERIOD = Object.freeze({ FY: 'FY', FY_PREV: 'FY_PREV' });
 
 /** Normalize query filters used across dashboards/reports. */
 export function parseReportFilters(query = {}) {
@@ -63,6 +92,16 @@ export function parseReportFilters(query = {}) {
     if (!Number.isNaN(d.getTime())) filters.dateTo = endOfDay(d);
   }
 
+  // A named financial-year period fills in whichever bound the caller did not pin explicitly.
+  const period = query.period ? String(query.period).toUpperCase() : null;
+  if (period === REPORT_PERIOD.FY || period === REPORT_PERIOD.FY_PREV) {
+    const fy = financialYearRange(new Date(), period === REPORT_PERIOD.FY_PREV ? -1 : 0);
+    if (!filters.dateFrom) filters.dateFrom = fy.from;
+    if (!filters.dateTo) filters.dateTo = fy.to;
+    filters.period = period;
+    filters.financialYearLabel = fy.label;
+  }
+
   if (!filters.dateFrom && !filters.dateTo) {
     filters.dateFrom = daysAgo(30);
     filters.dateTo = endOfDay();
@@ -99,12 +138,31 @@ export function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/**
+ * `YYYY-MM-DD` for the LOCAL calendar day. Must NOT be `toISOString().slice(0, 10)`: the range
+ * bounds come from `startOfDay`/`endOfDay`, which are local, so in IST (UTC+5:30) local midnight is
+ * `…T18:30:00.000Z` on the PREVIOUS UTC date — a UTC slice labelled every bucket a day early.
+ */
+export function localDayKey(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * The inclusive list of local calendar-day keys spanned by `from`..`to`.
+ *
+ * These keys are joined against `$dateToString` group ids, so those aggregations MUST pass
+ * `timezone: clinicTimezone()` — otherwise Mongo groups on the UTC day while this list is on the
+ * local day and the two disagree. Before the timezone was supplied, a request for Aug 3–5 produced
+ * labels Aug 2–4, and the last day of every instant-based series (revenue, patient growth) was
+ * dropped entirely because its UTC key fell outside the shifted list.
+ */
 export function eachDayKey(from, to) {
   const keys = [];
   const cur = startOfDay(from);
   const end = startOfDay(to);
   while (cur <= end) {
-    keys.push(cur.toISOString().slice(0, 10));
+    keys.push(localDayKey(cur));
     cur.setDate(cur.getDate() + 1);
   }
   return keys;
@@ -112,6 +170,8 @@ export function eachDayKey(from, to) {
 
 export default {
   parseReportFilters,
+  financialYearRange,
+  REPORT_PERIOD,
   applyCommonMatch,
   startOfDay,
   endOfDay,
@@ -120,5 +180,6 @@ export default {
   daysAgo,
   pct,
   roundMoney,
+  localDayKey,
   eachDayKey,
 };

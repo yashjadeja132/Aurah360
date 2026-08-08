@@ -26,6 +26,9 @@ export const createDeviceSchema = z.object({
   serialNumber: z.string().max(80).optional().nullable(),
   capability: z.enum(DEVICE_CAPABILITY_LIST).optional(),
   tags: z.array(z.string().max(40)).optional(),
+  /** RSC-001 — maintenance schedule; nextMaintenanceDueAt gates bookability once it has passed. */
+  lastMaintenanceAt: z.coerce.date().optional().nullable(),
+  nextMaintenanceDueAt: z.coerce.date().optional().nullable(),
   notes: z.string().max(500).optional().nullable(),
 });
 

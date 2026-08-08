@@ -23,6 +23,7 @@ import {
   useProtocols,
   usePackages,
 } from '@/modules/treatmentPlans/hooks/useTreatmentPlans';
+import { localDateKey } from '@/utils/date';
 import {
   TREATMENT_PLAN_STATUS_LABELS,
   EDITABLE_STATUSES,
@@ -110,9 +111,9 @@ export default function TreatmentPlanBuilderPage() {
         expectedResults: plan.goals?.expectedResults || '',
         clinicalObjectives: plan.goals?.clinicalObjectives || '',
         beforePhotosReference: plan.goals?.beforePhotosReference || '',
-        reviewDate: plan.goals?.reviewDate
-          ? new Date(plan.goals.reviewDate).toISOString().slice(0, 10)
-          : '',
+        // A review date is a CALENDAR DAY stored as local start-of-day; a UTC slice showed it a
+        // day early and would persist that shift on the next save. See `@/utils/date`.
+        reviewDate: localDateKey(plan.goals?.reviewDate || ''),
       },
       followUp: {
         reviewAfterDays: plan.followUp?.reviewAfterDays ?? '',

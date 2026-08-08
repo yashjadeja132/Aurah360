@@ -1,14 +1,22 @@
 import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import BillingService from '../services/BillingService.js';
+import { scopedListQuery } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — the three billing BROWSE lists (invoices, due payments, discount approvals) are
+ * branch-scoped for every role except OWNER/ADMIN. They are NOT doctor-scoped: billing is a
+ * cashier/reception function and an invoice is not owned by a doctor, so pinning them to a
+ * doctorId would hide a branch's own ledger from the people who have to reconcile it.
+ * Invoice reads by id (and payments/print) stay broad and audited.
+ */
 class BillingController {
   constructor() {
     this.service = new BillingService();
   }
 
   list = asyncHandler(async (req, res) => {
-    const result = await this.service.list(req.query);
+    const result = await this.service.list(await scopedListQuery(req, { branch: true }));
     return ApiResponse.success(res, {
       message: 'Invoices retrieved',
       data: result.items,
@@ -53,6 +61,26 @@ class BillingController {
     return ApiResponse.success(res, { message: 'Invoice finalized', data: { invoice } });
   });
 
+  duePayments = asyncHandler(async (req, res) => {
+    const result = await this.service.listDuePayments(await scopedListQuery(req, { branch: true }));
+    return ApiResponse.success(res, {
+      message: 'Due payments retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
+  });
+
+  discountApprovalQueue = asyncHandler(async (req, res) => {
+    const result = await this.service.listDiscountApprovalQueue(
+      await scopedListQuery(req, { branch: true })
+    );
+    return ApiResponse.success(res, {
+      message: 'Discount approvals retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
+  });
+
   approveDiscount = asyncHandler(async (req, res) => {
     const invoice = await this.service.approveDiscount(
       req.params.id,
@@ -61,6 +89,16 @@ class BillingController {
       req
     );
     return ApiResponse.success(res, { message: 'Discount approved', data: { invoice } });
+  });
+
+  rejectDiscount = asyncHandler(async (req, res) => {
+    const invoice = await this.service.rejectDiscount(
+      req.params.id,
+      req.body,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Discount rejected', data: { invoice } });
   });
 
   recordPayment = asyncHandler(async (req, res) => {

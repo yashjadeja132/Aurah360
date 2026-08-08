@@ -9,6 +9,7 @@ import {
   daysAgo,
 } from '../../helpers/reportFilters.helper.js';
 import { ANALYTICS_PERIOD } from '../../enums/analytics.js';
+import { dayBucket } from '../../utils/date.util.js';
 
 class AppointmentAnalyticsService {
   async report(query = {}) {
@@ -48,7 +49,9 @@ class AppointmentAnalyticsService {
       { $match: match },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$appointmentDate' } },
+          // appointmentDate is a calendar day stored as local start-of-day; a UTC bucket labelled
+          // every point in this trend a day early.
+          _id: dayBucket('$appointmentDate'),
           count: { $sum: 1 },
           completed: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, 1, 0] } },
           cancelled: { $sum: { $cond: [{ $eq: ['$status', 'CANCELLED'] }, 1, 0] } },

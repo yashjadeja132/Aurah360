@@ -1,13 +1,37 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import ApiError from '../../libs/ApiError.js';
 import AiRun from '../../models/AiRun.model.js';
 import AiFeatureFlag from '../../models/AiFeatureFlag.model.js';
+import User from '../../models/User.model.js';
 import PiiRedactor from './PiiRedactor.js';
 import AiProviderAdapter from './AiProviderAdapter.js';
 import AuditService from '../AuditService.js';
 import config from '../../config/index.js';
 import { AUDIT_ACTIONS } from '../../enums/auditAction.js';
 import { AI_USE_CASE, AI_RUN_STATUS, AI_DISPOSITION } from '../../enums/ai.js';
+import { estimateCostUsd } from './AiCostEstimator.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Byte-stable system prompt + structured-output schema for the clinical copilot. Loaded once
+ * from disk so the cached prompt prefix never varies between requests (any interpolation of
+ * patient data or dates would silently break prompt caching).
+ */
+const CLINICAL_COPILOT_PROMPT = fs.readFileSync(
+  path.join(HERE, '..', '..', 'prompts', 'clinical-copilot-v1.txt'),
+  'utf8'
+);
+const CLINICAL_COPILOT_SCHEMA = JSON.parse(
+  fs.readFileSync(path.join(HERE, 'schemas', 'clinical-copilot-v1.schema.json'), 'utf8')
+);
+
+const JSON_SCHEMAS = {
+  [AI_USE_CASE.CLINICAL_COPILOT]: CLINICAL_COPILOT_SCHEMA,
+};
 
 const SCHEMA_HINTS = {
   [AI_USE_CASE.SUGGESTED_QUESTIONS]: '{ "questions": string[] }',
@@ -18,6 +42,8 @@ const SCHEMA_HINTS = {
   [AI_USE_CASE.PATIENT_INSTRUCTION_DRAFT]: '{ "instructions": string }',
   [AI_USE_CASE.TREATMENT_CHECKLIST_ASSIST]: '{ "checklist": string[] }',
   [AI_USE_CASE.ANALYTICS_NARRATIVE]: '{ "narrative": string }',
+  [AI_USE_CASE.CLINICAL_COPILOT]:
+    '{ "summary": string, "possible_conditions": [...], "follow_up_questions": string[], "red_flags": string[], "investigations": [...], "diet_lifestyle_advice": string[], "medication_suggestions": [...], "procedural_options_note": string, "aftercare_advice_english": string, "patient_advice_gujarati": string, "confidence_note": string }',
 };
 
 const SYSTEM_PROMPTS = {
@@ -37,7 +63,25 @@ const SYSTEM_PROMPTS = {
     'Given the protocol and current session state, list any missing prerequisite steps (consent, photos, patch test, contraindication check).',
   [AI_USE_CASE.ANALYTICS_NARRATIVE]:
     'Write a short narrative summary of the provided de-identified aggregate clinic metrics for management.',
+  [AI_USE_CASE.CLINICAL_COPILOT]: CLINICAL_COPILOT_PROMPT,
 };
+
+/**
+ * Human-readable label per use case. The label alone is not a version — two deploys can both say
+ * "v1" while the prompt text differs — so the recorded promptVersion appends a content hash of the
+ * exact system prompt string used, making AI provenance verifiable after the fact.
+ */
+const PROMPT_LABELS = {
+  [AI_USE_CASE.CLINICAL_COPILOT]: 'clinical-copilot-v1',
+};
+
+/** `<label>@<8 hex>` — changes the moment a single byte of the system prompt changes. */
+function promptVersionFor(useCase, systemPrompt) {
+  if (!systemPrompt) return null;
+  const label = PROMPT_LABELS[useCase] || `${useCase.toLowerCase()}-v1`;
+  const hash = crypto.createHash('sha256').update(systemPrompt).digest('hex').slice(0, 8);
+  return `${label}@${hash}`;
+}
 
 /**
  * Privacy-safe, doctor-controlled AI gateway (Module 9). Every call: strips identity fields,
@@ -58,19 +102,63 @@ class AiGatewayService {
     return flag ? flag.enabled : true; // default on unless explicitly disabled
   }
 
-  async run({ useCase, context, patientId = null, consultationId = null }, actorId, req = null) {
+  async run({ useCase, context, patientId = null, consultationId = null, parentRunId = null }, actorId, req = null) {
     if (!Object.values(AI_USE_CASE).includes(useCase)) {
       throw ApiError.badRequest(`Unknown AI use case: ${useCase}`);
     }
 
     const enabled = await this.isUseCaseEnabled(useCase);
     if (!enabled) {
+      const reason = 'This AI use case is currently disabled by clinic policy.';
       const run = await this.#recordRun({
-        useCase, patientId, consultationId, actorId,
+        useCase, patientId, consultationId, parentRunId, actorId,
         inputManifest: {}, fieldsRemoved: [], status: AI_RUN_STATUS.KILL_SWITCH,
-        errorMessage: 'This AI use case is currently disabled by clinic policy.',
+        errorMessage: reason,
       });
-      return { runId: run._id.toString(), status: AI_RUN_STATUS.KILL_SWITCH, output: null };
+      return {
+        runId: run._id.toString(),
+        status: AI_RUN_STATUS.KILL_SWITCH,
+        output: null,
+        model: this.adapter.effectiveModel(),
+        degraded: true,
+        reason,
+      };
+    }
+
+    // AI_MONTHLY_BUDGET_USD — hard spend ceiling. Checked BEFORE the provider call so an
+    // over-budget clinic stops spending immediately. This never throws: an exceeded budget is a
+    // visible degraded response (the same shape the kill switch and provider errors return), so
+    // the consultation continues manually rather than erroring out (AI-004/NFR-020).
+    const budget = await this.checkMonthlyBudget();
+    if (budget.exceeded) {
+      const reason =
+        `AI is paused for the rest of this month: estimated spend $${budget.spentUsd.toFixed(2)} has `
+        + `reached the configured monthly budget of $${budget.budgetUsd.toFixed(2)}. `
+        + 'Continue the consultation manually, or ask an administrator to raise AI_MONTHLY_BUDGET_USD.';
+      const run = await this.#recordRun({
+        useCase, patientId, consultationId, parentRunId, actorId,
+        inputManifest: {}, fieldsRemoved: [], status: AI_RUN_STATUS.BUDGET_EXCEEDED,
+        errorMessage: reason,
+      });
+      await this.auditService.record(AUDIT_ACTIONS.AI_BUDGET_EXCEEDED, {
+        actorId,
+        metadata: {
+          aiRunId: run._id.toString(),
+          useCase,
+          spentUsd: budget.spentUsd,
+          budgetUsd: budget.budgetUsd,
+        },
+        req,
+      });
+      return {
+        runId: run._id.toString(),
+        status: AI_RUN_STATUS.BUDGET_EXCEEDED,
+        output: null,
+        model: this.adapter.effectiveModel(),
+        degraded: true,
+        reason,
+        budget: { spentUsd: budget.spentUsd, budgetUsd: budget.budgetUsd },
+      };
     }
 
     // AI-002 — de-identification gate. Only current-patient/current-request context, never
@@ -80,20 +168,57 @@ class AiGatewayService {
     const schemaHint = SCHEMA_HINTS[useCase];
     const systemPrompt = SYSTEM_PROMPTS[useCase];
     const userPrompt = JSON.stringify(manifest);
+    const promptVersion = promptVersionFor(useCase, systemPrompt);
+
+    const jsonSchema = JSON_SCHEMAS[useCase] || null;
 
     const startedAt = Date.now();
     try {
-      const { output } = await this.adapter.complete({ systemPrompt, userPrompt, schemaHint });
+      const { output, model, degraded, reason, usage } = await this.adapter.complete({
+        systemPrompt, userPrompt, schemaHint, jsonSchema,
+      });
       const latencyMs = Date.now() - startedAt;
+      // Tokens are spent whether or not the output was usable, so cost is recorded on the
+      // degraded path too — otherwise a run of refusals would look free.
+      const estimatedCostUsd = estimateCostUsd(usage, model, this.adapter.effectiveProvider());
+
+      // Provider declined or truncated — fail open, never block the consultation (§9.2).
+      if (degraded || !output) {
+        const run = await this.#recordRun({
+          useCase, patientId, consultationId, parentRunId, actorId,
+          inputManifest: manifest, fieldsRemoved, model,
+          status: AI_RUN_STATUS.PROVIDER_ERROR, errorMessage: reason || 'No AI output returned', latencyMs,
+          promptVersion, usage, estimatedCostUsd,
+        });
+        return {
+          runId: run._id.toString(),
+          status: AI_RUN_STATUS.PROVIDER_ERROR,
+          output: null,
+          model,
+          degraded: true,
+          reason: reason || 'No AI output returned',
+          latencyMs,
+        };
+      }
+
       const outputHash = crypto.createHash('sha256').update(JSON.stringify(output)).digest('hex');
 
       const run = await this.#recordRun({
-        useCase, patientId, consultationId, actorId,
-        inputManifest: manifest, fieldsRemoved,
+        useCase, patientId, consultationId, parentRunId, actorId,
+        inputManifest: manifest, fieldsRemoved, model,
         status: AI_RUN_STATUS.SUCCESS, output, outputHash, latencyMs,
+        promptVersion, usage, estimatedCostUsd,
       });
 
-      return { runId: run._id.toString(), status: AI_RUN_STATUS.SUCCESS, output, latencyMs };
+      return {
+        runId: run._id.toString(),
+        status: AI_RUN_STATUS.SUCCESS,
+        output,
+        model,
+        degraded: false,
+        reason: null,
+        latencyMs,
+      };
     } catch (err) {
       const latencyMs = Date.now() - startedAt;
       const status = err.name === 'AbortError' ? AI_RUN_STATUS.TIMEOUT
@@ -101,14 +226,51 @@ class AiGatewayService {
         : AI_RUN_STATUS.PROVIDER_ERROR;
 
       const run = await this.#recordRun({
-        useCase, patientId, consultationId, actorId,
+        useCase, patientId, consultationId, parentRunId, actorId,
         inputManifest: manifest, fieldsRemoved,
-        status, errorMessage: err.message, latencyMs,
+        status, errorMessage: err.message, latencyMs, promptVersion,
       });
 
       // AI-004/NFR-020 — safe fallback: caller continues the manual workflow, never blocked.
-      return { runId: run._id.toString(), status, output: null, error: err.message };
+      return {
+        runId: run._id.toString(),
+        status,
+        output: null,
+        model: this.adapter.effectiveModel(),
+        degraded: true,
+        reason: err.message,
+        error: err.message,
+      };
     }
+  }
+
+  /**
+   * Month-to-date estimated spend vs AI_MONTHLY_BUDGET_USD.
+   *
+   * "Month" = calendar month in server-local time, matching how the budget is set. A budget of 0
+   * or less is treated as UNLIMITED (not "block everything") — a misconfigured/blank env var must
+   * never silently switch the clinical AI layer off. Never throws: a failed aggregation returns
+   * "not exceeded" and logs, because a database hiccup must not become an AI outage.
+   */
+  async checkMonthlyBudget(now = new Date()) {
+    const budgetUsd = Number(config.ai.monthlyBudgetUsd) || 0;
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    let spentUsd = 0;
+    try {
+      const [agg] = await AiRun.aggregate([
+        { $match: { createdAt: { $gte: monthStart } } },
+        { $group: { _id: null, total: { $sum: '$estimatedCostUsd' } } },
+      ]);
+      spentUsd = Number(agg?.total) || 0;
+    } catch {
+      return { exceeded: false, spentUsd: 0, budgetUsd, monthStart };
+    }
+    return {
+      exceeded: budgetUsd > 0 && spentUsd >= budgetUsd,
+      spentUsd,
+      budgetUsd,
+      monthStart,
+    };
   }
 
   async #recordRun(payload) {
@@ -116,16 +278,22 @@ class AiGatewayService {
       useCase: payload.useCase,
       patientId: payload.patientId,
       consultationId: payload.consultationId,
+      parentRunId: payload.parentRunId || null,
       requestedBy: payload.actorId,
-      provider: config.ai.provider,
-      model: config.ai.model,
+      provider: this.adapter.effectiveProvider(),
+      model: payload.model || this.adapter.effectiveModel(),
       inputManifest: payload.inputManifest,
       fieldsRemoved: payload.fieldsRemoved,
       output: payload.output || null,
       outputHash: payload.outputHash || null,
       status: payload.status,
       errorMessage: payload.errorMessage || null,
-      latencyMs: payload.latencyMs || null,
+      latencyMs: payload.latencyMs ?? null,
+      // Real provenance: the prompt actually used, and the tokens actually billed. Both are null/
+      // zero for runs where no provider call happened (kill switch, budget refusal) — by design.
+      promptVersion: payload.promptVersion || null,
+      usage: payload.usage || undefined,
+      estimatedCostUsd: payload.estimatedCostUsd ?? 0,
     });
 
     await this.auditService.record(AUDIT_ACTIONS.AI_RUN_COMPLETED, {
@@ -164,11 +332,31 @@ class AiGatewayService {
     return run.toSafeObject();
   }
 
-  async listRuns(query = {}) {
+  /**
+   * SEC-030 — AI runs carry de-identified but still clinical context (chief complaints, drafted
+   * notes, red flags) and were readable organisation-wide by anyone holding AI governance view,
+   * which includes the branch-pinned BRANCH_MANAGER.
+   *
+   * `AiRun` has no `branchId` column, so there is nothing on the row itself to pin. The branch
+   * dimension that actually exists is the REQUESTER: every staff user belongs to exactly one
+   * branch (`User.branch`), and a branch manager's governance remit is the AI usage of the staff
+   * they manage. So a scoped caller sees the runs requested by users at their own branch. The
+   * alternative — deriving a branch from each run's consultation/patient — was rejected because a
+   * run may have neither (`patientId`/`consultationId` are both nullable), which would silently
+   * hide exactly the ungrounded runs governance most needs to see.
+   *
+   * @param {object} query
+   * @param {string|null} scopedBranchId  null = unrestricted (OWNER/ADMIN).
+   */
+  async listRuns(query = {}, scopedBranchId = null) {
     const filter = {};
     if (query.useCase) filter.useCase = query.useCase;
     if (query.patientId) filter.patientId = query.patientId;
     if (query.status) filter.status = query.status;
+    if (scopedBranchId) {
+      const userIds = await User.find({ branch: scopedBranchId }).distinct('_id');
+      filter.requestedBy = { $in: userIds };
+    }
     const rows = await AiRun.find(filter).sort({ createdAt: -1 }).limit(200).exec();
     return rows.map((r) => r.toSafeObject());
   }
@@ -209,6 +397,7 @@ class AiGatewayService {
     const errors = rows.filter((r) => r.status !== AI_RUN_STATUS.SUCCESS).length;
     const avgLatency = total ? Math.round(rows.reduce((s, r) => s + (r.latencyMs || 0), 0) / total) : 0;
     const totalCost = rows.reduce((s, r) => s + (r.estimatedCostUsd || 0), 0);
+    const budget = await this.checkMonthlyBudget();
 
     return {
       totalRuns: total,
@@ -217,6 +406,9 @@ class AiGatewayService {
       avgLatencyMs: avgLatency,
       estimatedCostUsd: Number(totalCost.toFixed(2)),
       monthlyBudgetUsd: config.ai.monthlyBudgetUsd,
+      /** Live budget state — this is what actually gates AI calls, so it is shown, not implied. */
+      monthToDateSpendUsd: Number(budget.spentUsd.toFixed(2)),
+      budgetExceeded: budget.exceeded,
     };
   }
 }

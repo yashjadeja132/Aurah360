@@ -71,6 +71,25 @@ export const DOCUMENT_SOURCE = Object.freeze({
 
 export const DOCUMENT_SOURCE_LIST = Object.freeze(Object.values(DOCUMENT_SOURCE));
 
+/**
+ * Referral/acquisition taxonomy (PAT-003, §5.1, §12.5). Lifted out of Patient.model.js so the
+ * Zod validator and the schema cannot drift — they drifted before, and the validator's silence
+ * about these fields is what made them unsaveable.
+ */
+export const PATIENT_SOURCE_CATEGORY_LIST = Object.freeze([
+  'GOOGLE',
+  'WEBSITE',
+  'FACEBOOK_AD',
+  'INSTAGRAM_AD',
+  'WHATSAPP',
+  'WALK_IN',
+  'PERSON_REFERRAL',
+  'PATIENT_REFERRAL',
+  'DOCTOR_REFERRAL',
+  'EVENT',
+  'OTHER',
+]);
+
 export const PATIENT_VISIBILITY = Object.freeze({
   HIDDEN: 'HIDDEN',
   RELEASED: 'RELEASED',
@@ -99,11 +118,88 @@ export const PHOTO_LATERALITY = Object.freeze({
 
 export const PHOTO_LATERALITY_LIST = Object.freeze(Object.values(PHOTO_LATERALITY));
 
+/**
+ * IMG-003 — the original restricted list. Kept verbatim and still applied as a substring test
+ * by helpers/bodyRegion.helper.js, so nothing that was blocked before can start passing.
+ */
 export const RESTRICTED_BODY_REGIONS = Object.freeze([
   'genital',
   'perianal',
   'breast_areola',
   'buttock_cleft',
+]);
+
+/**
+ * IMG-003 (hardened) — the same four policy concepts expressed as a controlled vocabulary of
+ * clinical synonyms/variants, matched as normalised TOKEN SETS rather than raw substrings
+ * (see helpers/bodyRegion.helper.js). An entry matches when every token in it is present in
+ * the normalised region, in any order — so "Areola (left breast)" and "left_areola" are both
+ * caught, where the old substring test only caught the literal string "breast_areola".
+ *
+ * Deliberately NOT listed: chest, abdomen, groin, inguinal, bikini line, bare "breast",
+ * bare "buttock", thigh. Those are routine, non-intimate treatment areas in an aesthetic
+ * clinic (hair removal, acne, scar review) and blocking them would stop real treatment.
+ * This list only widens the coverage of the four concepts the clinic already restricted:
+ * genital, perianal (incl. perineum), breast areola/nipple, and the gluteal/natal cleft.
+ */
+export const RESTRICTED_BODY_REGION_TERMS = Object.freeze([
+  // 1. genital
+  'genital',
+  'genitals',
+  'genitalia',
+  'genital area',
+  'genital region',
+  'private parts',
+  'intimate area',
+  'penis',
+  'penile',
+  'foreskin',
+  'prepuce',
+  'scrotum',
+  'scrotal',
+  'testicle',
+  'testicles',
+  'testis',
+  'testes',
+  'testicular',
+  'vulva',
+  'vulval',
+  'vulvar',
+  'vagina',
+  'vaginal',
+  'introitus',
+  'labia',
+  'labial',
+  'labium',
+  'clitoris',
+  'clitoral',
+  'mons pubis',
+  'pubis',
+  'pubic',
+  // 2. perianal / perineum
+  'perianal',
+  'peri anal',
+  'perineum',
+  'perineal',
+  'anus',
+  'anal',
+  'anorectal',
+  'rectum',
+  'rectal',
+  // 3. breast areola / nipple
+  'breast areola',
+  'areola',
+  'areolae',
+  'areolar',
+  'nipple',
+  'nipples',
+  // 4. gluteal / natal cleft
+  'buttock cleft',
+  'buttocks cleft',
+  'gluteal cleft',
+  'intergluteal cleft',
+  'natal cleft',
+  'gluteal crease cleft',
 ]);
 
 /** Front Desk Handoff Note (§5.3, PAT-006) */
@@ -153,6 +249,7 @@ export default {
   TIMELINE_EVENT,
   DOCUMENT_REVIEW_STATE,
   DOCUMENT_SOURCE,
+  PATIENT_SOURCE_CATEGORY_LIST,
   PATIENT_VISIBILITY,
   SCAN_STATE,
   PHOTO_LATERALITY,

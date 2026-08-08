@@ -17,9 +17,10 @@ import { ConsultationSoapRepository } from '../repositories/ConsultationClinical
 import { CONSULTATION_STATUS } from '../enums/consultation.js';
 import ConsultationService from '../services/ConsultationService.js';
 import PatientPortalService from '../services/PatientPortalService.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_release_gate'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_release_gate'));
   await mongoose.connection.dropDatabase();
 
   const patient = await Patient.create({

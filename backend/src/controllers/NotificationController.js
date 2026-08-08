@@ -1,7 +1,25 @@
 import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import NotificationService from '../services/NotificationService.js';
+import { hasGlobalScope } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-030 — notifications have NO branch dimension.
+ *
+ * Neither `Notification` nor `NotificationTemplate` carries a `branchId` (or anything that
+ * implies one): a notification is keyed on eventName + recipient + channel, optionally a
+ * patientId or userId. There is therefore nothing to pin `list`, `reports` or `listTemplates`
+ * to, and this change deliberately does NOT invent one — a branch column on notifications is a
+ * schema decision (it would have to be backfilled from the originating event, and every
+ * emitter taught to set it) rather than something a controller can synthesise. The delivery
+ * log stays org-wide for `notifications.view` holders; templates are org-wide by design.
+ *
+ * What IS fixed here is the one leak that needs no branch column: `getById` served ANY
+ * notification body to ANY `notifications.view` holder, including another member of staff's
+ * personal in-app message. A notification addressed to a specific user now belongs to that
+ * user — 404 for everyone else, so the id cannot be enumerated. Patient- and broadcast-addressed
+ * notifications (no `userId`) stay readable, which is what the delivery-log screen needs.
+ */
 class NotificationController {
   constructor() {
     this.service = new NotificationService();
@@ -27,7 +45,11 @@ class NotificationController {
   });
 
   getById = asyncHandler(async (req, res) => {
-    const notification = await this.service.getById(req.params.id);
+    const notification = await this.service.getById(req.params.id, {
+      // null = unrestricted (OWNER/ADMIN). Otherwise the caller may only open a notification
+      // that is unaddressed (patient/broadcast) or addressed to themselves.
+      viewerUserId: hasGlobalScope(req.auth) ? null : req.auth.userId,
+    });
     return ApiResponse.success(res, { data: { notification } });
   });
 

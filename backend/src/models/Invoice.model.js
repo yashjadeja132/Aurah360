@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import {
+  DISCOUNT_APPROVAL_STATUS,
+  DISCOUNT_APPROVAL_STATUS_LIST,
   DISCOUNT_TYPE,
   DISCOUNT_TYPE_LIST,
   INVOICE_ITEM_TYPE_LIST,
@@ -25,6 +27,22 @@ const invoiceItemSchema = new mongoose.Schema(
     quantity: { type: Number, default: 1, min: 0 },
     unitPrice: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
+    /**
+     * The GST rate actually applied to THIS line, resolved server-side from the item master
+     * (InventoryItem.gstPercent) or the service's fee schedule (FeeSchedule.taxPercent), falling
+     * back to the branch rate. Never accepted from the client.
+     *
+     * Persisted so the rate that was charged is a fact of the invoice: a later change to the
+     * item master must not retro-alter a finalized invoice, and a GST return has to be able to
+     * group by rate. `null` marks a legacy line written before per-line GST existed — those fall
+     * back to the invoice header's `taxPercent`, which is exactly how they were charged.
+     */
+    taxPercent: { type: Number, default: null, min: 0, max: 100 },
+    /** HSN/SAC snapshot from the item master — required on a GST invoice. */
+    hsnCode: { type: String, default: null, trim: true },
+    /** The post-discount amount this line's tax was computed on. Sum over lines reconciles
+     *  exactly to `subtotal - discount`. */
+    taxableAmount: { type: Number, default: 0, min: 0 },
     tax: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
   },
@@ -115,10 +133,29 @@ const invoiceSchema = new mongoose.Schema(
     discountValue: { type: Number, default: 0, min: 0 },
     discountApprovalRequired: { type: Boolean, default: false },
     discountApproved: { type: Boolean, default: false },
-    /** LOY-005 — loyalty-points redemption applied as a discount at billing. Draft-only;
-     *  the discount value it contributes flows through the same discountApprovalRequired/
-     *  discountApproved threshold check as any other discount (see BillingService
-     *  #computeDiscountApproval). Null when no redemption is applied. */
+    /**
+     * A.5 discount-approval gate. `discountApprovalStatus` is the authoritative state machine
+     * (see DISCOUNT_APPROVAL_STATUS); `discountApprovalRequired`/`discountApproved` are kept in
+     * lockstep with it as the pre-existing boolean projection older callers read.
+     * `discountReason` is mandatory whenever the manual discount exceeds
+     * config.billing.discountApprovalThresholdPercent — it is the requester's justification, as
+     * distinct from `discountDecisionNote`, which is the approver's note on the decision.
+     */
+    discountApprovalStatus: {
+      type: String,
+      enum: DISCOUNT_APPROVAL_STATUS_LIST,
+      default: DISCOUNT_APPROVAL_STATUS.NOT_REQUIRED,
+      index: true,
+    },
+    discountReason: { type: String, default: null, trim: true, maxlength: 500 },
+    discountDecisionNote: { type: String, default: null, trim: true, maxlength: 500 },
+    discountApprovalDecidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    discountApprovalDecidedAt: { type: Date, default: null },
+    /** LOY-005 — loyalty-points redemption applied as a discount at billing. Draft-only.
+     *  Deliberately EXCLUDED from the discount-approval threshold check: it is a
+     *  system-computed redemption of the patient's own accrued points, already governed by the
+     *  loyalty program's own caps/balance validation and ledger audit trail (see BillingService
+     *  #manualDiscountTotal). Null when no redemption is applied. */
     loyaltyRedemption: {
       type: new mongoose.Schema(
         {
@@ -128,6 +165,9 @@ const invoiceSchema = new mongoose.Schema(
           patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', default: null },
           appliedAt: { type: Date, default: Date.now },
           appliedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+          /** LOY-005 — the redemption's operation key. A retried apply-redemption request
+           *  carrying the same key is answered with this invoice instead of a second debit. */
+          idempotencyKey: { type: String, default: null },
         },
         { _id: false }
       ),
@@ -196,6 +236,10 @@ invoiceSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       discount: item.discount,
+      // Legacy lines carry no per-line rate; they were charged at the invoice header rate.
+      taxPercent: item.taxPercent ?? this.taxPercent ?? 0,
+      hsnCode: item.hsnCode ?? null,
+      taxableAmount: item.taxableAmount ?? 0,
       tax: item.tax,
       total: item.total,
     })),
@@ -218,6 +262,13 @@ invoiceSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     discountValue: this.discountValue,
     discountApprovalRequired: this.discountApprovalRequired,
     discountApproved: this.discountApproved,
+    discountApprovalStatus: this.discountApprovalStatus,
+    discountReason: this.discountReason,
+    discountDecisionNote: this.discountDecisionNote,
+    discountApprovalDecidedBy: this.discountApprovalDecidedBy
+      ? this.discountApprovalDecidedBy.toString()
+      : null,
+    discountApprovalDecidedAt: this.discountApprovalDecidedAt,
     loyaltyRedemption: this.loyaltyRedemption
       ? {
           points: this.loyaltyRedemption.points,
@@ -230,6 +281,7 @@ invoiceSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
           appliedBy: this.loyaltyRedemption.appliedBy
             ? this.loyaltyRedemption.appliedBy.toString()
             : null,
+          idempotencyKey: this.loyaltyRedemption.idempotencyKey || null,
         }
       : null,
     tax: this.tax,

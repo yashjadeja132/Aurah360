@@ -27,6 +27,7 @@ import ConsultationTemplate from './ConsultationTemplate.model.js';
 import Medicine from './Medicine.model.js';
 import Prescription from './Prescription.model.js';
 import PrescriptionTemplate from './PrescriptionTemplate.model.js';
+import DrugInteractionRule from './DrugInteractionRule.model.js';
 import TreatmentPlan from './TreatmentPlan.model.js';
 import TreatmentProtocol from './TreatmentProtocol.model.js';
 import TreatmentPackage from './TreatmentPackage.model.js';
@@ -128,6 +129,7 @@ export {
   Medicine,
   Prescription,
   PrescriptionTemplate,
+  DrugInteractionRule,
   TreatmentPlan,
   TreatmentProtocol,
   TreatmentPackage,

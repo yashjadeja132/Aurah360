@@ -95,6 +95,69 @@ export function useVoidInvoice(id) {
   });
 }
 
+/** A.5 — pending discount approvals for an approver holding billing.discount_approve. */
+export function useDiscountApprovalQueue(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.BILLING_DISCOUNT_APPROVALS(params),
+    queryFn: async () => {
+      const res = await billingApi.discountApprovalQueue(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
+export function useApproveDiscount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decisionNote }) => billingApi.approveDiscount(id, decisionNote),
+    onSuccess: () => {
+      toast.success('Discount approved');
+      invalidateAll(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Approve failed')),
+  });
+}
+
+export function useRejectDiscount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decisionNote }) => billingApi.rejectDiscount(id, decisionNote),
+    onSuccess: () => {
+      toast.success('Discount rejected');
+      invalidateAll(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Reject failed')),
+  });
+}
+
+/** A.4 — the cashier's due-payments worklist (oldest first, aging buckets in `meta`). */
+export function useDuePayments(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.BILLING_DUE_PAYMENTS(params),
+    queryFn: async () => {
+      const res = await billingApi.duePayments(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
+/**
+ * A.8 — refund a recorded payment. `invoiceId` is only used to refresh that invoice's detail
+ * view; the server keys everything off the payment.
+ */
+export function useRefundPayment(invoiceId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paymentId, ...payload }) => billingApi.refundPayment(paymentId, payload),
+    onSuccess: () => {
+      toast.success('Refund recorded');
+      invalidateAll(qc);
+      if (invoiceId) qc.invalidateQueries({ queryKey: QUERY_KEYS.BILLING_DETAIL(invoiceId) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Refund failed')),
+  });
+}
+
 export function useRecordPayment(id) {
   const qc = useQueryClient();
   return useMutation({

@@ -13,9 +13,17 @@ const aiRunSchema = new mongoose.Schema(
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', default: null, index: true },
     consultationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Consultation', default: null, index: true },
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Refinement chain — set when this run re-ran an earlier run with recorded patient answers. */
+    parentRunId: { type: mongoose.Schema.Types.ObjectId, ref: 'AiRun', default: null, index: true },
     provider: { type: String, required: true },
     model: { type: String, required: true },
-    promptVersion: { type: String, default: 'v1' },
+    /**
+     * The identity of the prompt that ACTUALLY produced this run: `<label>@<8-char content hash>`.
+     * Deliberately has no default — a run recorded without a prompt (kill switch, budget refusal)
+     * must read as null, not as a fabricated version. A stale `default: 'v1'` here previously made
+     * every row claim v1 regardless of the prompt used, which made provenance unusable.
+     */
+    promptVersion: { type: String, default: null },
     inputManifest: { type: mongoose.Schema.Types.Mixed, required: true },
     fieldsRemoved: { type: [String], default: [] },
     outputHash: { type: String, default: null },
@@ -23,6 +31,14 @@ const aiRunSchema = new mongoose.Schema(
     status: { type: String, enum: AI_RUN_STATUS_LIST, required: true, index: true },
     errorMessage: { type: String, default: null },
     latencyMs: { type: Number, default: null },
+    /** Provider-reported token counts this run was billed on (provider-neutral shape). */
+    usage: {
+      inputTokens: { type: Number, default: 0 },
+      outputTokens: { type: Number, default: 0 },
+      cacheCreationInputTokens: { type: Number, default: 0 },
+      cacheReadInputTokens: { type: Number, default: 0 },
+    },
+    /** Derived from `usage` via AiCostEstimator. Hardcoded rates — an estimate, never an invoice. */
     estimatedCostUsd: { type: Number, default: 0 },
     disposition: { type: String, enum: AI_DISPOSITION_LIST, default: AI_DISPOSITION.PENDING, index: true },
     dispositionedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -39,6 +55,7 @@ aiRunSchema.methods.toSafeObject = function toSafeObject() {
     patientId: this.patientId ? this.patientId.toString() : null,
     consultationId: this.consultationId ? this.consultationId.toString() : null,
     requestedBy: this.requestedBy.toString(),
+    parentRunId: this.parentRunId ? this.parentRunId.toString() : null,
     provider: this.provider,
     model: this.model,
     promptVersion: this.promptVersion,
@@ -48,6 +65,12 @@ aiRunSchema.methods.toSafeObject = function toSafeObject() {
     status: this.status,
     errorMessage: this.errorMessage,
     latencyMs: this.latencyMs,
+    usage: {
+      inputTokens: this.usage?.inputTokens || 0,
+      outputTokens: this.usage?.outputTokens || 0,
+      cacheCreationInputTokens: this.usage?.cacheCreationInputTokens || 0,
+      cacheReadInputTokens: this.usage?.cacheReadInputTokens || 0,
+    },
     estimatedCostUsd: this.estimatedCostUsd,
     disposition: this.disposition,
     dispositionedBy: this.dispositionedBy ? this.dispositionedBy.toString() : null,

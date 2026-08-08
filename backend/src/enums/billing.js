@@ -39,12 +39,42 @@ export const PAYMENT_METHOD = Object.freeze({
 
 export const PAYMENT_METHOD_LIST = Object.freeze(Object.values(PAYMENT_METHOD));
 
+/**
+ * Modes that carry no external instrument reference: CASH is settled in hand and SPLIT is only a
+ * container whose legs each carry their own mode/reference. Every other mode is non-cash and needs a
+ * reference number to stay reconcilable (PAY-04).
+ */
+export const REFERENCE_EXEMPT_PAYMENT_METHODS = Object.freeze([PAYMENT_METHOD.CASH, PAYMENT_METHOD.SPLIT]);
+
+/** PAY-04 — true when the given payment mode must be recorded with a non-empty reference. */
+export const paymentMethodRequiresReference = (method) =>
+  Boolean(method) && !REFERENCE_EXEMPT_PAYMENT_METHODS.includes(method);
+
 export const DISCOUNT_TYPE = Object.freeze({
   FLAT: 'FLAT',
   PERCENTAGE: 'PERCENTAGE',
 });
 
 export const DISCOUNT_TYPE_LIST = Object.freeze(Object.values(DISCOUNT_TYPE));
+
+/**
+ * Lifecycle of the discount-approval gate on a draft invoice (A.5). Only the MANUAL discount
+ * (line-item discounts + the header discount) is measured against
+ * config.billing.discountApprovalThresholdPercent — see BillingService #manualDiscountTotal.
+ *
+ * NOT_REQUIRED   — at or below the threshold; the discount applies normally.
+ * PENDING_APPROVAL — above the threshold; finalize is blocked until an approver decides.
+ * APPROVED       — an approver with billing.discount_approve cleared it; finalize is unblocked.
+ * REJECTED       — an approver refused it; finalize stays blocked until the discount is edited.
+ */
+export const DISCOUNT_APPROVAL_STATUS = Object.freeze({
+  NOT_REQUIRED: 'NOT_REQUIRED',
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+});
+
+export const DISCOUNT_APPROVAL_STATUS_LIST = Object.freeze(Object.values(DISCOUNT_APPROVAL_STATUS));
 
 export const PAYMENT_RECORD_STATUS = Object.freeze({
   RECORDED: 'RECORDED',
@@ -72,6 +102,57 @@ export const REFUND_METHOD = Object.freeze({
 });
 
 export const REFUND_METHOD_LIST = Object.freeze(Object.values(REFUND_METHOD));
+
+/**
+ * A.8 — controlled reason list for a refund. `BillingService.refund` has always required *a*
+ * reason; this is the vocabulary the HTTP layer accepts (see refundSchema), so refund reporting
+ * can group by cause instead of parsing free text. Free-form detail goes in `notes`, which is
+ * mandatory for OTHER.
+ */
+export const REFUND_REASON = Object.freeze({
+  PATIENT_REQUEST: 'PATIENT_REQUEST',
+  TREATMENT_DISCONTINUED: 'TREATMENT_DISCONTINUED',
+  PACKAGE_CANCELLED: 'PACKAGE_CANCELLED',
+  SERVICE_NOT_RENDERED: 'SERVICE_NOT_RENDERED',
+  DUPLICATE_PAYMENT: 'DUPLICATE_PAYMENT',
+  OVERCHARGE_CORRECTION: 'OVERCHARGE_CORRECTION',
+  BILLING_ERROR: 'BILLING_ERROR',
+  CLINICAL_CONTRAINDICATION: 'CLINICAL_CONTRAINDICATION',
+  GOODWILL: 'GOODWILL',
+  OTHER: 'OTHER',
+});
+
+export const REFUND_REASON_LIST = Object.freeze(Object.values(REFUND_REASON));
+
+/**
+ * A.4 — aging buckets for the due-payments worklist, measured in days since the invoice date.
+ * Boundaries live here (not in the page) so backend totals and frontend labels cannot drift.
+ */
+export const AGING_BUCKET = Object.freeze({
+  CURRENT: 'CURRENT',
+  DAYS_8_30: 'DAYS_8_30',
+  DAYS_31_60: 'DAYS_31_60',
+  DAYS_60_PLUS: 'DAYS_60_PLUS',
+});
+
+export const AGING_BUCKET_LIST = Object.freeze(Object.values(AGING_BUCKET));
+
+/** Inclusive upper bound in days for each bucket; null = unbounded. */
+export const AGING_BUCKET_MAX_DAYS = Object.freeze({
+  [AGING_BUCKET.CURRENT]: 7,
+  [AGING_BUCKET.DAYS_8_30]: 30,
+  [AGING_BUCKET.DAYS_31_60]: 60,
+  [AGING_BUCKET.DAYS_60_PLUS]: null,
+});
+
+/** Days since invoiceDate -> bucket key. */
+export function agingBucketForDays(days) {
+  const d = Number(days) || 0;
+  if (d <= AGING_BUCKET_MAX_DAYS[AGING_BUCKET.CURRENT]) return AGING_BUCKET.CURRENT;
+  if (d <= AGING_BUCKET_MAX_DAYS[AGING_BUCKET.DAYS_8_30]) return AGING_BUCKET.DAYS_8_30;
+  if (d <= AGING_BUCKET_MAX_DAYS[AGING_BUCKET.DAYS_31_60]) return AGING_BUCKET.DAYS_31_60;
+  return AGING_BUCKET.DAYS_60_PLUS;
+}
 
 export const CREDIT_NOTE_STATUS = Object.freeze({
   ISSUED: 'ISSUED',
@@ -101,6 +182,8 @@ export default {
   DISCOUNT_TYPE,
   BILLING_EVENTS,
   REFUND_METHOD,
+  REFUND_REASON,
+  AGING_BUCKET,
   CREDIT_NOTE_STATUS,
   CASH_CLOSE_STATUS,
 };

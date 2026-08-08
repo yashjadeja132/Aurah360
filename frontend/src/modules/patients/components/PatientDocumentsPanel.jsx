@@ -10,6 +10,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PERMISSIONS } from '@/constants/rbac';
 import { APP_CONFIG } from '@/constants/config';
 import { usePatientDocuments, usePatientMutations } from '../hooks/usePatients';
+// 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
+// and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
+import { todayKey } from '@/utils/date';
 
 const CATEGORIES = [
   'IDENTITY_PROOF',
@@ -24,7 +27,7 @@ const CATEGORIES = [
 const SOURCES = ['PATIENT', 'EXTERNAL_DOCTOR', 'CLINIC_GENERATED', 'INSURANCE_PROVIDER', 'OTHER'];
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return todayKey();
 }
 
 export function PatientDocumentsPanel({ patientId }) {

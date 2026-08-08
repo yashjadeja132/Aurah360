@@ -37,7 +37,26 @@ class UserService {
     return { ...userData, roleId: roleDoc._id };
   }
 
-  async createStaff(payload, actorId, req = null) {
+  /**
+   * SEC-030 — the branch filter is part of the LOOKUP, so a staff member at another branch is
+   * indistinguishable from one that does not exist: 404, never 403. Note the field is
+   * `User.branch` (a single Branch ref), which is what the helper's `branchId` maps onto.
+   */
+  async #findScopedStaff(userId, branchId) {
+    const filter = { _id: userId, deletedAt: null };
+    if (branchId) filter.branch = branchId;
+    const user = await this.userRepository.model.findOne(filter).exec();
+    if (!user) throw ApiError.notFound('Staff user not found');
+    return user;
+  }
+
+  async createStaff(payload, actorId, req = null, { branchId = null } = {}) {
+    // A branch-scoped creator hires into their OWN branch — 403 rather than 404 because the
+    // caller named a branch id, not a record id.
+    if (branchId && payload.branch && String(payload.branch) !== String(branchId)) {
+      throw ApiError.forbidden('branch is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
+    if (branchId) payload = { ...payload, branch: branchId };
     await this.#assertUniqueEmail(payload.email);
     await this.#assertUniqueEmployeeId(payload.employeeId);
 
@@ -81,9 +100,12 @@ class UserService {
     return user.toSafeObject();
   }
 
-  async updateStaff(userId, payload, actorId, req = null) {
-    const user = await this.userRepository.findByIdNotDeleted(userId);
-    if (!user) throw ApiError.notFound('Staff user not found');
+  async updateStaff(userId, payload, actorId, req = null, { branchId = null } = {}) {
+    const user = await this.#findScopedStaff(userId, branchId);
+    // A scoped editor cannot post a staff member out of their reach into another branch.
+    if (branchId && payload.branch && String(payload.branch) !== String(branchId)) {
+      throw ApiError.forbidden('branch is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
 
     if (user.role === ROLES.OWNER && actorId.toString() !== user._id.toString()) {
       const actor = await this.userRepository.findById(actorId);
@@ -146,9 +168,8 @@ class UserService {
     return updated.toSafeObject();
   }
 
-  async getStaffById(userId) {
-    const user = await this.userRepository.findByIdNotDeleted(userId);
-    if (!user) throw ApiError.notFound('Staff user not found');
+  async getStaffById(userId, { branchId = null } = {}) {
+    const user = await this.#findScopedStaff(userId, branchId);
     const permissions = await this.roleService.getEffectivePermissions(
       user.role,
       user.permissions || []
@@ -158,7 +179,7 @@ class UserService {
     });
   }
 
-  async listStaff(query) {
+  async listStaff(query, { branchId = null } = {}) {
     const page = Number(query.page) || PAGINATION.DEFAULT_PAGE;
     const limit = Math.min(Number(query.limit) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
 
@@ -173,7 +194,9 @@ class UserService {
       role: query.role,
       status: query.status,
       isActive,
-      branch: query.branch,
+      // SEC-030 — the caller's pinned branch wins over anything they typed; null (OWNER/ADMIN)
+      // falls through to whatever branch they chose to filter by, or no filter at all.
+      branch: branchId || query.branch,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
     });
@@ -189,9 +212,8 @@ class UserService {
     };
   }
 
-  async activateStaff(userId, actorId, req = null) {
-    const user = await this.userRepository.findByIdNotDeleted(userId);
-    if (!user) throw ApiError.notFound('Staff user not found');
+  async activateStaff(userId, actorId, req = null, { branchId = null } = {}) {
+    const user = await this.#findScopedStaff(userId, branchId);
     if (user.role === ROLES.OWNER) throw ApiError.forbidden('Owner cannot be deactivated/activated this way');
 
     const updated = await this.userRepository.updateById(userId, {
@@ -209,9 +231,8 @@ class UserService {
     return updated.toSafeObject();
   }
 
-  async deactivateStaff(userId, actorId, req = null) {
-    const user = await this.userRepository.findByIdNotDeleted(userId);
-    if (!user) throw ApiError.notFound('Staff user not found');
+  async deactivateStaff(userId, actorId, req = null, { branchId = null } = {}) {
+    const user = await this.#findScopedStaff(userId, branchId);
     if (user.role === ROLES.OWNER) throw ApiError.forbidden('Owner cannot be deactivated');
     if (userId.toString() === actorId.toString()) {
       throw ApiError.badRequest('You cannot deactivate your own account');
@@ -234,9 +255,8 @@ class UserService {
     return updated.toSafeObject();
   }
 
-  async softDeleteStaff(userId, actorId, req = null) {
-    const user = await this.userRepository.findByIdNotDeleted(userId);
-    if (!user) throw ApiError.notFound('Staff user not found');
+  async softDeleteStaff(userId, actorId, req = null, { branchId = null } = {}) {
+    const user = await this.#findScopedStaff(userId, branchId);
     if (user.role === ROLES.OWNER) throw ApiError.forbidden('Owner cannot be deleted');
     if (userId.toString() === actorId.toString()) {
       throw ApiError.badRequest('You cannot delete your own account');
@@ -262,9 +282,10 @@ class UserService {
     return updated.toSafeObject();
   }
 
-  async adminResetPassword(userId, newPassword, actorId, req = null) {
-    const user = await this.userRepository.findByIdNotDeleted(userId);
-    if (!user) throw ApiError.notFound('Staff user not found');
+  async adminResetPassword(userId, newPassword, actorId, req = null, { branchId = null } = {}) {
+    // The sharpest of the staff writes: unscoped, a branch manager could reset the password of
+    // any account in the organisation and then sign in as them.
+    const user = await this.#findScopedStaff(userId, branchId);
 
     const passwordHash = await hashPassword(newPassword);
     await this.userRepository.updateById(userId, {

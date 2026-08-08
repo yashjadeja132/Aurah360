@@ -12,6 +12,7 @@ import {
   completeSessionSchema,
   rescheduleSchema,
   reverseCompletionSchema,
+  sessionPhotoMetaSchema,
   sessionIdParamSchema,
   planIdParamSchema,
   sessionListQuerySchema,
@@ -78,6 +79,13 @@ router.post(
   controller.checkIn
 );
 
+router.get(
+  '/:id/preflight',
+  requirePermission(...view),
+  validate({ params: sessionIdParamSchema }),
+  controller.preflight
+);
+
 router.post(
   '/:id/start',
   requirePermission(...edit, ...complete),
@@ -123,8 +131,10 @@ router.post(
 router.post(
   '/:id/photos',
   requirePermission(...edit),
-  validate({ params: sessionIdParamSchema }),
   uploadPatientDocument,
+  // Multipart: multer must populate req.body before the metadata can be validated (same ordering
+  // as the consultation photo route).
+  validate({ params: sessionIdParamSchema, body: sessionPhotoMetaSchema }),
   controller.uploadPhoto
 );
 

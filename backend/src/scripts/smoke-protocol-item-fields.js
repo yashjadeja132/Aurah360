@@ -9,6 +9,7 @@ import '../config/env.js';
 import mongoose from 'mongoose';
 import config from '../config/index.js';
 import TreatmentPlanService from '../services/TreatmentPlanService.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -16,7 +17,7 @@ function assert(condition, message) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_protocol_item_fields'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_protocol_item_fields'));
   await mongoose.connection.dropDatabase();
 
   const planService = new TreatmentPlanService();

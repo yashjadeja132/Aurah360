@@ -2,15 +2,39 @@ import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import ReportService from '../services/ReportService.js';
 import AnalyticsService from '../services/AnalyticsService.js';
+import { scopedListQuery } from '../helpers/scope.helper.js';
 
+/**
+ * SEC-001 — the reporting stack used to FAIL OPEN.
+ *
+ * `parseReportFilters()` applies a branch match only IF the caller supplied `branchId`, and it
+ * never saw `req.auth`. So *omitting* the parameter returned organisation-wide figures, and a
+ * DOCTOR could read a colleague's book with `?doctorId=`. Reporting is the one surface that
+ * aggregates everything — revenue, dues, patient volumes, PHI samples — so an unscoped default
+ * there leaks more than any single list endpoint.
+ *
+ * Scope is therefore applied HERE, at the controller boundary, rather than inside
+ * `parseReportFilters`: there are 13 call sites of that helper across the analytics services, and
+ * a fix that each caller must remember to opt into is a fix that will be forgotten by the
+ * fourteenth. Passing an already-scoped query means unscoped input cannot reach a service at all.
+ *
+ * `doctor: true` pins a DOCTOR to their own doctorId; `resolveDoctorScope` returns null for every
+ * other role, so a receptionist filtering by doctor is unaffected. OWNER/ADMIN keep full reach,
+ * including the deliberate org-wide view when they omit `branchId`.
+ */
 class ReportController {
   constructor() {
     this.service = new ReportService();
     this.analyticsService = new AnalyticsService();
   }
 
+  /** Every report query passes through here — see the class docblock. */
+  #scoped(req) {
+    return scopedListQuery(req, { branch: true, doctor: true });
+  }
+
   dashboard = asyncHandler(async (req, res) => {
-    const data = await this.service.dashboard(req.params.type, req.query, {
+    const data = await this.service.dashboard(req.params.type, await this.#scoped(req), {
       userId: req.auth.userId,
       role: req.auth.role,
     });
@@ -18,22 +42,22 @@ class ReportController {
   });
 
   analytics = asyncHandler(async (req, res) => {
-    const data = await this.analyticsService.analyticsDashboard(req.query);
+    const data = await this.analyticsService.analyticsDashboard(await this.#scoped(req));
     return ApiResponse.success(res, { data });
   });
 
   kpis = asyncHandler(async (req, res) => {
-    const data = await this.analyticsService.kpis(req.query);
+    const data = await this.analyticsService.kpis(await this.#scoped(req));
     return ApiResponse.success(res, { data });
   });
 
   chart = asyncHandler(async (req, res) => {
-    const data = await this.analyticsService.chart(req.params.type, req.query);
+    const data = await this.analyticsService.chart(req.params.type, await this.#scoped(req));
     return ApiResponse.success(res, { data });
   });
 
   generate = asyncHandler(async (req, res) => {
-    const data = await this.service.generateReport(req.params.type, req.query, {
+    const data = await this.service.generateReport(req.params.type, await this.#scoped(req), {
       actorId: req.auth.userId,
       req,
     });
@@ -42,7 +66,7 @@ class ReportController {
 
   exportReport = asyncHandler(async (req, res) => {
     const format = req.query.format || req.body?.format || 'csv';
-    const result = await this.service.export(req.params.type, format, req.query, {
+    const result = await this.service.export(req.params.type, format, await this.#scoped(req), {
       actorId: req.auth.userId,
       req,
     });
@@ -56,19 +80,19 @@ class ReportController {
     const data = await this.service.queueHeavyReport(
       req.params.type,
       req.body?.format || req.query.format || 'csv',
-      { ...req.query, ...req.body?.filters },
+      { ...(await this.#scoped(req)), ...req.body?.filters },
       { actorId: req.auth.userId }
     );
     return ApiResponse.success(res, { statusCode: 202, message: 'Report queued', data });
   });
 
   getRun = asyncHandler(async (req, res) => {
-    const data = await this.service.getReportRun(req.params.id);
+    const data = await this.service.getReportRun(req.params.id, req.auth);
     return ApiResponse.success(res, { data });
   });
 
   listScheduled = asyncHandler(async (req, res) => {
-    const data = await this.service.listScheduled(req.query);
+    const data = await this.service.listScheduled(await this.#scoped(req));
     return ApiResponse.success(res, { data: data.items });
   });
 

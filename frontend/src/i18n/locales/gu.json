@@ -81,7 +81,39 @@
     "yourRole": "તમારી ભૂમિકા",
     "permissions": "અસરકારક પરમિશન્સ",
     "branch": "બ્રાન્ચ",
-    "session": "સેશન"
+    "session": "સેશન",
+    "thereFallback": "મિત્ર",
+    "accessScope": "આ લોગિન માટે એક્સેસ સ્કોપ",
+    "grantedToAccount": "આ એકાઉન્ટને આપેલી",
+    "allBranches": "બધી બ્રાન્ચ",
+    "currentScope": "હાલનો કાર્ય વ્યાપ",
+    "secure": "સુરક્ષિત",
+    "sessionHint": "એન્ક્રિપ્ટેડ સેશન દ્વારા સુરક્ષિત",
+    "open": "ખોલો",
+    "quickLinks": {
+      "patients": {
+        "label": "પેશન્ટ્સ",
+        "description": "પેશન્ટ રજીસ્ટર કરો અને તેમના રેકોર્ડ ખોલો."
+      },
+      "appointments": {
+        "label": "એપોઇન્ટમેન્ટ્સ",
+        "description": "મુલાકાત બુક કરો, બદલો અને ટ્રેક કરો."
+      },
+      "billing": {
+        "label": "બિલિંગ",
+        "description": "ઇન્વોઇસ બનાવો અને પેમેન્ટ લો."
+      },
+      "staff": {
+        "label": "સ્ટાફ",
+        "description": "સ્ટાફ એકાઉન્ટ અને ભૂમિકાઓ સંભાળો."
+      }
+    },
+    "yourAccountDescription": "તમારી પ્રોફાઇલ વિગતો અને સાઇન ઇન પાસવર્ડ અપડેટ કરો.",
+    "viewProfile": "પ્રોફાઇલ જુઓ",
+    "changePassword": "પાસવર્ડ બદલો",
+    "needSomethingElse": "બીજું કંઈ જોઈએ છે?",
+    "useSidebar": "દરેક મોડ્યુલ સુધી પહોંચવા સાઇડબારનો ઉપયોગ કરો.",
+    "sidebarGroupsDescription": "મોડ્યુલ્સ ઓવરવ્યૂ, ફ્રન્ટ ડેસ્ક, ક્લિનિકલ, ઓપરેશન્સ, ગ્રોથ અને એડમિનિસ્ટ્રેશન એમ જૂથોમાં ગોઠવેલા છે."
   },
   "crm": {
     "leadStatus": {
@@ -313,6 +345,11 @@
     "transfer": {
       "title": "કતાર ટ્રાન્સફર કરો",
       "reasonPlaceholder": "કારણ (જરૂરી)"
+    },
+    "moveUp": {
+      "title": "કતારમાં ઉપર ખસેડો",
+      "reasonRequired": "પ્રાથમિકતા બદલવા માટે કારણ જરૂરી છે.",
+      "reasonPlaceholder": "કારણ (ઓછામાં ઓછા 3 અક્ષર)"
     },
     "checkIn": {
       "button": "ચેક-ઇન",
@@ -700,6 +737,12 @@
       "noShow": "ગેરહાજર",
       "complete": "પૂર્ણ કરો",
       "reschedule": "ફરીથી સમય નક્કી કરો",
+      "cancelTitle": "એપોઇન્ટમેન્ટ રદ કરો",
+      "cancelReasonRequired": "રદ કરવાનું કારણ ફરજિયાત છે.",
+      "cancelReasonSelect": "કારણ પસંદ કરો…",
+      "cancelNotePlaceholder": "કારણ લખો (જરૂરી)",
+      "confirmCancel": "રદ કરવાની પુષ્ટિ કરો",
+      "cancelFailed": "રદ કરવું નિષ્ફળ",
       "cancelReasonPrompt": "રદ કરવાનું કારણ",
       "deleteConfirm": "આ એપોઇન્ટમેન્ટ સોફ્ટ-ડિલીટ કરવી છે?",
       "details": "વિગતો",
@@ -1369,6 +1412,7 @@
       "diagnosis": "ડાયગ્નોસિસ",
       "photos": "ફોટા",
       "followup": "ફોલો-અપ",
+      "labs": "લેબ ઓર્ડર",
       "ai": "AI આસિસ્ટ"
     },
     "statusLabels": {
@@ -1455,6 +1499,32 @@
         "OTHER": "અન્ય"
       }
     },
+    "labs": {
+      "title": "લેબ ઓર્ડર",
+      "hint": "તપાસ ઓર્ડર કરો, આવેલા પરિણામ નોંધો, પછી ડૉક્ટર દ્વારા સમીક્ષિત ચિહ્નિત કરો.",
+      "testName": "ટેસ્ટનું નામ",
+      "provider": "લેબ / પ્રોવાઇડર",
+      "dueDate": "નિયત તારીખ",
+      "reason": "ક્લિનિકલ કારણ",
+      "order": "ટેસ્ટ ઓર્ડર કરો",
+      "loadFailed": "લેબ ઓર્ડર લોડ થઈ શક્યા નહીં",
+      "emptyTitle": "હજી કોઈ લેબ ઓર્ડર નથી",
+      "emptyDescription": "આ કન્સલ્ટેશન માટે ઓર્ડર કરેલી તપાસ અહીં ટ્રેક થશે.",
+      "noProvider": "કોઈ પ્રોવાઇડર નથી",
+      "due": "નિયત",
+      "resultReceivedAt": "પરિણામ મળ્યું",
+      "reviewedAt": "સમીક્ષિત",
+      "reviewCommentPlaceholder": "સમીક્ષા ટિપ્પણી (વૈકલ્પિક)",
+      "markResultReceived": "પરિણામ મળ્યું ચિહ્નિત કરો",
+      "markReviewed": "ડૉક્ટર દ્વારા સમીક્ષિત ચિહ્નિત કરો",
+      "cancel": "ઓર્ડર રદ કરો",
+      "statusLabels": {
+        "ORDERED": "ઓર્ડર કરેલ",
+        "RESULT_RECEIVED": "પરિણામ મળ્યું",
+        "REVIEWED": "ડૉક્ટર દ્વારા સમીક્ષિત",
+        "CANCELLED": "રદ"
+      }
+    },
     "ai": {
       "title": "AI આસિસ્ટ",
       "description": "માત્ર સૂચનો — તમે સ્વીકારો ત્યાં સુધી કંઈ સેવ થતું નથી.",
@@ -1508,6 +1578,111 @@
       "timelineSubtitle": "પેશન્ટની ઘટનાઓ અને મુલાકાતો",
       "noTimelineEvents": "કોઈ ટાઇમલાઇન ઘટના નથી",
       "previousVisits": "અગાઉની મુલાકાતો"
+    }
+  },
+  "notFound": {
+    "title": "પેજ મળ્યું નથી",
+    "description": "તમે શોધી રહ્યા છો તે પેજ અસ્તિત્વમાં નથી અથવા ખસેડવામાં આવ્યું છે.",
+    "backToDashboard": "ડેશબોર્ડ પર પાછા જાઓ"
+  },
+  "users": {
+    "list": {
+      "title": "સ્ટાફ",
+      "subtitle": "ક્લિનિકના સ્ટાફ લોગિન, ભૂમિકાઓ અને એક્સેસ સંભાળો.",
+      "addStaff": "સ્ટાફ ઉમેરો",
+      "loadFailed": "સ્ટાફની યાદી લોડ થઈ શકી નથી.",
+      "activateSuccess": "{{name}} સક્રિય કરવામાં આવ્યા",
+      "activateFailed": "આ સ્ટાફ સભ્યને સક્રિય કરી શકાયા નથી.",
+      "deactivateSuccess": "{{name}} નિષ્ક્રિય કરવામાં આવ્યા",
+      "deactivateFailed": "આ સ્ટાફ સભ્યને નિષ્ક્રિય કરી શકાયા નથી."
+    },
+    "table": {
+      "nameHeader": "નામ",
+      "roleHeader": "ભૂમિકા",
+      "employeeIdHeader": "કર્મચારી ID",
+      "statusHeader": "સ્ટેટસ",
+      "actionsHeader": "ક્રિયાઓ",
+      "active": "સક્રિય",
+      "inactive": "નિષ્ક્રિય",
+      "view": "જુઓ",
+      "edit": "એડિટ કરો",
+      "activate": "સક્રિય કરો",
+      "deactivate": "નિષ્ક્રિય કરો",
+      "emptyTitle": "કોઈ સ્ટાફ મળ્યો નથી",
+      "emptyDescription": "ફિલ્ટર બદલો અથવા શરૂ કરવા માટે નવો સ્ટાફ સભ્ય ઉમેરો."
+    },
+    "filters": {
+      "searchPlaceholder": "નામ, ઇમેઇલ કે કર્મચારી ID થી શોધો",
+      "allRoles": "બધી ભૂમિકાઓ",
+      "ownerRole": "માલિક",
+      "allStatuses": "બધા સ્ટેટસ",
+      "active": "સક્રિય",
+      "inactive": "નિષ્ક્રિય",
+      "sortNewest": "નવા પહેલા",
+      "sortFirstName": "પ્રથમ નામ",
+      "sortLastName": "છેલ્લું નામ",
+      "sortRole": "ભૂમિકા",
+      "sortLastLogin": "છેલ્લું લોગિન"
+    },
+    "form": {
+      "firstNameLabel": "પ્રથમ નામ",
+      "lastNameLabel": "છેલ્લું નામ",
+      "emailLabel": "ઇમેઇલ",
+      "phoneLabel": "ફોન",
+      "passwordLabel": "પાસવર્ડ",
+      "roleLabel": "ભૂમિકા",
+      "genderLabel": "જેન્ડર",
+      "selectPlaceholder": "પસંદ કરો",
+      "employeeIdLabel": "કર્મચારી ID",
+      "departmentLabel": "વિભાગ",
+      "designationLabel": "હોદ્દો",
+      "saving": "સેવ થઈ રહ્યું છે…",
+      "createStaff": "સ્ટાફ બનાવો",
+      "saveChanges": "ફેરફારો સેવ કરો"
+    },
+    "create": {
+      "title": "સ્ટાફ ઉમેરો",
+      "subtitle": "નવા સ્ટાફ સભ્ય માટે લોગિન બનાવો.",
+      "detailsTitle": "સ્ટાફ વિગતો",
+      "detailsDescription": "વ્યક્તિગત વિગતો, ભૂમિકા અને સાઇન ઇન ક્રેડેન્શિયલ્સ.",
+      "success": "સ્ટાફ સભ્ય બનાવવામાં આવ્યા",
+      "failed": "સ્ટાફ સભ્ય બનાવી શકાયા નથી."
+    },
+    "edit": {
+      "title": "સ્ટાફ એડિટ કરો",
+      "detailsTitle": "સ્ટાફ વિગતો",
+      "success": "સ્ટાફ સભ્ય અપડેટ થયા",
+      "failed": "સ્ટાફ સભ્ય અપડેટ કરી શકાયા નથી.",
+      "notFound": "સ્ટાફ સભ્ય મળ્યા નથી."
+    },
+    "detail": {
+      "backToStaff": "સ્ટાફ",
+      "edit": "એડિટ કરો",
+      "resetPassword": "પાસવર્ડ રીસેટ કરો",
+      "delete": "દૂર કરો",
+      "profileTitle": "પ્રોફાઇલ",
+      "roleLabel": "ભૂમિકા",
+      "statusLabel": "સ્ટેટસ",
+      "phoneLabel": "ફોન",
+      "employeeIdLabel": "કર્મચારી ID",
+      "departmentLabel": "વિભાગ",
+      "designationLabel": "હોદ્દો",
+      "genderLabel": "જેન્ડર",
+      "lastLoginLabel": "છેલ્લું લોગિન",
+      "permissionsTitle": "પરમિશન્સ",
+      "noPermissions": "કોઈ પરમિશન આપેલી નથી.",
+      "refresh": "રિફ્રેશ કરો",
+      "resetPasswordTitle": "પાસવર્ડ રીસેટ કરો",
+      "resetPasswordDescription": "{{name}} માટે નવો સાઇન ઇન પાસવર્ડ સેટ કરો.",
+      "newPasswordLabel": "નવો પાસવર્ડ",
+      "cancel": "રદ કરો",
+      "reset": "પાસવર્ડ રીસેટ કરો",
+      "resetSuccess": "પાસવર્ડ સફળતાપૂર્વક રીસેટ થયો",
+      "resetFailed": "પાસવર્ડ રીસેટ કરી શકાયો નથી.",
+      "confirmDelete": "આ સ્ટાફ સભ્યને દૂર કરવા છે? તેમનું લોગિન નિષ્ક્રિય થઈ જશે.",
+      "deleteSuccess": "સ્ટાફ સભ્ય દૂર કરવામાં આવ્યા",
+      "deleteFailed": "સ્ટાફ સભ્યને દૂર કરી શકાયા નથી.",
+      "notFound": "સ્ટાફ સભ્ય મળ્યા નથી."
     }
   }
 }

@@ -6,6 +6,8 @@ import { requirePermission } from '../../middlewares/permission.middleware.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import {
   runAiSchema,
+  copilotRunSchema,
+  copilotRefineSchema,
   dispositionSchema,
   setFlagSchema,
   listRunsQuerySchema,
@@ -19,6 +21,18 @@ const controller = new AiController();
 router.use(authenticate);
 
 router.post('/run', requirePermission(PERMISSIONS.AI_USE), validate({ body: runAiSchema }), controller.run);
+router.post(
+  '/copilot',
+  requirePermission(PERMISSIONS.AI_USE),
+  validate({ body: copilotRunSchema }),
+  controller.copilotRun
+);
+router.post(
+  '/copilot/:runId/refine',
+  requirePermission(PERMISSIONS.AI_USE),
+  validate({ params: runIdParamSchema, body: copilotRefineSchema }),
+  controller.copilotRefine
+);
 router.post(
   '/runs/:runId/disposition',
   requirePermission(PERMISSIONS.AI_USE),

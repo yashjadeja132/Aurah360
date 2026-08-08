@@ -2,13 +2,16 @@ import http from 'http';
 import App from './app.js';
 import config from './config/index.js';
 import database from './config/database.js';
+import OrganizationRepository from './repositories/OrganizationRepository.js';
 import redisClient from './config/redis.js';
 import { initSocket } from './socket/index.js';
-import { startCrmWorker } from './queues/crmJobs.js';
+import { crmHandlerModule } from './queues/crmJobs.js';
 import { startAppointmentReminderWorker } from './queues/appointmentReminderJobs.js';
-import { startMissedFollowUpWorker } from './queues/missedFollowUpJobs.js';
-import { startLoyaltyExpiryWorker } from './queues/loyaltyExpiryJobs.js';
-import { startLoyaltyBirthdayWorker } from './queues/loyaltyBirthdayJobs.js';
+import { missedFollowUpHandlerModule } from './queues/missedFollowUpJobs.js';
+import { loyaltyExpiryHandlerModule } from './queues/loyaltyExpiryJobs.js';
+import { loyaltyBirthdayHandlerModule } from './queues/loyaltyBirthdayJobs.js';
+import { startComposedWorker, assertScheduledJobsAreHandled } from './queues/composeWorker.js';
+import { QUEUE_NAMES } from './queues/connection.js';
 import { startNotificationWorker } from './queues/notificationJobs.js';
 import { startReportWorker } from './queues/reportJobs.js';
 import { startAnalyticsWorker } from './queues/analyticsJobs.js';
@@ -31,6 +34,18 @@ class Server {
       this.#registerProcessHandlers();
       await database.connect();
 
+      /**
+       * Prime the synchronous org runtime mirror (timezone / financial-year start) before any
+       * request can build an aggregation. Non-fatal: orgRuntime falls back to the env defaults.
+       */
+      try {
+        await new OrganizationRepository().getSingleton();
+      } catch (err) {
+        logger.warn('Organization settings not loaded — using environment defaults', {
+          message: err.message,
+        });
+      }
+
       try {
         await redisClient.ready();
       } catch (err) {
@@ -41,10 +56,19 @@ class Server {
 
       this.io = initSocket(this.httpServer);
 
+      /**
+       * ONE worker per queue, composed from the handler modules that share it.
+       *
+       * CRM and LOYALTY each previously had TWO workers racing for the same queue, and BullMQ gives
+       * a job to exactly one consumer — so the loser returned `{ ignored: true }`, the job was
+       * marked completed, and the work never happened. Roughly half of all expiry, birthday,
+       * follow-up and missed-follow-up runs disappeared without an error anywhere.
+       */
       try {
-        startCrmWorker();
+        startComposedWorker(QUEUE_NAMES.CRM, [crmHandlerModule, missedFollowUpHandlerModule]);
+        assertScheduledJobsAreHandled(QUEUE_NAMES.CRM).catch(() => {});
       } catch (err) {
-        logger.warn('CRM worker not started', { message: err.message });
+        logger.warn('CRM queue worker not started', { message: err.message });
       }
 
       try {
@@ -54,21 +78,13 @@ class Server {
       }
 
       try {
-        startMissedFollowUpWorker();
+        startComposedWorker(QUEUE_NAMES.LOYALTY, [
+          loyaltyExpiryHandlerModule,
+          loyaltyBirthdayHandlerModule,
+        ]);
+        assertScheduledJobsAreHandled(QUEUE_NAMES.LOYALTY).catch(() => {});
       } catch (err) {
-        logger.warn('Missed follow-up worker not started', { message: err.message });
-      }
-
-      try {
-        startLoyaltyExpiryWorker();
-      } catch (err) {
-        logger.warn('Loyalty expiry worker not started', { message: err.message });
-      }
-
-      try {
-        startLoyaltyBirthdayWorker();
-      } catch (err) {
-        logger.warn('Loyalty birthday worker not started', { message: err.message });
+        logger.warn('Loyalty queue worker not started', { message: err.message });
       }
 
       try {

@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Label } from '@/components/ui/label';
 import { DraftIndicator } from './StatusBadges';
 import { useSoapAutosave, useSoapVersions } from '../hooks/useConsultations';
+import { useInsertTarget } from '../hooks/useInsertTarget';
+import { INSERT_TARGETS, appendText } from '../insertBus';
 
 export function SoapEditor({ consultationId, soap, readOnly }) {
   const { t } = useTranslation();
@@ -16,22 +18,45 @@ export function SoapEditor({ consultationId, soap, readOnly }) {
   const { save } = useSoapAutosave(consultationId, { enabled: !readOnly });
   const { data: versions } = useSoapVersions(consultationId);
 
+  /**
+   * Hydrate from the server ONCE per consultation. Re-running on every new `soap` object identity
+   * would wipe unsaved edits — including AI text the doctor just accepted — whenever the workspace
+   * query refetches (and on every React StrictMode effect replay).
+   */
+  const hydratedFor = useRef(null);
   useEffect(() => {
-    if (soap) {
-      setForm({
-        subjective: soap.subjective || '',
-        objective: soap.objective || '',
-        assessment: soap.assessment || '',
-        plan: soap.plan || '',
-      });
-    }
-  }, [soap]);
+    if (hydratedFor.current === consultationId) return;
+    hydratedFor.current = consultationId;
+    setForm({
+      subjective: soap?.subjective || '',
+      objective: soap?.objective || '',
+      assessment: soap?.assessment || '',
+      plan: soap?.plan || '',
+    });
+  }, [soap, consultationId]);
 
   const onChange = (field) => (e) => {
     const next = { ...form, [field]: e.target.value };
     setForm(next);
     if (!readOnly) save(next, setDraftStatus);
   };
+
+  /**
+   * AI-accepted text lands here as an ordinary edit: appended to the field, still fully editable,
+   * autosaved as a DRAFT only. Signing remains a separate, explicit clinician action.
+   */
+  const appendInto = (field) => ({ text }) => {
+    setForm((prev) => {
+      const next = { ...prev, [field]: appendText(prev[field], text) };
+      save(next, setDraftStatus);
+      return next;
+    });
+  };
+
+  useInsertTarget(INSERT_TARGETS.SOAP_SUBJECTIVE, appendInto('subjective'), !readOnly);
+  useInsertTarget(INSERT_TARGETS.SOAP_OBJECTIVE, appendInto('objective'), !readOnly);
+  useInsertTarget(INSERT_TARGETS.SOAP_ASSESSMENT, appendInto('assessment'), !readOnly);
+  useInsertTarget(INSERT_TARGETS.SOAP_PLAN, appendInto('plan'), !readOnly);
 
   const fields = [
     { key: 'subjective', label: t('consultations.soap.subjective', 'Subjective') },

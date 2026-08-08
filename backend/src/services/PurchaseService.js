@@ -24,6 +24,28 @@ class PurchaseService {
     this.auditService = new AuditService();
   }
 
+  /**
+   * SEC-030 — single-record branch gate for the purchase documents that DO carry a branch
+   * (PurchaseOrder, GoodsReceipt). Out of scope reads as "not found", never 403.
+   *
+   * Suppliers deliberately have NO branch gate: the Supplier model has no `branchId` at all — it
+   * is one organisation-wide vendor master that every branch orders against — so there is nothing
+   * to scope on and inventing one would only fragment the catalogue.
+   */
+  #assertBranchScope(doc, branchId, notFoundMessage) {
+    if (!branchId || !doc) return doc;
+    if (String(doc.branchId) !== String(branchId)) {
+      throw ApiError.notFound(notFoundMessage);
+    }
+    return doc;
+  }
+
+  #assertWriteBranch(payloadBranchId, branchId) {
+    if (branchId && String(payloadBranchId) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
+  }
+
   // —— Suppliers ——
   async createSupplier(payload, actorId) {
     if (!payload.name) throw ApiError.badRequest('name is required');
@@ -111,9 +133,10 @@ class PurchaseService {
     return doc.toSafeObject(extra);
   }
 
-  async createPo(payload, actorId, req = null) {
+  async createPo(payload, actorId, req = null, { branchId = null } = {}) {
     if (!payload.supplierId) throw ApiError.badRequest('supplierId is required');
     if (!payload.branchId) throw ApiError.badRequest('branchId is required');
+    this.#assertWriteBranch(payload.branchId, branchId);
     const supplier = await this.supplierRepo.findByIdNotDeleted(payload.supplierId);
     if (!supplier) throw ApiError.notFound('Supplier not found');
     if (!Array.isArray(payload.items) || !payload.items.length) {
@@ -152,9 +175,10 @@ class PurchaseService {
     return this.getPo(doc._id.toString());
   }
 
-  async getPo(id) {
+  async getPo(id, { branchId = null } = {}) {
     const doc = await this.poRepo.findByIdNotDeleted(id);
     if (!doc) throw ApiError.notFound('Purchase order not found');
+    this.#assertBranchScope(doc, branchId, 'Purchase order not found');
     return this.#mapPo(doc);
   }
 
@@ -173,9 +197,10 @@ class PurchaseService {
     };
   }
 
-  async submitPo(id, actorId) {
+  async submitPo(id, actorId, { branchId = null } = {}) {
     const doc = await this.poRepo.findByIdNotDeleted(id);
     if (!doc) throw ApiError.notFound('Purchase order not found');
+    this.#assertBranchScope(doc, branchId, 'Purchase order not found');
     if (doc.status !== PO_STATUS.DRAFT) {
       throw ApiError.badRequest('Only draft POs can be submitted');
     }
@@ -188,9 +213,10 @@ class PurchaseService {
   }
 
   // —— Goods Receipt ——
-  async createGrn(payload, actorId, req = null) {
+  async createGrn(payload, actorId, req = null, { branchId = null } = {}) {
     if (!payload.supplierId) throw ApiError.badRequest('supplierId is required');
     if (!payload.branchId) throw ApiError.badRequest('branchId is required');
+    this.#assertWriteBranch(payload.branchId, branchId);
     if (!Array.isArray(payload.items) || !payload.items.length) {
       throw ApiError.badRequest('items are required');
     }
@@ -226,9 +252,10 @@ class PurchaseService {
     return this.getGrn(doc._id.toString());
   }
 
-  async getGrn(id) {
+  async getGrn(id, { branchId = null } = {}) {
     const doc = await this.grRepo.findByIdNotDeleted(id);
     if (!doc) throw ApiError.notFound('Goods receipt not found');
+    this.#assertBranchScope(doc, branchId, 'Goods receipt not found');
     const extra = {};
     if (doc.supplierId?.name) {
       extra.supplier = {
@@ -267,9 +294,10 @@ class PurchaseService {
   }
 
   /** Post GRN — receives stock via InventoryService (only stock path). */
-  async postGrn(id, actorId, req = null) {
+  async postGrn(id, actorId, req = null, { branchId = null } = {}) {
     const grn = await this.grRepo.findByIdNotDeleted(id);
     if (!grn) throw ApiError.notFound('Goods receipt not found');
+    this.#assertBranchScope(grn, branchId, 'Goods receipt not found');
     if (grn.status === GR_STATUS.POSTED) {
       throw ApiError.forbidden('Goods receipt already posted');
     }

@@ -14,6 +14,7 @@ import { ROLES } from '../constants/roles.js';
 import { SCAN_STATE } from '../enums/patient.js';
 import StorageFactory from '../storage/StorageFactory.js';
 import { generateFileToken } from '../storage/LocalStorage.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 const tokenService = new TokenService();
 const storage = StorageFactory.create();
@@ -23,7 +24,7 @@ function assert(condition, message) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_file_access'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_file_access'));
   await mongoose.connection.dropDatabase();
 
   const app = new App().getExpressApp();

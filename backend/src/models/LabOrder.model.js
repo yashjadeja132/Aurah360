@@ -44,5 +44,20 @@ labOrderSchema.methods.toSafeObject = function toSafeObject() {
 };
 
 export const LAB_ORDER_STATUS_LIST = LAB_ORDER_STATUS;
+
+/**
+ * Legal status moves. REVIEWED and CANCELLED are terminal — a reviewed or cancelled order is a
+ * closed clinical record and cannot be reopened. Enforced server-side in
+ * ConsultationService.updateLabOrder so every caller path (not just the UI) obeys it.
+ */
+export const LAB_ORDER_STATUS_TRANSITIONS = {
+  ORDERED: ['RESULT_RECEIVED', 'CANCELLED'],
+  RESULT_RECEIVED: ['REVIEWED', 'CANCELLED'],
+  REVIEWED: [],
+  CANCELLED: [],
+};
+
+export const LAB_ORDER_TERMINAL_STATUSES = ['REVIEWED', 'CANCELLED'];
+
 const LabOrder = mongoose.model('LabOrder', labOrderSchema);
 export default LabOrder;

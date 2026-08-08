@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useSaveDiagnosis, useSaveExamination } from '../hooks/useConsultations';
+import { useInsertTarget } from '../hooks/useInsertTarget';
+import { INSERT_TARGETS, appendCsv, appendText } from '../insertBus';
 
 export function DiagnosisForm({ consultationId, diagnosis, readOnly }) {
   const { t } = useTranslation();
@@ -15,16 +17,46 @@ export function DiagnosisForm({ consultationId, diagnosis, readOnly }) {
     icd10Codes: '',
   });
 
+  /** Hydrate once per consultation — a refetch must not wipe unsaved or AI-inserted edits. */
+  const hydratedFor = useRef(null);
   useEffect(() => {
-    if (diagnosis) {
-      setForm({
-        primaryDiagnosis: diagnosis.primaryDiagnosis || '',
-        secondaryDiagnoses: (diagnosis.secondaryDiagnoses || []).join(', '),
-        clinicalNotes: diagnosis.clinicalNotes || '',
-        icd10Codes: (diagnosis.icd10Codes || []).join(', '),
+    if (hydratedFor.current === consultationId) return;
+    hydratedFor.current = consultationId;
+    setForm({
+      primaryDiagnosis: diagnosis?.primaryDiagnosis || '',
+      secondaryDiagnoses: (diagnosis?.secondaryDiagnoses || []).join(', '),
+      clinicalNotes: diagnosis?.clinicalNotes || '',
+      icd10Codes: (diagnosis?.icd10Codes || []).join(', '),
+    });
+  }, [diagnosis, consultationId]);
+
+  /**
+   * A copilot condition accepted by the doctor fills the primary field when it is still empty,
+   * otherwise it joins the secondary list. The model's reasoning is appended to clinical notes,
+   * explicitly marked as an unverified AI suggestion. Nothing is saved until the doctor presses
+   * Save diagnosis.
+   */
+  useInsertTarget(
+    INSERT_TARGETS.DIAGNOSIS,
+    ({ condition, reasoning, likelihood }) => {
+      if (!condition) return;
+      setForm((prev) => {
+        const next = { ...prev };
+        if (!prev.primaryDiagnosis.trim()) next.primaryDiagnosis = condition;
+        else next.secondaryDiagnoses = appendCsv(prev.secondaryDiagnoses, condition);
+        if (reasoning) {
+          next.clinicalNotes = appendText(
+            prev.clinicalNotes,
+            `${t('consultations.diagnosis.aiNotePrefix', 'AI suggestion (verify)')} — ${condition}${
+              likelihood ? ` [${likelihood}]` : ''
+            }: ${reasoning}`
+          );
+        }
+        return next;
       });
-    }
-  }, [diagnosis]);
+    },
+    !readOnly
+  );
 
   return (
     <div className="space-y-3">

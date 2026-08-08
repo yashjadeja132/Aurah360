@@ -29,6 +29,18 @@ export function useDoctorPrescriptions(doctorId, params = {}) {
   });
 }
 
+/** All prescriptions for one patient — GET /prescriptions/patient/:patientId. */
+export function usePatientPrescriptions(patientId) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PRESCRIPTION_PATIENT_LIST(patientId),
+    queryFn: async () => {
+      const res = await prescriptionsApi.listByPatient(patientId);
+      return res.data || [];
+    },
+    enabled: Boolean(patientId),
+  });
+}
+
 export function useConsultationPrescriptions(consultationId) {
   return useQuery({
     queryKey: QUERY_KEYS.PRESCRIPTION_CONSULTATION_LIST(consultationId),
@@ -102,16 +114,38 @@ export function useUpdatePrescription(id) {
   });
 }
 
+/**
+ * RX-SAFETY — server-evaluated allergy/interaction preflight for a prescription.
+ * The server enforces the block on finalize regardless; this only lets the editor show it first.
+ */
+export function usePrescriptionSafety(id, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PRESCRIPTION_SAFETY(id),
+    queryFn: async () => {
+      const res = await prescriptionsApi.safetyCheck(id);
+      return res.data.safety;
+    },
+    enabled: Boolean(id) && enabled,
+  });
+}
+
 export function useFinalizePrescription(id) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => prescriptionsApi.finalize(id),
+    // payload may carry { override: { reason } } for a blocking safety alert.
+    mutationFn: (payload = {}) => prescriptionsApi.finalize(id, payload),
     onSuccess: () => {
       toast.success('Prescription finalized');
       invalidateAll(qc);
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PRESCRIPTION_DETAIL(id) });
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.PRESCRIPTION_SAFETY(id) });
     },
-    onError: (e) => toast.error(errMsg(e, 'Finalize failed')),
+    onError: (e) =>
+      toast.error(
+        e?.response?.data?.code === 'PRESCRIPTION_SAFETY_BLOCKED'
+          ? errMsg(e, 'Blocked by a prescribing safety alert')
+          : errMsg(e, 'Finalize failed')
+      ),
   });
 }
 

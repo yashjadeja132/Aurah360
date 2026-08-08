@@ -39,6 +39,24 @@ export function useStockLedger(params = {}) {
   });
 }
 
+/**
+ * Batch expiry report. `GET /inventory/reports/:type` supports
+ * `expiry` (expired + near-expiry) and `near-expiry` (near only); the service
+ * returns one row per batch with { name, itemCode, batchNumber, expiryDate,
+ * quantity, status: 'EXPIRED' | 'NEAR_EXPIRY' }. Key is inlined rather than
+ * added to QUERY_KEYS so the shared constants file stays untouched — the
+ * ['inventory', ...] prefix still matches the module-wide invalidator.
+ */
+export function useInventoryExpiryReport(params = {}) {
+  return useQuery({
+    queryKey: ['inventory', 'reports', 'expiry', params],
+    queryFn: async () => {
+      const res = await inventoryApi.report('expiry', params);
+      return res.data?.items || [];
+    },
+  });
+}
+
 export function useSuppliers(params = {}) {
   return useQuery({
     queryKey: QUERY_KEYS.INVENTORY_SUPPLIERS(params),

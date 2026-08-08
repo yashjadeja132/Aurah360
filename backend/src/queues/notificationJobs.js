@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
+import { getQueue, getBullConnection, enqueueJob, QUEUE_NAMES } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 
@@ -9,30 +9,24 @@ export const NOTIFICATION_JOBS = Object.freeze({
   DAILY_BIRTHDAY: 'daily-birthday-scan',
 });
 
+/** Called from request paths (appointment cancel, invoice finalize, …), so it must never
+ *  block the response — enqueueJob bounds the wait and fails open. */
 export async function enqueueNotificationDispatch(notificationMongoId, { delayMs = 0 } = {}) {
-  try {
-    const queue = getQueue(QUEUE_NAMES.NOTIFICATIONS);
-    const opts = {
-      jobId: `ntf-dispatch-${notificationMongoId}-${delayMs || 'now'}`,
-      removeOnComplete: 200,
-      removeOnFail: 100,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 3000 },
-    };
-    if (delayMs > 0) opts.delay = delayMs;
-    await queue.add(
-      NOTIFICATION_JOBS.DISPATCH,
-      { notificationId: notificationMongoId },
-      opts
-    );
-    return true;
-  } catch (err) {
-    logger.warn('Notification dispatch not enqueued (Redis?)', {
-      message: err.message,
-      notificationMongoId,
-    });
-    return false;
-  }
+  const opts = {
+    jobId: `ntf-dispatch-${notificationMongoId}-${delayMs || 'now'}`,
+    removeOnComplete: 200,
+    removeOnFail: 100,
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 3000 },
+  };
+  if (delayMs > 0) opts.delay = delayMs;
+  const job = await enqueueJob(
+    QUEUE_NAMES.NOTIFICATIONS,
+    NOTIFICATION_JOBS.DISPATCH,
+    { notificationId: notificationMongoId },
+    opts
+  );
+  return Boolean(job);
 }
 
 export async function ensureBirthdayScanJob() {

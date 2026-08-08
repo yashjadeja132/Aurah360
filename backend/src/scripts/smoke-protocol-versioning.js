@@ -22,6 +22,7 @@ import TreatmentPlanService from '../services/TreatmentPlanService.js';
 import TreatmentSessionService from '../services/TreatmentSessionService.js';
 import { TREATMENT_PLAN_STATUS } from '../enums/treatmentPlan.js';
 import { generateInvoiceNumber } from '../helpers/invoiceNumber.helper.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -29,7 +30,7 @@ function assert(condition, message) {
 }
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_protocol_versioning'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_protocol_versioning'));
   await mongoose.connection.dropDatabase();
 
   const planService = new TreatmentPlanService();

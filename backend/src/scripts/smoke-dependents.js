@@ -4,9 +4,10 @@ import mongoose from 'mongoose';
 import config from '../config/index.js';
 import Patient from '../models/Patient.model.js';
 import PatientPortalService from '../services/PatientPortalService.js';
+import { smokeDbUri } from './smokeDbUri.js';
 
 async function main() {
-  await mongoose.connect(config.mongo.uri.replace(/\/([^/?]+)$/, '/aurah360_smoke_dependents'));
+  await mongoose.connect(smokeDbUri(config.mongo.uri, 'aurah360_smoke_dependents'));
   await mongoose.connection.dropDatabase();
 
   const branchId = new mongoose.Types.ObjectId();

@@ -18,6 +18,9 @@ import { useMasterActive } from '@/modules/masters/hooks/useMasters';
 import { appointmentsApi } from '@/modules/appointments/api/appointmentsApi';
 import { QUEUE_PRIORITY_OPTIONS } from '../constants';
 import { useWalkIn } from '../hooks/useReception';
+// 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
+// and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
+import { todayKey } from '@/utils/date';
 
 export function WalkInDialog({ open, onOpenChange, branchId }) {
   const { t } = useTranslation();
@@ -56,7 +59,7 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
       setSlots([]);
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayKey();
     appointmentsApi
       .availableSlots({ doctorId, branchId, date: today })
       .then((res) => {

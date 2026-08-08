@@ -81,8 +81,11 @@ export const consentIdParamSchema = z.object({
   consentId: objectId,
 });
 
+// SEC-030 — doctorId optional; a DOCTOR's own id is resolved server-side from their token and
+// the controller still requires a resolvable one (see scope.helper.js).
 export const doctorQuerySchema = z.object({
-  doctorId: objectId,
+  doctorId: objectId.optional(),
+  branchId: objectId.optional(),
   status: z.enum(TREATMENT_PLAN_STATUS_LIST).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });

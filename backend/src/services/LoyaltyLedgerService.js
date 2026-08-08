@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import ApiError from '../libs/ApiError.js';
 import AuditService from './AuditService.js';
 import { eventBus } from '../events/eventBus.js';
@@ -297,8 +298,10 @@ class LoyaltyLedgerService {
     extraFields = {},
     createdBy = null,
     organizationId = null,
+    idempotencyKey = null,
+    session = null,
   }) {
-    const lots = await this.#openCreditLots(patientId);
+    const lots = await this.#openCreditLots(patientId, session);
     const available = lots.reduce((sum, l) => sum + l.remaining, 0);
     if (available < points) {
       throw ApiError.badRequest(
@@ -311,26 +314,59 @@ class LoyaltyLedgerService {
     for (const lot of lots) {
       if (remainingToDebit <= 0) break;
       const take = Math.min(lot.remaining, remainingToDebit);
-      const debit = await LoyaltyLedgerEntry.create({
-        organizationId,
-        branchId,
-        patientId,
-        entryType,
-        points: take,
-        consumesEntryId: lot._id,
-        createdBy,
-        ...extraFields,
-      });
+      const [debit] = await LoyaltyLedgerEntry.create(
+        [
+          {
+            organizationId,
+            branchId,
+            patientId,
+            entryType,
+            points: take,
+            consumesEntryId: lot._id,
+            createdBy,
+            // A single logical debit can span several lots, but (patientId, idempotencyKey) is
+            // unique — so each lot row gets the operation key plus its lot ordinal. Row `:0`
+            // alone is enough for the index to reject a replay; the suffixes exist so the whole
+            // operation can be reconstructed from the key when returning the replayed result.
+            idempotencyKey: idempotencyKey ? `${idempotencyKey}:${debitEntries.length}` : null,
+            ...extraFields,
+          },
+        ],
+        { session, ordered: true }
+      );
       debitEntries.push(debit);
       remainingToDebit -= take;
     }
     return debitEntries;
   }
 
+  /** Rebuilds an already-applied redemption's entries from its operation key (see #debitFifo),
+   *  so a replayed request returns the original result instead of spending again. */
+  async #findRedemptionByKey(patientId, idempotencyKey) {
+    const escaped = idempotencyKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const entries = await LoyaltyLedgerEntry.find({
+      patientId,
+      idempotencyKey: { $regex: `^${escaped}:\\d+$` },
+    }).sort({ createdAt: 1 });
+    if (!entries.length) return null;
+    return entries.map((e) => e.toSafeObject({ duplicate: true }));
+  }
+
   /**
    * LOY-005 — redeem points as a discount line item at billing. Caller (BillingService) is
    * responsible for composing this with — not bypassing — the existing discount-approval
    * threshold logic; this method only concerns itself with the points side of the ledger.
+   *
+   * DOUBLE-SPEND CONTROL — two independent guards, because they defend different attacks:
+   *  1. Concurrency: the whole redemption runs inside a transaction whose first write is a
+   *     CONDITIONAL decrement of the patient's single LoyaltyBalanceCache document
+   *     (`currentBalance >= points`). Two simultaneous redemptions therefore contend on one
+   *     document — the loser either hits a write conflict (retried by withTransaction, then
+   *     re-evaluating a now-lower balance) or fails the predicate outright. Neither can read a
+   *     stale balance and spend it twice, and the debit rows roll back with the decrement.
+   *  2. Retry: `idempotencyKey` is stamped on the first debit row, so the unique sparse
+   *     (patientId, idempotencyKey) index makes a replayed request a benign no-op that returns
+   *     the original entries rather than spending again.
    */
   async redeem({
     branchId,
@@ -338,6 +374,7 @@ class LoyaltyLedgerService {
     points,
     invoiceId,
     redeemedValueInr,
+    idempotencyKey = null,
     createdBy = null,
     organizationId = null,
     actorReq = null,
@@ -355,23 +392,66 @@ class LoyaltyLedgerService {
       throw ApiError.badRequest(`Points must be redeemed in steps of ${settings.redemptionStepPoints}.`);
     }
 
-    const debitEntries = await this.#debitFifo({
-      patientId,
-      branchId,
-      points,
-      entryType: LOYALTY_ENTRY_TYPE.DEBIT_REDEEM,
-      extraFields: { sourceRefType: 'INVOICE', sourceRefId: invoiceId, redeemedValueInr, conversionRateVersion: settings._id },
-      createdBy,
-      organizationId,
-    });
+    if (idempotencyKey) {
+      const replay = await this.#findRedemptionByKey(patientId, idempotencyKey);
+      if (replay) return replay;
+    }
 
-    const cache = await this.#getOrCreateCache(patientId);
-    cache.currentBalance = Math.max(0, cache.currentBalance - points);
-    cache.redeemableBalance = Math.max(0, cache.redeemableBalance - points);
-    cache.lifetimeRedeemed += points;
-    cache.lastLedgerEntryId = debitEntries[debitEntries.length - 1]?._id || cache.lastLedgerEntryId;
-    cache.recalculatedAt = new Date();
-    await cache.save();
+    // The cache row is the lock the transaction contends on, so it must exist before we start.
+    await this.#getOrCreateCache(patientId);
+
+    let debitEntries = [];
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        debitEntries = [];
+        const claimed = await LoyaltyBalanceCache.findOneAndUpdate(
+          { patientId, currentBalance: { $gte: points }, redeemableBalance: { $gte: points } },
+          {
+            $inc: { currentBalance: -points, redeemableBalance: -points, lifetimeRedeemed: points },
+            $set: { recalculatedAt: new Date() },
+          },
+          { new: true, session }
+        );
+        if (!claimed) {
+          const { currentBalance } = await this.computeBalanceFromLedger(patientId);
+          throw ApiError.badRequest(
+            `Insufficient loyalty balance: requested ${points}, available ${currentBalance}.`
+          );
+        }
+
+        debitEntries = await this.#debitFifo({
+          patientId,
+          branchId,
+          points,
+          entryType: LOYALTY_ENTRY_TYPE.DEBIT_REDEEM,
+          extraFields: {
+            sourceRefType: 'INVOICE',
+            sourceRefId: invoiceId,
+            redeemedValueInr,
+            conversionRateVersion: settings._id,
+          },
+          createdBy,
+          organizationId,
+          idempotencyKey,
+          session,
+        });
+
+        await LoyaltyBalanceCache.updateOne(
+          { _id: claimed._id },
+          { $set: { lastLedgerEntryId: debitEntries[debitEntries.length - 1]._id } },
+          { session }
+        );
+      });
+    } catch (error) {
+      if (error?.code === 11000 && idempotencyKey) {
+        const replay = await this.#findRedemptionByKey(patientId, idempotencyKey);
+        if (replay) return replay;
+      }
+      throw error;
+    } finally {
+      await session.endSession();
+    }
 
     await this.auditService.record(AUDIT_ACTIONS.LOYALTY_POINTS_REDEEMED, {
       actorId: createdBy,

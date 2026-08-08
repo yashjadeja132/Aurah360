@@ -12,6 +12,7 @@ import { ROLES } from '../constants/roles.js';
 import AuditService from '../services/AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { PATIENT_VISIBILITY, SCAN_STATE } from '../enums/patient.js';
+import { assertPatientInScope } from '../helpers/patientScope.helper.js';
 
 const storage = StorageFactory.create();
 const documentRepository = new PatientDocumentRepository();
@@ -22,6 +23,24 @@ const auditService = new AuditService();
  * Auth-gated file serving — replaces the old public `express.static('/uploads')` mount
  * (RC1 security finding B1). Every read is permission-checked and audited; there is no
  * public object path. `authenticate` middleware runs ahead of this on the route.
+ *
+ * SEC-030 closes three defects here. This is the one place raw bytes leave the system, so it is
+ * the one place a scoping gap is unrecoverable:
+ *
+ *  1. ROW SCOPE. Access used to be permission-only: any holder of `patients.view` could fetch any
+ *     document or clinical-photo id in the organisation, in any branch, for a patient they had
+ *     never met. Staff reads now additionally require the file's patient to be connected to the
+ *     caller's branch (`assertPatientInScope` — registration branch ∪ consultation branches ∪
+ *     appointment branches, so a patient treated away from their home branch stays readable
+ *     there). Out of scope answers 404, never 403: a 403 would confirm the id exists.
+ *  2. DOWNLOAD ≠ VIEW. One permission used to cover both. Fetching to render inline is unchanged;
+ *     asking for `?download=1` (which is what now sets `Content-Disposition: attachment`) needs
+ *     `patients.documents.download` or one of the document-management grants that already implied
+ *     it. Nothing that worked before breaks — the download flag is new, so every existing caller
+ *     lands on the unchanged view path.
+ *  3. PORTAL AUDIT. Patient-portal file reads served bytes with no audit record at all, so a
+ *     patient's own downloads were invisible to an auditor while staff downloads were logged.
+ *     They are now recorded with the same action, tagged `channel: 'PATIENT_PORTAL'`.
  */
 class FileAccessController {
   #canViewClinical(req) {
@@ -57,6 +76,58 @@ class FileAccessController {
     throw ApiError.unauthorized('Access token required');
   }
 
+  /** True when the caller explicitly asked for a copy rather than an inline render. */
+  #isDownloadRequest(req) {
+    const flag = String(req.query?.download ?? '').toLowerCase();
+    const disposition = String(req.query?.disposition ?? '').toLowerCase();
+    return flag === '1' || flag === 'true' || disposition === 'attachment';
+  }
+
+  /**
+   * Download gate — deliberately ADDITIVE to the permissions that already implied a right to take
+   * a copy (document management / patients.* / clinical.*), so no role that could legitimately
+   * download before loses the ability. It bites only on view-only grants (NURSE, TECHNICIAN:
+   * `patients.view` + `clinical.view`), which is the separation that was missing.
+   */
+  #assertCanDownload(req, viaToken) {
+    if (viaToken) {
+      // A signed link proves the file, not the bearer's role — there is no session to check a
+      // download grant against, so signed links stay view-only.
+      throw ApiError.forbidden(
+        'A signed file link may be viewed but not downloaded; sign in to download this file.',
+        'FILE_DOWNLOAD_NOT_PERMITTED'
+      );
+    }
+    if (req.auth?.role === ROLES.OWNER) return;
+    const permitted = hasAnyPermission(req.auth?.permissions || [], [
+      PERMISSIONS.PATIENTS_DOCUMENTS_DOWNLOAD,
+      PERMISSIONS.PATIENTS_DOCUMENTS,
+      PERMISSIONS.PATIENTS_ALL,
+      PERMISSIONS.CLINICAL_ALL,
+    ]);
+    if (!permitted) {
+      throw ApiError.forbidden(
+        'You may view this file but not download a copy of it.',
+        'FILE_DOWNLOAD_NOT_PERMITTED'
+      );
+    }
+  }
+
+  /** `Content-Disposition` for the byte response — attachment only on an authorized download. */
+  #dispositionHeader(isDownload, originalName) {
+    const safeName = String(originalName || 'file').replace(/[^\w.\-]+/g, '_');
+    return `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`;
+  }
+
+  /**
+   * Row scope for a staff read. Skipped for the signed-token path (the token was minted by a
+   * session that had already passed this check for this exact file id) and for patient sessions.
+   */
+  async #assertStaffScope(req, patientId, notFoundMessage) {
+    if (!req.auth) return;
+    await assertPatientInScope(req, patientId, notFoundMessage);
+  }
+
   /**
    * Malware-scan gate (Task #23) — only CLEAN files are servable. PENDING is a soft/retryable
    * state (scan just hasn't finished); QUARANTINED/REJECTED are a hard block that gets audited.
@@ -88,6 +159,10 @@ class FileAccessController {
 
     const fileId = doc._id.toString();
     const { viaToken } = this.#authorizeFileAccess(req, fileId);
+    await this.#assertStaffScope(req, doc.patientId, 'Document not found');
+
+    const isDownload = this.#isDownloadRequest(req);
+    if (isDownload) this.#assertCanDownload(req, viaToken);
 
     const gated = await this.#scanGate(res, doc.scanState, {
       fileId,
@@ -99,13 +174,21 @@ class FileAccessController {
 
     await auditService.record(AUDIT_ACTIONS.PATIENT_DOCUMENT_DOWNLOADED, {
       actorId: req.auth?.userId || null,
-      metadata: { documentId: fileId, patientId: doc.patientId.toString(), viaToken },
+      metadata: {
+        documentId: fileId,
+        patientId: doc.patientId.toString(),
+        viaToken,
+        mode: isDownload ? 'DOWNLOAD' : 'VIEW',
+      },
       req,
     });
 
     const absolutePath = await storage.getAbsolutePath(doc.storageKey);
     return res.sendFile(path.resolve(absolutePath), {
-      headers: { 'Content-Type': doc.mimeType || 'application/octet-stream' },
+      headers: {
+        'Content-Type': doc.mimeType || 'application/octet-stream',
+        'Content-Disposition': this.#dispositionHeader(isDownload, doc.originalName),
+      },
     });
   });
 
@@ -114,6 +197,7 @@ class FileAccessController {
     const doc = await documentRepository.findByIdNotDeleted(req.params.id);
     if (!doc) throw ApiError.notFound('Document not found');
     if (!this.#canViewClinical(req)) throw ApiError.forbidden('Insufficient permissions');
+    await this.#assertStaffScope(req, doc.patientId, 'Document not found');
 
     const { token, expiresAt } = generateFileToken(doc._id.toString());
     return res.json({ token, expiresAt });
@@ -125,6 +209,10 @@ class FileAccessController {
 
     const fileId = photo._id.toString();
     const { viaToken } = this.#authorizeFileAccess(req, fileId);
+    await this.#assertStaffScope(req, photo.patientId, 'Photo not found');
+
+    const isDownload = this.#isDownloadRequest(req);
+    if (isDownload) this.#assertCanDownload(req, viaToken);
 
     const gated = await this.#scanGate(res, photo.scanState, {
       fileId,
@@ -134,15 +222,39 @@ class FileAccessController {
     });
     if (gated) return gated;
 
+    // IMG-003/PRV-001 — defence in depth behind the upload-time capture policy: photo BYTES are
+    // never served for a row whose consent was never verified. Every capture path now sets this
+    // from the real ConsentGrant log (ClinicalPhotoPolicyService), so an unverified row means the
+    // image predates/bypassed the policy and must not be released.
+    if (photo.consentVerified !== true) {
+      await auditService.record(AUDIT_ACTIONS.CLINICAL_PHOTO_CONSENT_MISSING, {
+        actorId: req.auth?.userId || null,
+        metadata: { photoId: fileId, patientId: photo.patientId.toString(), stage: 'file_access' },
+        req,
+      });
+      throw ApiError.forbidden(
+        'Photography consent is not verified for this image, so it cannot be viewed or downloaded.',
+        'PHOTOGRAPHY_CONSENT_NOT_VERIFIED'
+      );
+    }
+
     await auditService.record(AUDIT_ACTIONS.PATIENT_DOCUMENT_DOWNLOADED, {
       actorId: req.auth?.userId || null,
-      metadata: { photoId: fileId, patientId: photo.patientId.toString(), viaToken },
+      metadata: {
+        photoId: fileId,
+        patientId: photo.patientId.toString(),
+        viaToken,
+        mode: isDownload ? 'DOWNLOAD' : 'VIEW',
+      },
       req,
     });
 
     const absolutePath = await storage.getAbsolutePath(photo.storageKey);
     return res.sendFile(path.resolve(absolutePath), {
-      headers: { 'Content-Type': photo.mimeType || 'application/octet-stream' },
+      headers: {
+        'Content-Type': photo.mimeType || 'application/octet-stream',
+        'Content-Disposition': this.#dispositionHeader(isDownload, photo.originalName),
+      },
     });
   });
 
@@ -151,6 +263,7 @@ class FileAccessController {
     const photo = await photoRepository.findByIdNotDeleted(req.params.id);
     if (!photo) throw ApiError.notFound('Photo not found');
     if (!this.#canViewClinical(req)) throw ApiError.forbidden('Insufficient permissions');
+    await this.#assertStaffScope(req, photo.patientId, 'Photo not found');
 
     const { token, expiresAt } = generateFileToken(photo._id.toString());
     return res.json({ token, expiresAt });
@@ -186,7 +299,7 @@ class FileAccessController {
 
     const fileId = doc._id.toString();
     const ownerPatientId = doc.patientId.toString();
-    this.#authorizePatientFileAccess(req, fileId, ownerPatientId);
+    const { viaToken } = this.#authorizePatientFileAccess(req, fileId, ownerPatientId);
     if (doc.patientVisibility === PATIENT_VISIBILITY.HIDDEN) throw ApiError.forbidden('Not released');
 
     const gated = await this.#scanGate(res, doc.scanState, {
@@ -196,6 +309,15 @@ class FileAccessController {
       kind: 'document',
     });
     if (gated) return gated;
+
+    // SEC-030 — portal reads were the only byte-serving path with no audit record at all.
+    // actorId is null because the reader is a patient, not a staff User; the patient is
+    // identified by `patientId` and the channel tag.
+    await auditService.record(AUDIT_ACTIONS.PATIENT_DOCUMENT_DOWNLOADED, {
+      actorId: null,
+      metadata: { documentId: fileId, patientId: ownerPatientId, viaToken, channel: 'PATIENT_PORTAL' },
+      req,
+    });
 
     const absolutePath = await storage.getAbsolutePath(doc.storageKey);
     return res.sendFile(path.resolve(absolutePath), {
@@ -224,7 +346,7 @@ class FileAccessController {
 
     const photoFileId = photo._id.toString();
     const photoOwnerPatientId = photo.patientId.toString();
-    this.#authorizePatientFileAccess(req, photoFileId, photoOwnerPatientId);
+    const { viaToken } = this.#authorizePatientFileAccess(req, photoFileId, photoOwnerPatientId);
     if (photo.patientVisibility === PATIENT_VISIBILITY.HIDDEN) throw ApiError.forbidden('Not released');
 
     const photoGated = await this.#scanGate(res, photo.scanState, {
@@ -234,6 +356,18 @@ class FileAccessController {
       kind: 'photo',
     });
     if (photoGated) return photoGated;
+
+    // SEC-030 — see `patientDocument`: portal photo reads were likewise unaudited.
+    await auditService.record(AUDIT_ACTIONS.PATIENT_DOCUMENT_DOWNLOADED, {
+      actorId: null,
+      metadata: {
+        photoId: photoFileId,
+        patientId: photoOwnerPatientId,
+        viaToken,
+        channel: 'PATIENT_PORTAL',
+      },
+      req,
+    });
 
     const absolutePath = await storage.getAbsolutePath(photo.storageKey);
     return res.sendFile(path.resolve(absolutePath), {

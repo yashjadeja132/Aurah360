@@ -17,6 +17,9 @@ import {
   updateMedicineSchema,
   templateCreateSchema,
   applyTemplateSchema,
+  finalizePrescriptionSchema,
+  createInteractionRuleSchema,
+  updateInteractionRuleSchema,
 } from '../../validators/prescription.validator.js';
 
 const router = Router();
@@ -58,6 +61,33 @@ router.patch(
   requirePermission(PERMISSIONS.PRESCRIPTION_EDIT, PERMISSIONS.PRESCRIPTION_ALL),
   validate({ params: prescriptionIdParamSchema, body: updateMedicineSchema }),
   controller.updateMedicine
+);
+
+/**
+ * RX-SAFETY — drug-interaction rule set (admin-maintained; ships EMPTY on purpose, see
+ * DrugInteractionRule.model.js). Registered before `/:id` so the literal path wins.
+ */
+router.get(
+  '/interaction-rules',
+  requirePermission(
+    PERMISSIONS.PRESCRIPTION_SAFETY_RULES_VIEW,
+    PERMISSIONS.PRESCRIPTION_SAFETY_RULES_MANAGE
+  ),
+  controller.listInteractionRules
+);
+
+router.post(
+  '/interaction-rules',
+  requirePermission(PERMISSIONS.PRESCRIPTION_SAFETY_RULES_MANAGE),
+  validate({ body: createInteractionRuleSchema }),
+  controller.createInteractionRule
+);
+
+router.patch(
+  '/interaction-rules/:id',
+  requirePermission(PERMISSIONS.PRESCRIPTION_SAFETY_RULES_MANAGE),
+  validate({ params: prescriptionIdParamSchema, body: updateInteractionRuleSchema }),
+  controller.updateInteractionRule
 );
 
 // Templates / favorites
@@ -145,10 +175,18 @@ router.delete(
   controller.remove
 );
 
+// RX-SAFETY — read-only preflight so the editor can show the block before the doctor tries.
+router.get(
+  '/:id/safety-check',
+  requirePermission(PERMISSIONS.PRESCRIPTION_VIEW, PERMISSIONS.PRESCRIPTION_ALL),
+  validate({ params: prescriptionIdParamSchema }),
+  controller.safetyCheck
+);
+
 router.post(
   '/:id/finalize',
   requirePermission(PERMISSIONS.PRESCRIPTION_FINALIZE, PERMISSIONS.PRESCRIPTION_ALL),
-  validate({ params: prescriptionIdParamSchema }),
+  validate({ params: prescriptionIdParamSchema, body: finalizePrescriptionSchema }),
   controller.finalize
 );
 

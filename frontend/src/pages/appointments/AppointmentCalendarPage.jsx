@@ -14,26 +14,22 @@ import {
 } from '@/modules/appointments/constants';
 import { APP_ROUTES, appointmentDetailPath } from '@/constants/routes';
 import { cn } from '@/utils/cn';
+// Every date in this screen is a CALENDAR DAY, not an instant: `appointmentDate` is persisted as
+// local start-of-day, so in IST it arrives as `…T18:30:00.000Z` — the PREVIOUS UTC date. The old
+// `toISOString().slice(0, 10)` bucketing therefore filed every appointment one column to the left.
+// See `@/utils/date`.
+import { addDaysKey, localDateKey, startOfWeek, startOfWeekKey } from '@/utils/date';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-function startOfWeek(dateStr) {
-  const d = dateStr ? new Date(dateStr) : new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
 
 export default function AppointmentCalendarPage() {
   const { t } = useTranslation();
   const { data: doctorsData } = useDoctorList({ limit: 50, isActive: 'true' });
   const doctors = doctorsData?.items || [];
   const [doctorId, setDoctorId] = useState('');
-  const [weekStart, setWeekStart] = useState(startOfWeek().toISOString().slice(0, 10));
+  const [weekStart, setWeekStart] = useState(startOfWeekKey());
   const [view, setView] = useState('week');
-  const [day, setDay] = useState(new Date().toISOString().slice(0, 10));
+  const [day, setDay] = useState(localDateKey());
 
   const activeDoctor = doctorId || doctors[0]?.id || '';
 
@@ -42,11 +38,9 @@ export default function AppointmentCalendarPage() {
       return { from: day, to: day };
     }
     const start = startOfWeek(weekStart);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
     return {
-      from: start.toISOString().slice(0, 10),
-      to: end.toISOString().slice(0, 10),
+      from: localDateKey(start),
+      to: addDaysKey(6, start),
     };
   }, [view, weekStart, day]);
 
@@ -58,7 +52,7 @@ export default function AppointmentCalendarPage() {
   const byDate = useMemo(() => {
     const map = {};
     items.forEach((a) => {
-      const key = new Date(a.appointmentDate).toISOString().slice(0, 10);
+      const key = localDateKey(a.appointmentDate);
       if (!map[key]) map[key] = [];
       map[key].push(a);
     });
@@ -67,11 +61,7 @@ export default function AppointmentCalendarPage() {
 
   const weekDays = useMemo(() => {
     const start = startOfWeek(weekStart);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      return d.toISOString().slice(0, 10);
-    });
+    return Array.from({ length: 7 }, (_, i) => addDaysKey(i, start));
   }, [weekStart]);
 
   return (
@@ -123,7 +113,9 @@ export default function AppointmentCalendarPage() {
                 className="mb-2 w-full text-left text-xs font-medium"
                 onClick={() => { setDay(dateKey); setView('day'); }}
               >
-                {DAY_NAMES[new Date(dateKey).getDay()]} {dateKey.slice(5)}
+                {/* `new Date('2026-08-03')` parses as UTC midnight; appending a time forces the
+                    LOCAL calendar day so the weekday label can't drift off the column's date. */}
+                {DAY_NAMES[new Date(`${dateKey}T00:00:00`).getDay()]} {dateKey.slice(5)}
               </button>
               <div className="space-y-1">
                 {(byDate[dateKey] || []).map((a) => (

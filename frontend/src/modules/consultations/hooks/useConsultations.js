@@ -30,6 +30,34 @@ export function usePatientConsultationSummary(patientId) {
   });
 }
 
+/** All consultations for one patient — GET /consultations/patient/:patientId. */
+export function usePatientConsultations(patientId) {
+  return useQuery({
+    queryKey: QUERY_KEYS.CONSULTATION_PATIENT_LIST(patientId),
+    queryFn: async () => {
+      const res = await consultationsApi.listByPatient(patientId);
+      return res.data || [];
+    },
+    enabled: Boolean(patientId),
+  });
+}
+
+/**
+ * Clinical photos for one consultation — GET /consultations/:id/photos. Same endpoint (and
+ * therefore the same consultation.view permission + consent metadata) the consultation
+ * workspace photos panel reads; no new ungated image path is introduced.
+ */
+export function useConsultationPhotos(consultationId, enabled = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.CONSULTATION_PHOTOS(consultationId),
+    queryFn: async () => {
+      const res = await consultationsApi.listPhotos(consultationId);
+      return res.data || [];
+    },
+    enabled: Boolean(consultationId) && enabled,
+  });
+}
+
 export function useDoctorConsultations(doctorId, params = {}) {
   return useQuery({
     queryKey: QUERY_KEYS.CONSULTATION_DOCTOR_LIST(doctorId, params),
@@ -52,11 +80,42 @@ export function useSoapVersions(id) {
   });
 }
 
+export function useConsultationLabOrders(id) {
+  return useQuery({
+    queryKey: QUERY_KEYS.CONSULTATION_LAB_ORDERS(id),
+    queryFn: async () => {
+      const res = await consultationsApi.listLabOrders(id);
+      return res.data?.orders || [];
+    },
+    enabled: Boolean(id),
+  });
+}
+
+/**
+ * A13 — cross-patient Report Review worklist. Rows already carry populated patient/consultation
+ * context, so no per-row follow-up fetch is needed.
+ */
+export function useLabOrderReviewQueue(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.LAB_ORDER_REVIEW_QUEUE(params),
+    queryFn: async () => {
+      const res = await consultationsApi.labOrderReviewQueue(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
 function useInvalidateWorkspace(id) {
   const qc = useQueryClient();
   return () => {
     qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_WORKSPACE(id) });
     qc.invalidateQueries({ queryKey: ['consultations'] });
+    // Signing completes the underlying appointment, so any cached appointment list is now wrong.
+    // Without this the doctor navigates back to "Start from appointment" inside the 30s staleTime
+    // and still sees the patient they just signed off — the queries default to
+    // refetchOnWindowFocus: false, so nothing else would correct it.
+    qc.invalidateQueries({ queryKey: ['appointments'] });
+    qc.invalidateQueries({ queryKey: ['queue'] });
   };
 }
 
@@ -153,6 +212,39 @@ export function useUploadPhoto(id) {
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e, 'Upload failed')),
+  });
+}
+
+function useInvalidateLabOrders(id) {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_LAB_ORDERS(id) });
+    qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_WORKSPACE(id) });
+  };
+}
+
+export function useCreateLabOrder(id) {
+  const invalidate = useInvalidateLabOrders(id);
+  return useMutation({
+    mutationFn: (payload) => consultationsApi.createLabOrder(id, payload),
+    onSuccess: () => {
+      toast.success('Lab order created');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Lab order failed')),
+  });
+}
+
+export function useUpdateLabOrder(id) {
+  const invalidate = useInvalidateLabOrders(id);
+  return useMutation({
+    mutationFn: ({ labOrderId, ...payload }) =>
+      consultationsApi.updateLabOrder(id, labOrderId, payload),
+    onSuccess: () => {
+      toast.success('Lab order updated');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Lab order update failed')),
   });
 }
 

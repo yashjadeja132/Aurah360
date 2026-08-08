@@ -6,10 +6,13 @@ import { ProtectedRoute } from '@/routes/ProtectedRoute';
 import { PublicRoute } from '@/routes/PublicRoute';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PatientPortalShell, PatientProtectedRoute } from '@/routes/PatientPortalRoutes';
+import { RoleLanding } from '@/routes/RoleLanding';
 import {
   LoginPage,
   ForgotPasswordPage,
-  DashboardPage,
+  OwnerLandingPage,
+
+  DoctorMyDayPage,
   StaffListPage,
   StaffCreatePage,
   StaffDetailPage,
@@ -48,6 +51,7 @@ import {
   QueueDashboardPage,
   ConsultationListPage,
   ConsultationWorkspacePage,
+  ReportReviewQueuePage,
   PrescriptionListPage,
   PrescriptionEditorPage,
   PrescriptionPrintPage,
@@ -57,10 +61,15 @@ import {
   ProtocolLibraryPage,
   PackageBuilderPage,
   InvoiceListPage,
+  BillingHubPage,
+  CashierDashboardPage,
   CashClosePage,
+  DiscountApprovalQueuePage,
+  DuePaymentsPage,
   InvoiceDetailPage,
   InvoicePrintPage,
-  TreatmentDashboardPage,
+  TreatmentsHubPage,
+  TechnicianWorklistPage,
   TreatmentSafetyPage,
   SessionListPage,
   SessionExecutionPage,
@@ -73,6 +82,8 @@ import {
   StockLedgerPage,
   PurchaseOrdersPage,
   SuppliersPage,
+  CrmHubPage,
+
   CrmDashboardPage,
   OfferBoardPage,
   RecallWorklistPage,
@@ -80,6 +91,8 @@ import {
   LeadDetailPage,
   KanbanPipelinePage,
   TaskBoardPage,
+  LoyaltyHubPage,
+
   LoyaltyDashboardPage,
   LoyaltySettingsPage,
   LoyaltyRulesPage,
@@ -89,6 +102,8 @@ import {
   NotificationCenterPage,
   DeliveryLogPage,
   TemplateManagerPage,
+  ReportsWorkspacePage,
+
   ReportsHubPage,
   RoleDashboardPage,
   AnalyticsDashboardPage,
@@ -108,6 +123,18 @@ import {
   PatientNotificationsPage,
   PatientProfilePage,
   PatientFeedbackPage,
+  InventoryHubPage,
+
+  PharmacyHubPage,
+
+  CommunicationHubPage,
+
+  ReceptionDeskPage,
+
+
+  BranchCommandPage,
+
+
   NotFoundPage,
 } from '@/routes/lazyPages';
 import { APP_ROUTES } from '@/constants/routes';
@@ -392,7 +419,15 @@ export const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
-          { path: APP_ROUTES.DASHBOARD, element: <DashboardPage /> },
+          { path: APP_ROUTES.DASHBOARD, element: <RoleLanding /> },
+          {
+            path: APP_ROUTES.DOCTOR_MY_DAY,
+            element: <AppointmentPermission><DoctorMyDayPage /></AppointmentPermission>,
+          },
+          {
+            path: APP_ROUTES.OWNER_LANDING,
+            element: <AnalyticsPermission><OwnerLandingPage /></AnalyticsPermission>,
+          },
           {
             path: APP_ROUTES.STAFF,
             element: <StaffPermission><StaffListPage /></StaffPermission>,
@@ -539,6 +574,27 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // A1 — the receptionist's landing. Registered before APP_ROUTES.RECEPTION so the
+            // literal '/reception/desk' segment is matched first. Same reception.view gate; the
+            // dues and consent sections inside are separately gated.
+            path: APP_ROUTES.RECEPTION_DESK,
+            element: (
+              <ReceptionPermission>
+                <ReceptionDeskPage />
+              </ReceptionPermission>
+            ),
+          },
+          {
+            // B1 — Branch Manager command screen. reports.view is the narrowest permission it
+            // needs to read revenue; queue/stock/approval sections are gated inside.
+            path: APP_ROUTES.BRANCH_COMMAND,
+            element: (
+              <ReportsPermission>
+                <BranchCommandPage />
+              </ReportsPermission>
+            ),
+          },
+          {
             path: APP_ROUTES.RECEPTION,
             element: (
               <ReceptionPermission>
@@ -559,6 +615,15 @@ export const router = createBrowserRouter([
             element: (
               <ConsultationPermission>
                 <ConsultationListPage />
+              </ConsultationPermission>
+            ),
+          },
+          {
+            // A13 — keep above CONSULTATION_WORKSPACE so 'report-review' is not read as an id.
+            path: APP_ROUTES.REPORT_REVIEW_QUEUE,
+            element: (
+              <ConsultationPermission>
+                <ReportReviewQueuePage />
               </ConsultationPermission>
             ),
           },
@@ -638,7 +703,17 @@ export const router = createBrowserRouter([
             path: APP_ROUTES.BILLING,
             element: (
               <BillingPermission>
-                <InvoiceListPage />
+                <BillingHubPage />
+              </BillingPermission>
+            ),
+          },
+          {
+            // The cashier's worklist landing. Same billing.view gate as the invoice list; the
+            // approvals section inside is separately gated on billing.discount_approve.
+            path: APP_ROUTES.BILLING_CASHIER,
+            element: (
+              <BillingPermission>
+                <CashierDashboardPage />
               </BillingPermission>
             ),
           },
@@ -667,10 +742,52 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // A.4 — a due-collection worklist; viewing needs billing.view like the invoice list,
+            // the per-row Collect action is separately guarded by billing.payment.
+            path: APP_ROUTES.BILLING_DUE_PAYMENTS,
+            element: (
+              <BillingPermission>
+                <DuePaymentsPage />
+              </BillingPermission>
+            ),
+          },
+          {
+            path: APP_ROUTES.BILLING_DISCOUNT_APPROVALS,
+            element: (
+              <PermissionGuard
+                permissions={[PERMISSIONS.BILLING_DISCOUNT_APPROVE, PERMISSIONS.BILLING_ALL]}
+                fallback="redirect"
+              >
+                <DiscountApprovalQueuePage />
+              </PermissionGuard>
+            ),
+          },
+          {
+            // Hub route guard is deliberately broad — each tab self-gates on the permission
+            // its former standalone route required, and the panels re-check on render.
             path: APP_ROUTES.TREATMENT_DASHBOARD,
             element: (
+              <PermissionGuard
+                permissions={[
+                  PERMISSIONS.TREATMENT_SESSION_VIEW,
+                  PERMISSIONS.TREATMENT_SESSION_ALL,
+                  PERMISSIONS.TREATMENT_PLAN_VIEW,
+                  PERMISSIONS.TREATMENT_PLAN_ALL,
+                  PERMISSIONS.ADVERSE_EVENT_VIEW,
+                  PERMISSIONS.ADVERSE_EVENT_CREATE,
+                  PERMISSIONS.PATCH_TEST_VIEW,
+                ]}
+                fallback="redirect"
+              >
+                <TreatmentsHubPage />
+              </PermissionGuard>
+            ),
+          },
+          {
+            path: APP_ROUTES.TECHNICIAN_WORKLIST,
+            element: (
               <TreatmentSessionPermission>
-                <TreatmentDashboardPage />
+                <TechnicianWorklistPage />
               </TreatmentSessionPermission>
             ),
           },
@@ -707,10 +824,11 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Hub: overview + prescription queue as tabs. Each tab self-gates.
             path: APP_ROUTES.PHARMACY,
             element: (
               <PharmacyPermission>
-                <PharmacyDashboardPage />
+                <PharmacyHubPage />
               </PharmacyPermission>
             ),
           },
@@ -731,10 +849,11 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Hub: overview, ledger, expiry, transfers, purchase orders, suppliers as tabs.
             path: APP_ROUTES.INVENTORY,
             element: (
               <InventoryPermission>
-                <InventoryDashboardPage />
+                <InventoryHubPage />
               </InventoryPermission>
             ),
           },
@@ -771,12 +890,10 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Hub: leads, pipeline, follow-ups, recalls, offers and feedback as tabs. Each tab
+            // self-gates on the permission its former standalone route required.
             path: APP_ROUTES.CRM,
-            element: (
-              <CrmPermission>
-                <CrmDashboardPage />
-              </CrmPermission>
-            ),
+            element: <CrmHubPage />,
           },
           {
             path: APP_ROUTES.CRM_OFFERS,
@@ -827,15 +944,10 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Hub: overview, rules, tiers, campaigns, approvals and settings as tabs. The hub
+            // carries its own guard over the union of its tab gates; each panel re-checks.
             path: APP_ROUTES.LOYALTY,
-            element: (
-              <PermissionGuard
-                permissions={[PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_RULES_VIEW, PERMISSIONS.LOYALTY_REPORTS_VIEW, PERMISSIONS.LOYALTY_ALL]}
-                fallback="redirect"
-              >
-                <LoyaltyDashboardPage />
-              </PermissionGuard>
-            ),
+            element: <LoyaltyHubPage />,
           },
           {
             path: APP_ROUTES.LOYALTY_SETTINGS,
@@ -858,10 +970,11 @@ export const router = createBrowserRouter([
             element: <LoyaltyAdjustApprovePermission><LoyaltyAdjustmentQueuePage /></LoyaltyAdjustApprovePermission>,
           },
           {
+            // Hub: inbox, templates, delivery log as tabs.
             path: APP_ROUTES.NOTIFICATIONS,
             element: (
               <NotificationsPermission>
-                <NotificationCenterPage />
+                <CommunicationHubPage />
               </NotificationsPermission>
             ),
           },
@@ -906,10 +1019,12 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Hub: Dashboards / Reports / Analytics / Scheduled as tabs. Replaces the
+            // hub-of-cards page plus the parallel /analytics stack.
             path: APP_ROUTES.REPORTS,
             element: (
               <ReportsPermission>
-                <ReportsHubPage />
+                <ReportsWorkspacePage />
               </ReportsPermission>
             ),
           },

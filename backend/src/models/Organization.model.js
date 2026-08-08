@@ -16,11 +16,16 @@ const organizationSchema = new mongoose.Schema(
     contactPhone: { type: String, default: null, trim: true },
     privacyContactEmail: { type: String, default: null, trim: true, lowercase: true },
     grievanceContactEmail: { type: String, default: null, trim: true, lowercase: true },
+    /** Source of truth for report/day-bucket timezone — beats CLINIC_DEFAULT_TIMEZONE.
+     *  See src/config/orgRuntime.js for the precedence note. */
     timezone: { type: String, default: 'Asia/Kolkata' },
-    supportedLanguages: { type: [String], default: ['en', 'gu', 'hi'] },
-    defaultLanguage: { type: String, default: 'en' },
-    financialYearStartMonth: { type: Number, default: 4, min: 1, max: 12 }, // April
+    /** India's FY starts in April. Drives `period=FY`/`FY_PREV` report ranges
+     *  (src/helpers/reportFilters.helper.js). */
+    financialYearStartMonth: { type: Number, default: 4, min: 1, max: 12 },
+    /** Prefix for newly generated invoice numbers. Changing it does NOT renumber history —
+     *  each prefix carries its own counter (src/helpers/invoiceNumber.helper.js). */
     invoicePrefix: { type: String, default: 'INV' },
+    /** Rendered on the invoice + receipt print payloads (BillingService.getPrintData). */
     invoiceFooterNote: { type: String, default: null },
     /** Fields branches are allowed to override individually (ORG-006). */
     branchOverridableFields: {
@@ -45,8 +50,6 @@ organizationSchema.methods.toSafeObject = function toSafeObject() {
     privacyContactEmail: this.privacyContactEmail,
     grievanceContactEmail: this.grievanceContactEmail,
     timezone: this.timezone,
-    supportedLanguages: this.supportedLanguages,
-    defaultLanguage: this.defaultLanguage,
     financialYearStartMonth: this.financialYearStartMonth,
     invoicePrefix: this.invoicePrefix,
     invoiceFooterNote: this.invoiceFooterNote,

@@ -9,28 +9,51 @@ class FeeScheduleService {
     this.auditService = new AuditService();
   }
 
-  async create(payload, actorId, req = null) {
-    const row = await FeeSchedule.create({ ...payload, createdBy: actorId });
+  /**
+   * SEC-030 — a branch-scoped caller may only ever author pricing for their OWN branch; the
+   * requested `branchId` is overwritten rather than validated so there is no way to author an
+   * org-wide (`branchId: null`) price from a branch account.
+   */
+  async create(payload, actorId, req = null, scopedBranchId = null) {
+    const body = scopedBranchId ? { ...payload, branchId: scopedBranchId } : payload;
+    const row = await FeeSchedule.create({ ...body, createdBy: actorId });
     await this.auditService.record(AUDIT_ACTIONS.FEE_SCHEDULE_UPDATED, {
       actorId,
-      metadata: { serviceId: payload.serviceId, branchId: payload.branchId, doctorId: payload.doctorId },
+      metadata: { serviceId: body.serviceId, branchId: body.branchId, doctorId: body.doctorId },
       req,
     });
     return row.toSafeObject();
   }
 
+  /**
+   * SEC-030 — `branchId` here means "rows that APPLY to this branch", not "rows whose column
+   * equals this branch". A FeeSchedule row with `branchId: null` is an organisation-wide default
+   * price that governs every branch, so pinning the column outright would hide from a branch
+   * user the very prices their own tills charge — an outage, not a fix. Branch-specific rows for
+   * OTHER branches (which are commercially sensitive and were previously readable by every
+   * BILLING_VIEW holder in the org) are what actually gets excluded.
+   */
   async list(query = {}) {
     const filter = { isActive: true };
     if (query.serviceId) filter.serviceId = query.serviceId;
-    if (query.branchId) filter.branchId = query.branchId;
+    if (query.branchId) filter.$or = [{ branchId: query.branchId }, { branchId: null }];
     if (query.doctorId) filter.doctorId = query.doctorId;
     const rows = await FeeSchedule.find(filter).sort({ effectiveFrom: -1 }).exec();
     return rows.map((r) => r.toSafeObject());
   }
 
-  async deactivate(id, actorId) {
+  /**
+   * SEC-030 — 404 (not 403) for a row outside the caller's branch, including the org-wide
+   * (`branchId: null`) defaults: a branch account must not be able to switch off pricing that
+   * governs other branches, and must not learn that a given row id exists.
+   */
+  async deactivate(id, actorId, scopedBranchId = null) {
+    const existing = await FeeSchedule.findById(id);
+    if (!existing) throw ApiError.notFound('Fee schedule row not found');
+    if (scopedBranchId && String(existing.branchId || '') !== String(scopedBranchId)) {
+      throw ApiError.notFound('Fee schedule row not found');
+    }
     const row = await FeeSchedule.findByIdAndUpdate(id, { isActive: false }, { new: true });
-    if (!row) throw ApiError.notFound('Fee schedule row not found');
     return row.toSafeObject();
   }
 

@@ -10,12 +10,11 @@ import {
 } from '../repositories/ConsultationClinicalRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
 import AuditService from './AuditService.js';
-import ConsentService from './ConsentService.js';
+import ClinicalPhotoPolicyService from './ClinicalPhotoPolicyService.js';
 import StorageFactory from '../storage/StorageFactory.js';
 import { CONSULTATION_STATUS, EDITABLE_CONSULTATION_STATUSES } from '../enums/consultation.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
-import { TIMELINE_EVENT, RESTRICTED_BODY_REGIONS } from '../enums/patient.js';
-import { CONSENT_PURPOSE } from '../enums/privacy.js';
+import { TIMELINE_EVENT } from '../enums/patient.js';
 
 /**
  * Clinical sub-records for a consultation (SOAP, vitals, diagnosis, exam, photos, templates).
@@ -31,28 +30,10 @@ class ConsultationClinicalService {
     this.templateRepository = new ConsultationTemplateRepository();
     this.timelineService = new PatientTimelineService();
     this.auditService = new AuditService();
-    this.consentService = new ConsentService();
+    // IMG-003/PRV-001 — capture policy (consent + restricted body area + image type) lives in one
+    // shared service that the treatment-session capture path calls too, so the two cannot drift.
+    this.photoPolicy = new ClinicalPhotoPolicyService();
     this.storage = StorageFactory.create();
-  }
-
-  /**
-   * IMG-003/PRV-001 — never trust a client-supplied consent flag. Cross-check the real,
-   * append-only ConsentGrant log for the patient before persisting any consentVerified flag.
-   */
-  async #assertPhotographyConsent(patientId, consultationId, actorId, req) {
-    const granted = await this.consentService.isGranted(patientId, CONSENT_PURPOSE.CLINICAL_PHOTOGRAPHY);
-    if (!granted) {
-      await this.auditService.record(AUDIT_ACTIONS.CLINICAL_PHOTO_CONSENT_MISSING, {
-        actorId,
-        metadata: { consultationId, patientId: patientId?.toString?.() || patientId },
-        req,
-      });
-      throw ApiError.forbidden(
-        'Clinical photography consent has not been granted for this patient. Capture cannot proceed until consent is recorded.',
-        'PHOTOGRAPHY_CONSENT_NOT_GRANTED'
-      );
-    }
-    return granted;
   }
 
   async #getEditable(consultationId) {
@@ -197,32 +178,19 @@ class ConsultationClinicalService {
     const consultation = await this.#getEditable(consultationId);
     if (!file?.buffer) throw ApiError.badRequest('File is required');
 
-    // IMG-003 (P0) — clinic policy blocks privacy-sensitive/intimate-area capture server-side.
-    // This cannot be bypassed from the API regardless of what the UI allows through.
-    const normalizedRegion = (bodyRegion || '').toLowerCase().replace(/[\s_-]+/g, '_');
-    if (RESTRICTED_BODY_REGIONS.some((r) => normalizedRegion.includes(r))) {
-      await this.auditService.record(AUDIT_ACTIONS.RESTRICTED_PHOTO_BLOCKED, {
-        actorId,
-        metadata: { consultationId, bodyRegion },
-        req,
-      });
-      throw ApiError.forbidden(
-        'This body area is blocked by clinic policy for routine capture. A doctor-authorized exception workflow is required.',
-        'RESTRICTED_BODY_AREA'
-      );
-    }
-
-    // IMG-003/PRV-001 (P0) — a client-supplied `consentVerified` boolean is never trusted at
-    // face value. Cross-check the real ConsentGrant log for CLINICAL_PHOTOGRAPHY; no valid,
-    // currently-active grant means the capture is hard-stopped regardless of what the caller sent.
-    await this.#assertPhotographyConsent(consultation.patientId, consultationId, actorId, req);
-
-    // Marketing/before-after image use is a distinct, separate consent purpose (PRV-001, §16.3) —
-    // it must never be conflated with (or inferred from) clinical photography consent.
-    const marketingGranted = await this.consentService.isGranted(
-      consultation.patientId,
-      CONSENT_PURPOSE.MARKETING_IMAGE_USE
-    );
+    // IMG-003/PRV-001 (P0) — the whole capture policy in one call (shared with the
+    // treatment-session capture path): image-type screen, restricted-body-area hard stop, and a
+    // cross-check of the real ConsentGrant log for CLINICAL_PHOTOGRAPHY. A client-supplied
+    // `consentVerified` boolean is never trusted at face value and is intentionally ignored —
+    // the verified flags below come from the grant log, not from the caller.
+    const verified = await this.photoPolicy.assertCaptureAllowed({
+      patientId: consultation.patientId,
+      bodyRegion,
+      file,
+      actorId,
+      req,
+      metadata: { consultationId },
+    });
 
     const saved = await this.storage.save(file.buffer, {
       folder: `consultations/${consultationId}/photos`,
@@ -246,14 +214,31 @@ class ConsultationClinicalService {
       originalName: file.originalname,
       mimeType: saved.mimeType,
       size: saved.size,
-      // Real grant already confirmed above — this reflects the verified ConsentGrant, not the
+      // Real grant already confirmed above — these reflect the verified ConsentGrant, not the
       // caller-supplied `consentVerified` argument (which is intentionally ignored here).
-      consentVerified: true,
-      consentVerifiedAt: new Date(),
-      consentVerifiedBy: actorId,
-      marketingConsentVerified: marketingGranted,
+      ...verified,
       uploadedBy: actorId,
     });
+
+    /**
+     * Make the before/after pairing symmetric.
+     *
+     * `pairedPhotoId` was written on the new photo only, so the pairing was visible from the AFTER
+     * photo and invisible from the BEFORE one — a half-link that no comparison view could rely on.
+     * Both photos must point at each other, and the counterpart must belong to the SAME PATIENT:
+     * accepting an arbitrary id here would let a caller link one patient's photo to another's and
+     * surface it in their comparison view.
+     */
+    if (pairedPhotoId) {
+      const counterpart = await this.photoRepository.findByIdNotDeleted(pairedPhotoId);
+      if (counterpart && counterpart.patientId.toString() === consultation.patientId.toString()) {
+        await this.photoRepository.updateById(counterpart._id, { pairedPhotoId: photo._id });
+      } else {
+        // Never leave a dangling or cross-patient link on the new photo either.
+        await this.photoRepository.updateById(photo._id, { pairedPhotoId: null });
+        photo.pairedPhotoId = null;
+      }
+    }
 
     await this.timelineService.addEvent(consultation.patientId, {
       eventType: TIMELINE_EVENT.CLINICAL_PHOTO_UPLOADED,
@@ -283,7 +268,11 @@ class ConsultationClinicalService {
     await this.#getEditable(photo.consultationId.toString());
     // Same hard-stop as uploadPhoto — re-verify against the real ConsentGrant log rather than
     // blindly flipping consentVerified to true on request.
-    await this.#assertPhotographyConsent(photo.patientId, photo.consultationId.toString(), actorId, req);
+    await this.photoPolicy.assertPhotographyConsent(photo.patientId, {
+      actorId,
+      req,
+      metadata: { consultationId: photo.consultationId.toString(), photoId: photoId?.toString?.() || photoId },
+    });
     const updated = await this.photoRepository.updateById(photoId, {
       consentVerified: true,
       consentVerifiedAt: new Date(),

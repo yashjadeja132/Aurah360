@@ -55,7 +55,17 @@ const loyaltyLedgerEntrySchema = new mongoose.Schema(
 );
 
 loyaltyLedgerEntrySchema.index({ patientId: 1, createdAt: -1 });
-loyaltyLedgerEntrySchema.index({ patientId: 1, idempotencyKey: 1 }, { unique: true, sparse: true });
+/**
+ * Duplicate-delivery guard. PARTIAL, not sparse: a sparse index still indexes an explicit
+ * `null`, and idempotencyKey defaults to null — so under `sparse` the SECOND unkeyed entry for a
+ * patient collided with the first, which broke exactly the concurrent-redemption path this index
+ * exists to protect. Restricting the index to string keys makes unkeyed entries invisible to it.
+ * Existing deployments pick the change up via `npm run db:migrate` (Model.syncIndexes).
+ */
+loyaltyLedgerEntrySchema.index(
+  { patientId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
+);
 loyaltyLedgerEntrySchema.index({ entryType: 1, earnLotExpiryDate: 1 });
 
 loyaltyLedgerEntrySchema.methods.toSafeObject = function toSafeObject(extra = {}) {

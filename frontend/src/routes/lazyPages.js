@@ -4,7 +4,9 @@ import { lazy } from 'react';
 
 export const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 export const ForgotPasswordPage = lazy(() => import('@/pages/auth/ForgotPasswordPage'));
+export const OwnerLandingPage = lazy(() => import('@/pages/dashboard/OwnerLandingPage'));
 export const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
+export const DoctorMyDayPage = lazy(() => import('@/pages/doctor/DoctorMyDayPage'));
 export const StaffListPage = lazy(() => import('@/pages/users/StaffListPage'));
 export const StaffCreatePage = lazy(() => import('@/pages/users/StaffCreatePage'));
 export const StaffDetailPage = lazy(() => import('@/pages/users/StaffDetailPage'));
@@ -47,6 +49,9 @@ export const ConsultationListPage = lazy(() => import('@/pages/consultations/Con
 export const ConsultationWorkspacePage = lazy(
   () => import('@/pages/consultations/ConsultationWorkspacePage')
 );
+export const ReportReviewQueuePage = lazy(
+  () => import('@/pages/consultations/ReportReviewQueuePage')
+);
 export const PrescriptionListPage = lazy(() => import('@/pages/prescriptions/PrescriptionListPage'));
 export const PrescriptionEditorPage = lazy(() => import('@/pages/prescriptions/PrescriptionEditorPage'));
 export const PrescriptionPrintPage = lazy(() => import('@/pages/prescriptions/PrescriptionPrintPage'));
@@ -59,11 +64,16 @@ export const ProtocolLibraryPage = lazy(() => import('@/pages/treatmentPlans/Pro
 export const PackageBuilderPage = lazy(() => import('@/pages/treatmentPlans/PackageBuilderPage'));
 export const InvoiceListPage = lazy(() => import('@/pages/billing/InvoiceListPage'));
 export const CashClosePage = lazy(() => import('@/pages/billing/CashClosePage'));
+export const DiscountApprovalQueuePage = lazy(() => import('@/pages/billing/DiscountApprovalQueuePage'));
+export const DuePaymentsPage = lazy(() => import('@/pages/billing/DuePaymentsPage'));
+export const BillingHubPage = lazy(() => import('@/pages/billing/BillingHubPage'));
+export const CashierDashboardPage = lazy(() => import('@/pages/billing/CashierDashboardPage'));
 export const InvoiceDetailPage = lazy(() => import('@/pages/billing/InvoiceDetailPage'));
 export const InvoicePrintPage = lazy(() => import('@/pages/billing/InvoicePrintPage'));
 export const TreatmentSafetyPage = lazy(() => import('@/pages/treatments/TreatmentSafetyPage'));
-export const TreatmentDashboardPage = lazy(
-  () => import('@/pages/treatmentSessions/TreatmentDashboardPage')
+export const TreatmentsHubPage = lazy(() => import('@/pages/treatments/TreatmentsHubPage'));
+export const TechnicianWorklistPage = lazy(
+  () => import('@/pages/treatments/TechnicianWorklistPage')
 );
 export const SessionListPage = lazy(() => import('@/pages/treatmentSessions/SessionListPage'));
 export const SessionExecutionPage = lazy(() => import('@/pages/treatmentSessions/SessionExecutionPage'));
@@ -76,6 +86,7 @@ export const InventoryTransfersPage = lazy(() => import('@/pages/inventory/Inven
 export const StockLedgerPage = lazy(() => import('@/pages/inventory/StockLedgerPage'));
 export const PurchaseOrdersPage = lazy(() => import('@/pages/inventory/PurchaseOrdersPage'));
 export const SuppliersPage = lazy(() => import('@/pages/inventory/SuppliersPage'));
+export const CrmHubPage = lazy(() => import('@/pages/crm/CrmHubPage'));
 export const CrmDashboardPage = lazy(() => import('@/pages/crm/CrmDashboardPage'));
 export const OfferBoardPage = lazy(() => import('@/pages/crm/OfferBoardPage'));
 export const RecallWorklistPage = lazy(() => import('@/pages/crm/RecallWorklistPage'));
@@ -88,6 +99,7 @@ export const NotificationCenterPage = lazy(
 );
 export const DeliveryLogPage = lazy(() => import('@/pages/notifications/DeliveryLogPage'));
 export const TemplateManagerPage = lazy(() => import('@/pages/notifications/TemplateManagerPage'));
+export const ReportsWorkspacePage = lazy(() => import('@/pages/reports/ReportsWorkspacePage'));
 export const ReportsHubPage = lazy(() => import('@/pages/reports/ReportsHubPage'));
 export const RoleDashboardPage = lazy(() => import('@/pages/reports/RoleDashboardPage'));
 export const AnalyticsDashboardPage = lazy(() => import('@/pages/reports/AnalyticsDashboardPage'));
@@ -107,6 +119,7 @@ export const PatientDocumentsPage = lazy(() => import('@/pages/portal/PatientDoc
 export const PatientNotificationsPage = lazy(() => import('@/pages/portal/PatientNotificationsPage'));
 export const PatientProfilePage = lazy(() => import('@/pages/portal/PatientProfilePage'));
 export const PatientFeedbackPage = lazy(() => import('@/pages/portal/PatientFeedbackPage'));
+export const LoyaltyHubPage = lazy(() => import('@/pages/loyalty/LoyaltyHubPage'));
 export const LoyaltyDashboardPage = lazy(() => import('@/pages/loyalty/LoyaltyDashboardPage'));
 export const LoyaltySettingsPage = lazy(() => import('@/pages/loyalty/LoyaltySettingsPage'));
 export const LoyaltyRulesPage = lazy(() => import('@/pages/loyalty/LoyaltyRulesPage'));
@@ -116,3 +129,8 @@ export const LoyaltyAdjustmentQueuePage = lazy(
   () => import('@/pages/loyalty/LoyaltyAdjustmentQueuePage')
 );
 export const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
+export const InventoryHubPage = lazy(() => import('@/pages/inventory/InventoryHubPage'));
+export const PharmacyHubPage = lazy(() => import('@/pages/pharmacy/PharmacyHubPage'));
+export const CommunicationHubPage = lazy(() => import('@/pages/notifications/CommunicationHubPage'));
+export const ReceptionDeskPage = lazy(() => import('@/pages/reception/ReceptionDeskPage'));
+export const BranchCommandPage = lazy(() => import('@/pages/branchManager/BranchCommandPage'));

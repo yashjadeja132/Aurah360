@@ -13,8 +13,15 @@ export const prescriptionsApi = {
   remove(id) {
     return api.delete(`/prescriptions/${id}`).then((res) => res.data);
   },
-  finalize(id) {
-    return api.post(`/prescriptions/${id}/finalize`).then((res) => res.data);
+  /**
+   * RX-SAFETY — a blocking allergy/interaction alert answers 409 PRESCRIPTION_SAFETY_BLOCKED.
+   * Pass { override: { reason } } to proceed (server-side permission + audit still apply).
+   */
+  finalize(id, payload = {}) {
+    return api.post(`/prescriptions/${id}/finalize`, payload).then((res) => res.data);
+  },
+  safetyCheck(id) {
+    return api.get(`/prescriptions/${id}/safety-check`).then((res) => res.data);
   },
   duplicate(id) {
     return api.post(`/prescriptions/${id}/duplicate`).then((res) => res.data);

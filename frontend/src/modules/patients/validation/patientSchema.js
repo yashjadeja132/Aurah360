@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { localDateKey } from '@/utils/date';
 
 export const patientFormSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
@@ -112,9 +113,9 @@ export function fromPatient(patient) {
     middleName: patient.middleName || '',
     lastName: patient.lastName || '',
     gender: patient.gender || 'MALE',
-    dateOfBirth: patient.dateOfBirth
-      ? new Date(patient.dateOfBirth).toISOString().slice(0, 10)
-      : '',
+    // DOB is a CALENDAR DAY stored as local start-of-day. A UTC slice rendered it a day early in
+    // the edit form — a clinical-record defect, and one that would be saved back on any resubmit.
+    dateOfBirth: localDateKey(patient.dateOfBirth || ''),
     bloodGroup: patient.bloodGroup || '',
     maritalStatus: patient.maritalStatus || '',
     mobile: patient.mobile || '',

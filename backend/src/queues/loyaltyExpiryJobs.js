@@ -1,6 +1,4 @@
-import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
-import { attachDeadLetterHandler } from './dlq.js';
+import { getQueue, QUEUE_NAMES } from './connection.js';
 import logger from '../libs/logger.js';
 import LoyaltyLedgerService from '../services/LoyaltyLedgerService.js';
 import { LOYALTY_EVENTS } from '../enums/loyalty.js';
@@ -126,41 +124,30 @@ export async function ensureLoyaltyExpiryJobs() {
   }
 }
 
-let worker = null;
-
-export function startLoyaltyExpiryWorker() {
-  if (worker) return worker;
-
-  worker = new Worker(
-    QUEUE_NAMES.LOYALTY,
-    async (job) => {
-      if (job.name === LOYALTY_EXPIRY_JOBS.EXPIRE_DUE_LOTS) {
-        const result = await expireDueLots();
-        logger.info('Loyalty expiry job', result);
-        return result;
-      }
-      if (job.name === LOYALTY_EXPIRY_JOBS.REMIND_EXPIRING_SOON) {
-        const result = await remindExpiringSoon();
-        logger.info('Loyalty expiry reminder job', result);
-        return result;
-      }
-      return { ignored: true };
-    },
-    { connection: getBullConnection() }
-  );
-
-  attachDeadLetterHandler(worker, QUEUE_NAMES.LOYALTY);
-
-  ensureLoyaltyExpiryJobs().catch(() => {});
-
-  logger.info('Loyalty expiry BullMQ worker started');
-  return worker;
-}
+/**
+ * Handler registration for the shared LOYALTY queue. This module no longer creates its own Worker:
+ * it used to, and so did loyaltyBirthdayJobs, which meant BullMQ handed each job to whichever of the
+ * two won the race and the loser's jobs were silently dropped. See queues/composeWorker.js.
+ */
+export const loyaltyExpiryHandlerModule = {
+  jobNames: [LOYALTY_EXPIRY_JOBS.EXPIRE_DUE_LOTS, LOYALTY_EXPIRY_JOBS.REMIND_EXPIRING_SOON],
+  ensure: ensureLoyaltyExpiryJobs,
+  handle: async (job) => {
+    if (job.name === LOYALTY_EXPIRY_JOBS.EXPIRE_DUE_LOTS) {
+      const result = await expireDueLots();
+      logger.info('Loyalty expiry job', result);
+      return result;
+    }
+    const result = await remindExpiringSoon();
+    logger.info('Loyalty expiry reminder job', result);
+    return result;
+  },
+};
 
 export default {
   expireDueLots,
   remindExpiringSoon,
   ensureLoyaltyExpiryJobs,
-  startLoyaltyExpiryWorker,
+  loyaltyExpiryHandlerModule,
   LOYALTY_EXPIRY_JOBS,
 };
