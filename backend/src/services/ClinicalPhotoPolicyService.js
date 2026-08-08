@@ -4,6 +4,7 @@ import ConsentService from './ConsentService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { CONSENT_PURPOSE } from '../enums/privacy.js';
 import { findRestrictedBodyRegionTerm } from '../helpers/bodyRegion.helper.js';
+import { assertContentMatchesClaim, normalizeMimeType } from '../helpers/fileSignature.helper.js';
 
 /**
  * A clinical photo is an image, never a document. Multer's upload filter is shared with
@@ -35,10 +36,19 @@ class ClinicalPhotoPolicyService {
     this.consentService = new ConsentService();
   }
 
-  /** Reject anything that is not a capturable image (see ALLOWED_PHOTO_MIME_TYPES). */
+  /**
+   * Reject anything that is not a capturable image (see ALLOWED_PHOTO_MIME_TYPES).
+   *
+   * The declared MIME is checked first so the error names the type the caller asked for, then the
+   * file's LEADING BYTES have to agree with it. `file.mimetype` is client-supplied: without the
+   * byte check, an HTML page or an SVG (scriptable XML) labelled `image/png` was stored as a
+   * clinical photo and served back later. Returns the DETECTED type so callers persist that
+   * rather than the claim — see fileSignature.helper.js, which is explicit that this verifies the
+   * file's TYPE and is not an antivirus scan.
+   */
   assertAllowedImage(file) {
     if (!file?.buffer) throw ApiError.badRequest('File is required');
-    const mimeType = String(file.mimetype || '').toLowerCase();
+    const mimeType = normalizeMimeType(file.mimetype);
     if (!ALLOWED_PHOTO_MIME_TYPES.includes(mimeType)) {
       throw ApiError.badRequest(
         `Clinical photos must be an image (${ALLOWED_PHOTO_MIME_TYPES.join(', ')}); got ${
@@ -48,7 +58,11 @@ class ClinicalPhotoPolicyService {
         'UNSUPPORTED_PHOTO_TYPE'
       );
     }
-    return mimeType;
+    return assertContentMatchesClaim(file.buffer, {
+      mimeType: file.mimetype,
+      originalName: file.originalname,
+      allowedTypes: ALLOWED_PHOTO_MIME_TYPES,
+    });
   }
 
   /**

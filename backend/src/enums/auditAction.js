@@ -206,6 +206,10 @@ export const AUDIT_ACTIONS = Object.freeze({
   DISCOUNT_APPROVED: 'DISCOUNT_APPROVED',
   DISCOUNT_REJECTED: 'DISCOUNT_REJECTED',
 
+  // Money integrity (MON-002) — annulling an issued invoice / declaring a balance uncollectable.
+  INVOICE_CANCELLED: 'INVOICE_CANCELLED',
+  INVOICE_WRITTEN_OFF: 'INVOICE_WRITTEN_OFF',
+
   // Inventory transfer (INV-002)
   STOCK_TRANSFER_REQUESTED: 'STOCK_TRANSFER_REQUESTED',
   STOCK_TRANSFER_APPROVED: 'STOCK_TRANSFER_APPROVED',
@@ -249,6 +253,16 @@ export const AUDIT_ACTIONS = Object.freeze({
   LOYALTY_CAMPAIGN_CREATED: 'LOYALTY_CAMPAIGN_CREATED',
   LOYALTY_CAMPAIGN_STATUS_CHANGED: 'LOYALTY_CAMPAIGN_STATUS_CHANGED',
   LOYALTY_TIER_CHANGED: 'LOYALTY_TIER_CHANGED',
+
+  /**
+   * NFR-018 — reading the audit log is itself an auditable event. The audit trail is the most
+   * sensitive collection in the system (it names who touched which patient, and when), so "who
+   * went looking, with what filter, and how many rows came back" has to be answerable too —
+   * otherwise the one query nobody can investigate is the query against the investigation record.
+   */
+  AUDIT_LOG_SEARCHED: 'AUDIT_LOG_SEARCHED',
+  /** Recorded separately from the search itself: unredacted `metadata` can contain PHI. */
+  AUDIT_LOG_METADATA_REVEALED: 'AUDIT_LOG_METADATA_REVEALED',
 });
 
 export const AUDIT_ACTION_LIST = Object.freeze(Object.values(AUDIT_ACTIONS));

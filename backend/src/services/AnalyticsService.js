@@ -255,7 +255,11 @@ class AnalyticsService {
       { $match: match },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          // `createdAt` is a true instant, but this series is a CALENDAR-DAY chart read by clinic
+          // staff, so it must bucket on the clinic's day. Without a timezone Mongo used the UTC
+          // day, so stock movements recorded between 00:00 and 05:30 IST were charted on the
+          // previous day — and the labels then disagreed with every other trend on the dashboard.
+          _id: dayBucket('$createdAt'),
           quantity: { $sum: '$quantity' },
           count: { $sum: 1 },
         },

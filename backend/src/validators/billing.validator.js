@@ -6,8 +6,10 @@ import {
   REFUND_REASON,
   REFUND_REASON_LIST,
   DISCOUNT_TYPE_LIST,
+  INVOICE_CANCEL_REASON_LIST,
   INVOICE_ITEM_TYPE_LIST,
   INVOICE_STATUS_LIST,
+  WRITE_OFF_REASON_LIST,
   PAYMENT_METHOD,
   PAYMENT_METHOD_LIST,
   paymentMethodRequiresReference,
@@ -104,6 +106,31 @@ export const voidDraftSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+/**
+ * MON-002 — cancelling an ISSUED invoice and writing off a balance are both control events, so
+ * the reason comes from a controlled list (reportable by cause) and OTHER must be explained.
+ * The write-off AMOUNT is deliberately absent: it is derived from the payment ledger server-side,
+ * because a client-named write-off amount is a client-named revenue reduction.
+ */
+const controlReasonSchema = (reasons) =>
+  z
+    .object({
+      reason: z.enum(reasons, { errorMap: () => ({ message: 'A reason is required' }) }),
+      note: z.string().max(500).optional().nullable(),
+    })
+    .superRefine((val, ctx) => {
+      if (val.reason === 'OTHER' && !String(val.note ?? '').trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['note'],
+          message: 'A note is required when the reason is OTHER',
+        });
+      }
+    });
+
+export const cancelInvoiceSchema = controlReasonSchema(INVOICE_CANCEL_REASON_LIST);
+export const writeOffSchema = controlReasonSchema(WRITE_OFF_REASON_LIST);
+
 export const invoiceIdParamSchema = z.object({ id: objectId });
 export const paymentIdParamSchema = z.object({ paymentId: objectId });
 export const planIdParamSchema = z.object({ planId: objectId });
@@ -146,6 +173,9 @@ export const recordPaymentSchema = z
     reference: z.string().max(200).optional().nullable(),
     notes: z.string().max(1000).optional().nullable(),
     paidAt: z.coerce.date().optional(),
+    /** MON-001 — a client-generated key so a retried collection (flaky network, double-clicked
+     *  "Record payment") replays the original payment instead of taking the money twice. */
+    idempotencyKey: z.string().min(8).max(120).optional(),
   })
   .superRefine((val, ctx) => {
     // Split payments carry their reference per leg (validated by paymentSplitSchema).

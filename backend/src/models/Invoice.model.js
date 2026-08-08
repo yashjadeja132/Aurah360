@@ -177,9 +177,36 @@ const invoiceSchema = new mongoose.Schema(
     taxPercent: { type: Number, default: 0, min: 0 },
     gstPlaceholder: { type: Boolean, default: true },
     total: { type: Number, default: 0, min: 0 },
+    /**
+     * MON-001 — DERIVED, never incremented in place. It is recomputed from the Payment rows
+     * (net of refunds) plus `creditApplied` on every settlement, so a lost update can at worst
+     * lag by one write and is corrected by the next one. The old read-then-increment let two
+     * concurrent cashiers each collect money while the invoice recorded only the last writer's.
+     */
     paidAmount: { type: Number, default: 0, min: 0 },
     balanceAmount: { type: Number, default: 0, min: 0 },
     advanceApplied: { type: Number, default: 0, min: 0 },
+    /**
+     * MON-004 — settlement that came from credit notes rather than Payment rows. Held separately
+     * precisely because `paidAmount` is derived from the payment ledger: without it, the next
+     * recomputation would silently erase every credit note ever applied to this invoice.
+     */
+    creditApplied: { type: Number, default: 0, min: 0 },
+    /**
+     * MON-002 — bad debt. The balance the clinic gave up collecting, with its mandatory cause.
+     * The invoice keeps its total and its revenue; only the receivable is retired, which is why
+     * this is a field on the invoice and not an edit to its amounts.
+     */
+    writeOffAmount: { type: Number, default: 0, min: 0 },
+    writeOffReason: { type: String, default: null },
+    writeOffNote: { type: String, default: null, maxlength: 500 },
+    writeOffAt: { type: Date, default: null },
+    writeOffBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    /** MON-002 — cancellation of a FINALIZED invoice (as distinct from voiding a draft). */
+    cancelReason: { type: String, default: null },
+    cancelNote: { type: String, default: null, maxlength: 500 },
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     notes: { type: String, default: null },
     finalizedAt: { type: Date, default: null },
     finalizedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -291,6 +318,16 @@ invoiceSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     paidAmount: this.paidAmount,
     balanceAmount: this.balanceAmount,
     advanceApplied: this.advanceApplied,
+    creditApplied: this.creditApplied || 0,
+    writeOffAmount: this.writeOffAmount || 0,
+    writeOffReason: this.writeOffReason || null,
+    writeOffNote: this.writeOffNote || null,
+    writeOffAt: this.writeOffAt || null,
+    writeOffBy: this.writeOffBy ? this.writeOffBy.toString() : null,
+    cancelReason: this.cancelReason || null,
+    cancelNote: this.cancelNote || null,
+    cancelledAt: this.cancelledAt || null,
+    cancelledBy: this.cancelledBy ? this.cancelledBy.toString() : null,
     notes: this.notes,
     finalizedAt: this.finalizedAt,
     finalizedBy: this.finalizedBy ? this.finalizedBy.toString() : null,

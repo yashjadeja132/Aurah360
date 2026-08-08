@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import ApiError from '../libs/ApiError.js';
 import { config } from '../config/index.js';
 import { InvoiceRepository, PaymentRepository } from '../repositories/BillingRepository.js';
@@ -9,7 +10,7 @@ import AuditService from './AuditService.js';
 import FeeScheduleService from './FeeScheduleService.js';
 import OrganizationService from './OrganizationService.js';
 import InventoryItem from '../models/InventoryItem.model.js';
-import { priceInvoice, taxBreakdown } from '../helpers/invoiceTax.helper.js';
+import { fromPaise, priceInvoice, taxBreakdown, toPaise } from '../helpers/invoiceTax.helper.js';
 import { eventBus } from '../events/eventBus.js';
 import {
   generateInvoiceNumber,
@@ -23,14 +24,18 @@ import {
   AGING_BUCKET_MAX_DAYS,
   agingBucketForDays,
   BILLING_EVENTS,
+  CREDIT_NOTE_REDEEMABLE_STATUSES,
+  CREDIT_NOTE_STATUS,
   DISCOUNT_APPROVAL_STATUS,
   DISCOUNT_TYPE,
+  INVOICE_CANCEL_REASON_LIST,
   INVOICE_ITEM_TYPE,
   INVOICE_STATUS,
   PAYMENT_METHOD,
   PAYMENT_RECORD_STATUS,
   PAYMENT_STATUS,
   paymentMethodRequiresReference,
+  WRITE_OFF_REASON_LIST,
 } from '../enums/billing.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import CreditNote from '../models/CreditNote.model.js';
@@ -717,6 +722,234 @@ class BillingService {
   }
 
   /**
+   * MON-002 — a control event that destroys a receivable must say why, in a word the business
+   * can report on plus (for OTHER, which says nothing on its own) free text. Mirrors
+   * #assertDiscountReason: enforced in the service, not only the validator, so every caller path
+   * captures it.
+   */
+  #assertControlReason(payload, allowedReasons, verb) {
+    const reason = String(payload?.reason ?? '').trim();
+    if (!reason) throw ApiError.badRequest(`A reason is required to ${verb}`);
+    if (!allowedReasons.includes(reason)) {
+      throw ApiError.badRequest(
+        `Unknown reason "${reason}" — expected one of: ${allowedReasons.join(', ')}`
+      );
+    }
+    const note = String(payload?.note ?? payload?.notes ?? '').trim() || null;
+    if (reason === 'OTHER' && !note) {
+      throw ApiError.badRequest(`A note is required to ${verb} with reason OTHER`);
+    }
+    return { reason, note };
+  }
+
+  /**
+   * MON-002 — cancel a FINALIZED (issued) invoice.
+   *
+   * `voidDraft` refuses anything that is not a draft, and no code path ever set
+   * INVOICE_STATUS.CANCELLED, so a finalized invoice raised in error was permanently
+   * uncorrectable: it sat in the dues worklist forever, overstating receivables, with no way out
+   * of the system at all.
+   *
+   * Preconditions, in order of how much money they protect:
+   *  - The invoice must still be FINALIZED (the conditional update, not just this read, decides).
+   *  - It must carry NO money. Money that was actually collected is reversed by REFUNDING it —
+   *    cancelling an invoice out from under a payment would leave the payment pointing at an
+   *    annulled document and the cash unaccounted for. Same for credit notes already spent on it.
+   *
+   * Dependent effects are reversed the way the draft-void path reverses them — by writing
+   * COUNTER-ENTRIES, never by editing history: earned loyalty points are clawed back, and any
+   * redemption the patient spent on this invoice is credited back, because the invoice it bought
+   * no longer exists and those points would otherwise simply be destroyed. The finalized invoice
+   * document itself is left completely intact and readable; only its status changes.
+   */
+  async cancelFinalized(id, payload, actorId, req = null) {
+    const { reason, note } = this.#assertControlReason(
+      payload,
+      INVOICE_CANCEL_REASON_LIST,
+      'cancel a finalized invoice'
+    );
+
+    const invoice = await this.invoiceRepository.findByIdNotDeleted(id);
+    if (!invoice) throw ApiError.notFound('Invoice not found');
+    if (invoice.status === INVOICE_STATUS.DRAFT) {
+      throw ApiError.badRequest('This invoice is still a draft — void it instead');
+    }
+    if (invoice.status !== INVOICE_STATUS.FINALIZED) {
+      throw ApiError.badRequest(`This invoice is already ${invoice.status}`);
+    }
+
+    // Derived from the payment rows, not from the invoice's own counter: the whole point of this
+    // gate is that it must not be fooled by a stale denormalised figure.
+    const settledPaise =
+      (await this.paymentRepository.sumRecordedPaiseForInvoice(invoice._id))
+      + toPaise(invoice.creditApplied || 0);
+    if (settledPaise > 0) {
+      throw ApiError.badRequest(
+        `₹${fromPaise(settledPaise)} has been collected against this invoice — refund the payments before cancelling it`
+      );
+    }
+
+    const cancelled = await this.invoiceRepository.cancelFinalized(id, {
+      status: INVOICE_STATUS.CANCELLED,
+      paymentStatus: PAYMENT_STATUS.CANCELLED,
+      balanceAmount: 0,
+      cancelReason: reason,
+      cancelNote: note,
+      cancelledAt: new Date(),
+      cancelledBy: actorId,
+      // The draft-void path stamps voidedAt/By; keep them in step so "when did this invoice stop
+      // being live" has one answer regardless of which path retired it.
+      voidedAt: new Date(),
+      voidedBy: actorId,
+      updatedBy: actorId,
+      $push: {
+        timeline: {
+          at: new Date(),
+          action: 'CANCELLED',
+          note: note ? `${reason} — ${note}` : reason,
+          actorId,
+        },
+      },
+    });
+    if (!cancelled) {
+      throw ApiError.badRequest('This invoice changed while it was being cancelled — reload it and retry');
+    }
+
+    await this.auditService.record(AUDIT_ACTIONS.INVOICE_CANCELLED, {
+      actorId,
+      metadata: {
+        invoiceId: id,
+        invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total,
+        reason,
+        note,
+      },
+      branchId: invoice.branchId,
+      resourceType: 'Invoice',
+      resourceId: id,
+      req,
+    });
+
+    // Same clawback the draft-void path performs, for the same reason: points earned from an
+    // invoice that no longer stands were never earned.
+    await this.#clawbackEarnedLoyaltyPoints(invoice, `Invoice cancelled — ${reason}`, actorId, req);
+    await this.#reverseRedemptionOnCancel(invoice, reason, actorId, req);
+
+    return this.getById(id);
+  }
+
+  /**
+   * MON-002 — returns points the patient redeemed against a now-cancelled invoice, as a
+   * CREDIT_REVERSAL counter-entry (the ledger is append-only, so nothing is edited).
+   *
+   * `voidDraft` never needed this — a draft's redemption is removed with
+   * removeLoyaltyRedemption before voiding — but a FINALIZED invoice can carry one that no
+   * longer buys anything. Best-effort/non-blocking, matching #clawbackEarnedLoyaltyPoints:
+   * the cancellation itself has already committed and must not be undone by a loyalty failure.
+   */
+  async #reverseRedemptionOnCancel(invoice, reason, actorId, req) {
+    if (!invoice.loyaltyRedemption?.points) return;
+    try {
+      await this.loyaltyLedgerService.credit({
+        branchId: invoice.branchId,
+        patientId: invoice.patientId,
+        points: invoice.loyaltyRedemption.points,
+        entryType: 'CREDIT_REVERSAL',
+        sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
+        sourceRefId: invoice._id,
+        note: `Invoice cancelled — ${reason}`,
+        createdBy: actorId,
+        actorReq: req,
+      });
+    } catch (err) {
+      logger.error('BillingService: loyalty redemption reversal failed (non-blocking)', {
+        invoiceId: invoice._id.toString(),
+        error: err.message,
+      });
+    }
+  }
+
+  /**
+   * MON-002 — write off an uncollectable balance on a FINALIZED invoice.
+   *
+   * There was no bad-debt path at all, so a balance that will never be collected could only be
+   * left outstanding forever (permanently overstating receivables and clogging the dues
+   * worklist) or faked as a payment (overstating collections). Neither is acceptable, hence a
+   * state of its own: the invoice keeps its total and its revenue, the receivable is retired,
+   * and PAYMENT_STATUS.WRITTEN_OFF says which of the two happened.
+   *
+   * The amount is DERIVED — the outstanding balance implied by the payment ledger — never taken
+   * from the caller, so a client cannot write off more (or less) than is actually owed.
+   */
+  async writeOff(id, payload, actorId, req = null) {
+    const { reason, note } = this.#assertControlReason(
+      payload,
+      WRITE_OFF_REASON_LIST,
+      'write off an invoice balance'
+    );
+
+    const invoice = await this.invoiceRepository.findByIdNotDeleted(id);
+    if (!invoice) throw ApiError.notFound('Invoice not found');
+    if (invoice.status !== INVOICE_STATUS.FINALIZED) {
+      throw ApiError.badRequest('Only a finalized invoice can have its balance written off');
+    }
+    if ((invoice.writeOffAmount || 0) > 0) {
+      throw ApiError.badRequest('This invoice balance has already been written off');
+    }
+
+    const totalPaise = toPaise(invoice.total);
+    const settledPaise =
+      (await this.paymentRepository.sumRecordedPaiseForInvoice(invoice._id))
+      + toPaise(invoice.creditApplied || 0);
+    const outstandingPaise = totalPaise - settledPaise;
+    if (outstandingPaise <= 0) {
+      throw ApiError.badRequest('This invoice has no outstanding balance to write off');
+    }
+
+    const written = await this.invoiceRepository.claimWriteOff(id, {
+      writeOffAmount: fromPaise(outstandingPaise),
+      writeOffReason: reason,
+      writeOffNote: note,
+      writeOffAt: new Date(),
+      writeOffBy: actorId,
+      // The receivable is gone, so the invoice leaves the dues worklist (which filters on
+      // balanceAmount > 0). `paidAmount` is deliberately NOT touched: no money was received.
+      balanceAmount: 0,
+      paymentStatus: PAYMENT_STATUS.WRITTEN_OFF,
+      updatedBy: actorId,
+      $push: {
+        timeline: {
+          at: new Date(),
+          action: 'WRITTEN_OFF',
+          note: `₹${fromPaise(outstandingPaise)} — ${note ? `${reason} — ${note}` : reason}`,
+          actorId,
+        },
+      },
+    });
+    if (!written) {
+      throw ApiError.badRequest('This invoice changed while it was being written off — reload it and retry');
+    }
+
+    await this.auditService.record(AUDIT_ACTIONS.INVOICE_WRITTEN_OFF, {
+      actorId,
+      metadata: {
+        invoiceId: id,
+        invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total,
+        writeOffAmount: fromPaise(outstandingPaise),
+        reason,
+        note,
+      },
+      branchId: invoice.branchId,
+      resourceType: 'Invoice',
+      resourceId: id,
+      req,
+    });
+
+    return this.getById(id);
+  }
+
+  /**
    * LOY-006 — sums CREDIT (earned) points sourced to this invoice, subtracts anything already
    * clawed back for it, and claws back the remainder. Deliberately never touches DEBIT_REDEEM
    * entries — a refunded/voided invoice does not auto-reverse points the patient redeemed.
@@ -1264,6 +1497,29 @@ class BillingService {
     return this.getById(id);
   }
 
+  /**
+   * MON-001 — collect money against a finalized invoice.
+   *
+   * Two independent controls, because they defend different failures (same shape as
+   * LoyaltyLedgerService.redeem, which this deliberately mirrors):
+   *
+   *  1. RETRY — `payload.idempotencyKey`. A replayed request returns the ORIGINAL payment
+   *     instead of creating a second one. The pre-flight lookup is only a fast path; the unique
+   *     partial (invoiceId, idempotencyKey) index on Payment is the actual guarantee, because
+   *     two simultaneous retries would both pass a read-then-write check.
+   *
+   *  2. CONCURRENCY — the whole settlement runs in a transaction whose FIRST write is a
+   *     conditional claim of payment headroom on the invoice document
+   *     (`paidAmount <= total - amount`). Two cashiers therefore contend on one document: the
+   *     loser either takes a write conflict (retried by withTransaction, re-evaluating a
+   *     now-higher paidAmount) or fails the predicate outright. The payment row is written
+   *     inside the same transaction, so a rejected settlement leaves no orphan payment and a
+   *     recorded payment is never missing from the invoice.
+   *
+   * `paidAmount` is then DERIVED from the payment rows (PaymentRepository
+   * .sumRecordedPaiseForInvoice, in integer paise) rather than left as an accumulated counter —
+   * the invoice's money fields are a projection of the ledger, so they cannot drift away from it.
+   */
   async recordPayment(id, payload, actorId, req = null) {
     const invoice = await this.invoiceRepository.findByIdNotDeleted(id);
     if (!invoice) throw ApiError.notFound('Invoice not found');
@@ -1277,6 +1533,19 @@ class BillingService {
     }
     if (invoice.status !== INVOICE_STATUS.FINALIZED) {
       throw ApiError.badRequest('Only finalized invoices can receive payments');
+    }
+    if (invoice.paymentStatus === PAYMENT_STATUS.WRITTEN_OFF) {
+      throw ApiError.badRequest(
+        'This invoice balance has been written off — reverse the write-off before collecting against it'
+      );
+    }
+
+    const idempotencyKey = String(payload.idempotencyKey ?? '').trim() || null;
+    if (idempotencyKey) {
+      const replay = await this.paymentRepository.findByIdempotencyKey(invoice._id, idempotencyKey);
+      // A retried request is a benign no-op that answers with the invoice as the original
+      // payment left it — never a second collection, and never a 409 the cashier must interpret.
+      if (replay) return this.getById(id);
     }
 
     let amount = this.#round(Number(payload.amount) || 0);
@@ -1317,46 +1586,98 @@ class BillingService {
       throw ApiError.badRequest('Cannot overpay invoice');
     }
 
-    const payment = await this.paymentRepository.create({
-      paymentNumber: await generatePaymentNumber(),
-      receiptNumber: await generateReceiptNumber(),
-      invoiceId: invoice._id,
-      patientId: invoice.patientId,
-      branchId: invoice.branchId,
-      amount,
-      method,
-      splits,
-      isAdvance,
-      isPartial: amount + 0.001 < balance,
-      reference: payload.reference || null,
-      notes: payload.notes || null,
-      status: PAYMENT_RECORD_STATUS.RECORDED,
-      paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
-      createdBy: actorId,
-      updatedBy: actorId,
-    });
+    // Numbers are drawn OUTSIDE the transaction on purpose: the sequence counter is not
+    // transactional, and re-drawing inside a retried callback would burn a receipt number per
+    // write conflict. Re-using the same pair on a retry is safe because the losing attempt's
+    // insert was rolled back.
+    const paymentNumber = await generatePaymentNumber();
+    const receiptNumber = await generateReceiptNumber();
 
-    const paidAmount = this.#round((invoice.paidAmount || 0) + amount);
-    const balanceAmount = this.#round(Math.max(0, invoice.total - paidAmount));
-    const paymentStatus = this.#paymentStatusFrom(paidAmount, invoice.total, invoice.status);
+    const totalPaise = toPaise(invoice.total);
+    const amountPaise = toPaise(amount);
+    // The most the invoice may already have been paid for this payment to still fit.
+    const maxPaid = fromPaise(totalPaise - amountPaise);
 
-    await this.invoiceRepository.updateById(id, {
-      paidAmount,
-      balanceAmount,
-      paymentStatus,
-      advanceApplied: isAdvance
-        ? this.#round((invoice.advanceApplied || 0) + amount)
-        : invoice.advanceApplied,
-      updatedBy: actorId,
-      $push: {
-        timeline: {
-          at: new Date(),
-          action: 'PAYMENT',
-          note: `${method} ₹${amount}${isAdvance ? ' (advance)' : ''}`,
-          actorId,
-        },
-      },
-    });
+    let payment = null;
+    let paymentStatus = invoice.paymentStatus;
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        payment = null;
+        const claimed = await this.invoiceRepository.claimPaymentHeadroom(id, {
+          amount,
+          maxPaid,
+          isAdvance,
+          session,
+        });
+        if (!claimed) {
+          // Either another cashier took the headroom first, or the invoice stopped being payable
+          // between the read above and this write. Both are "this money must not be taken".
+          throw ApiError.badRequest('Cannot overpay invoice');
+        }
+
+        payment = await this.paymentRepository.createInSession(
+          {
+            paymentNumber,
+            receiptNumber,
+            invoiceId: invoice._id,
+            patientId: invoice.patientId,
+            branchId: invoice.branchId,
+            amount,
+            method,
+            splits,
+            isAdvance,
+            isPartial: amount + 0.001 < balance,
+            reference: payload.reference || null,
+            notes: payload.notes || null,
+            idempotencyKey,
+            status: PAYMENT_RECORD_STATUS.RECORDED,
+            paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+            createdBy: actorId,
+            updatedBy: actorId,
+          },
+          session
+        );
+
+        // Rewrite the invoice's money fields from the ledger rather than trusting the $inc above.
+        // Credit-note settlement lives outside the payment rows, so it is added back in.
+        const settledPaise =
+          (await this.paymentRepository.sumRecordedPaiseForInvoice(invoice._id, { session }))
+          + toPaise(claimed.creditApplied || 0);
+        const paidAmount = fromPaise(settledPaise);
+        const balanceAmount = fromPaise(Math.max(0, totalPaise - settledPaise));
+        paymentStatus = this.#paymentStatusFrom(paidAmount, invoice.total, claimed.status);
+
+        await this.invoiceRepository.updateByIdInSession(
+          id,
+          {
+            paidAmount,
+            balanceAmount,
+            paymentStatus,
+            updatedBy: actorId,
+            $push: {
+              timeline: {
+                at: new Date(),
+                action: 'PAYMENT',
+                note: `${method} ₹${amount}${isAdvance ? ' (advance)' : ''}`,
+                actorId,
+              },
+            },
+          },
+          session
+        );
+      });
+    } catch (error) {
+      // The unique (invoiceId, idempotencyKey) index caught a retry that raced past the
+      // pre-flight lookup — answer with the original payment's invoice, not an error.
+      if (error?.code === 11000 && idempotencyKey) {
+        const replay = await this.paymentRepository.findByIdempotencyKey(invoice._id, idempotencyKey);
+        if (replay) return this.getById(id);
+      }
+      throw error;
+    } finally {
+      await session.endSession();
+    }
 
     await this.auditService.record(AUDIT_ACTIONS.PAYMENT_RECORDED, {
       actorId,
@@ -1400,16 +1721,67 @@ class BillingService {
   async refund(paymentId, payload, actorId, req = null) {
     const payment = await this.paymentRepository.findByIdNotDeleted(paymentId);
     if (!payment) throw ApiError.notFound('Payment not found');
-    if (payment.status === PAYMENT_RECORD_STATUS.REFUNDED) {
-      throw ApiError.badRequest('Payment has already been refunded');
+    if (payment.status === PAYMENT_RECORD_STATUS.VOID) {
+      throw ApiError.badRequest('A voided payment cannot be refunded');
     }
     if (!payload.reason) throw ApiError.badRequest('Refund reason is required');
 
-    const refundAmount = this.#round(Number(payload.amount) || payment.amount);
-    if (refundAmount > payment.amount) {
-      throw ApiError.badRequest('Refund amount cannot exceed the original payment');
+    /**
+     * MON-003 — refunds ACCUMULATE.
+     *
+     * The old code overwrote `refundedAmount` with the latest refund and flipped the payment to
+     * REFUNDED regardless of how much was actually returned, so a ₹100 refund against a ₹1000
+     * payment both understated the refund and made the remaining ₹900 permanently unrefundable
+     * through the app. What is refundable is the payment less everything already returned, and
+     * the payment only reaches REFUNDED once that reaches zero. Paise throughout: a sequence of
+     * partial refunds is exactly where accumulated float error would leave a stranded paisa.
+     */
+    const paymentPaise = toPaise(payment.amount);
+    const alreadyRefundedPaise = toPaise(payment.refundedAmount || 0);
+    const refundablePaise = paymentPaise - alreadyRefundedPaise;
+    if (refundablePaise <= 0) {
+      throw ApiError.badRequest('Payment has already been refunded');
     }
+
+    const refundPaise = payload.amount === undefined || payload.amount === null
+      ? refundablePaise
+      : toPaise(payload.amount);
+    if (refundPaise <= 0) throw ApiError.badRequest('Refund amount must be greater than zero');
+    if (refundPaise > refundablePaise) {
+      throw ApiError.badRequest(
+        alreadyRefundedPaise > 0
+          ? `Refund amount cannot exceed the ₹${fromPaise(refundablePaise)} still refundable on this payment`
+          : 'Refund amount cannot exceed the original payment'
+      );
+    }
+    const refundAmount = fromPaise(refundPaise);
+    const totalRefundedPaise = alreadyRefundedPaise + refundPaise;
+    const fullyRefunded = totalRefundedPaise >= paymentPaise;
     const refundMethod = payload.method || 'ORIGINAL_MODE';
+
+    // Claim the refund on the payment BEFORE minting any instrument: the conditional update is
+    // what stops two concurrent refunds from each being sized against the same starting figure,
+    // and issuing the credit note first would leave a spendable orphan behind when it loses.
+    const claimed = await this.paymentRepository.claimRefund(paymentId, {
+      expectedRefundedAmount: fromPaise(alreadyRefundedPaise),
+      updates: {
+        refundedAmount: fromPaise(totalRefundedPaise),
+        refundedAt: new Date(),
+        refundNotes: payload.notes || null,
+        refundMethod,
+        refundReason: payload.reason,
+        refundApprovedBy: actorId,
+        // Only a fully-returned payment is REFUNDED; a partially-refunded one is still a
+        // RECORDED payment carrying a balance, and must stay refundable.
+        status: fullyRefunded ? PAYMENT_RECORD_STATUS.REFUNDED : PAYMENT_RECORD_STATUS.RECORDED,
+        updatedBy: actorId,
+      },
+    });
+    if (!claimed) {
+      throw ApiError.badRequest(
+        'This payment was refunded concurrently — reload the payment and retry with the remaining refundable amount'
+      );
+    }
 
     let creditNote = null;
     if (refundMethod === 'CREDIT_NOTE') {
@@ -1425,28 +1797,24 @@ class BillingService {
         expiresAt: payload.creditNoteExpiresAt || null,
         issuedBy: actorId,
       });
+      await this.paymentRepository.updateById(paymentId, { creditNoteId: creditNote._id });
     }
-
-    await this.paymentRepository.updateById(paymentId, {
-      refundedAmount: refundAmount,
-      refundedAt: new Date(),
-      refundNotes: payload.notes || null,
-      refundMethod,
-      refundReason: payload.reason,
-      refundApprovedBy: actorId,
-      creditNoteId: creditNote?._id || null,
-      status: PAYMENT_RECORD_STATUS.REFUNDED,
-      updatedBy: actorId,
-    });
 
     const invoice = await this.invoiceRepository.findByIdNotDeleted(payment.invoiceId);
     if (invoice) {
-      const paidAmount = this.#round(Math.max(0, (invoice.paidAmount || 0) - refundAmount));
-      const balanceAmount = this.#round(Math.max(0, invoice.total - paidAmount));
+      // Derived from the payment rows (net of refunds) plus credit-note settlement, for the same
+      // reason recordPayment derives it: the invoice's money fields are a projection of the
+      // ledger, so a partial refund can never leave them disagreeing with it.
+      const totalPaise = toPaise(invoice.total);
+      const settledPaise =
+        (await this.paymentRepository.sumRecordedPaiseForInvoice(invoice._id))
+        + toPaise(invoice.creditApplied || 0);
+      const paidAmount = fromPaise(Math.max(0, settledPaise));
+      const balanceAmount = fromPaise(Math.max(0, totalPaise - settledPaise));
       await this.invoiceRepository.updateById(invoice._id, {
         paidAmount,
         balanceAmount,
-        paymentStatus: paidAmount <= 0 ? PAYMENT_STATUS.REFUNDED : PAYMENT_STATUS.PARTIALLY_PAID,
+        paymentStatus: settledPaise <= 0 ? PAYMENT_STATUS.REFUNDED : PAYMENT_STATUS.PARTIALLY_PAID,
         updatedBy: actorId,
         $push: {
           timeline: {
@@ -1493,27 +1861,125 @@ class BillingService {
     return this.refund(paymentId, { ...payload, reason: payload.notes || 'Refund' }, actorId, req);
   }
 
+  /**
+   * MON-004 — spend a credit note against an invoice.
+   *
+   * Every one of these guards was previously absent, and each of them is money: an expired,
+   * revoked or already-spent note could be applied; it could be applied to a DRAFT invoice
+   * (whose totals are still editable, and which resets `paidAmount` on the next edit) or to a
+   * cancelled one; it could be applied to another patient's invoice; and it could be applied for
+   * more than the invoice owed, manufacturing a credit out of an overpayment.
+   */
   async applyCreditNote(creditNoteId, invoiceId, amount, actorId, req = null) {
     const creditNote = await CreditNote.findById(creditNoteId);
     if (!creditNote) throw ApiError.notFound('Credit note not found');
-    if (creditNote.balance < amount) throw ApiError.badRequest('Amount exceeds credit note balance');
+
+    const amountPaise = toPaise(amount);
+    if (amountPaise <= 0) throw ApiError.badRequest('Amount must be greater than zero');
+
+    // Expiry is checked against the note's own date, and a lapsed note is marked EXPIRED on the
+    // way past so it stops appearing as spendable in every later listing too.
+    if (creditNote.expiresAt && new Date(creditNote.expiresAt).getTime() < Date.now()) {
+      if (creditNote.status !== CREDIT_NOTE_STATUS.EXPIRED) {
+        await CreditNote.updateOne(
+          { _id: creditNote._id, status: { $in: CREDIT_NOTE_REDEEMABLE_STATUSES } },
+          { $set: { status: CREDIT_NOTE_STATUS.EXPIRED } }
+        );
+      }
+      throw ApiError.badRequest('This credit note has expired');
+    }
+    if (!CREDIT_NOTE_REDEEMABLE_STATUSES.includes(creditNote.status)) {
+      throw ApiError.badRequest(`A ${creditNote.status} credit note cannot be applied`);
+    }
+    if (toPaise(creditNote.balance) < amountPaise) {
+      throw ApiError.badRequest('Amount exceeds credit note balance');
+    }
 
     const invoice = await this.invoiceRepository.findByIdNotDeleted(invoiceId);
     if (!invoice) throw ApiError.notFound('Invoice not found');
+    if (invoice.status !== INVOICE_STATUS.FINALIZED) {
+      throw ApiError.badRequest(
+        invoice.status === INVOICE_STATUS.DRAFT
+          ? 'Only finalized invoices can be settled with a credit note'
+          : `A ${invoice.status} invoice cannot be settled with a credit note`
+      );
+    }
+    if (invoice.paymentStatus === PAYMENT_STATUS.WRITTEN_OFF) {
+      throw ApiError.badRequest('This invoice balance has been written off');
+    }
+    // A credit note is issued to a patient, not to the clinic — spending it on someone else's
+    // invoice moves money between patients' accounts.
+    if (String(creditNote.patientId) !== String(invoice.patientId)) {
+      throw ApiError.badRequest("This credit note belongs to a different patient");
+    }
+    const outstandingPaise = toPaise(invoice.balanceAmount);
+    if (amountPaise > outstandingPaise) {
+      throw ApiError.badRequest(
+        `Amount exceeds the invoice's outstanding balance of ₹${fromPaise(outstandingPaise)}`
+      );
+    }
 
-    creditNote.balance = this.#round(creditNote.balance - amount);
-    creditNote.appliedTo.push({ invoiceId, amount, appliedAt: new Date() });
-    creditNote.status = creditNote.balance <= 0 ? 'FULLY_USED' : 'PARTIALLY_USED';
-    await creditNote.save();
-
-    const paidAmount = this.#round((invoice.paidAmount || 0) + amount);
-    const balanceAmount = this.#round(Math.max(0, invoice.total - paidAmount));
-    await this.invoiceRepository.updateById(invoiceId, {
-      paidAmount,
-      balanceAmount,
-      paymentStatus: balanceAmount <= 0 ? PAYMENT_STATUS.PAID : PAYMENT_STATUS.PARTIALLY_PAID,
-      updatedBy: actorId,
+    // Conditional claim on the invoice first: it is the thing that can be over-settled, and a
+    // failed claim must not have already debited the note.
+    const settledPaise = toPaise(invoice.paidAmount || 0) + amountPaise;
+    const claimedInvoice = await this.invoiceRepository.claimCreditApplication(invoiceId, {
+      amount,
+      $set: {
+        paidAmount: fromPaise(settledPaise),
+        balanceAmount: fromPaise(Math.max(0, toPaise(invoice.total) - settledPaise)),
+        paymentStatus:
+          settledPaise >= toPaise(invoice.total) ? PAYMENT_STATUS.PAID : PAYMENT_STATUS.PARTIALLY_PAID,
+        updatedBy: actorId,
+      },
+      $push: {
+        timeline: {
+          at: new Date(),
+          action: 'CREDIT_NOTE_APPLIED',
+          note: `Applied ₹${fromPaise(amountPaise)} from credit note ${creditNote.creditNoteNumber}`,
+          actorId,
+        },
+      },
     });
+    if (!claimedInvoice) {
+      throw ApiError.badRequest(
+        'The invoice was settled concurrently — reload it and reapply for the remaining balance'
+      );
+    }
+
+    // Debit the note conditionally too, so the same note cannot be spent twice in parallel. If
+    // this loses, the invoice claim above is rolled back rather than left settled for free.
+    const debited = await CreditNote.findOneAndUpdate(
+      {
+        _id: creditNote._id,
+        status: { $in: CREDIT_NOTE_REDEEMABLE_STATUSES },
+        balance: { $gte: fromPaise(amountPaise) - 0.005 },
+      },
+      {
+        $inc: { balance: -fromPaise(amountPaise) },
+        $push: { appliedTo: { invoiceId, amount: fromPaise(amountPaise), appliedAt: new Date() } },
+      },
+      { new: true }
+    );
+    if (!debited) {
+      await this.invoiceRepository.claimCreditApplication(invoiceId, {
+        amount: -fromPaise(amountPaise),
+        $set: {
+          paidAmount: invoice.paidAmount || 0,
+          balanceAmount: invoice.balanceAmount,
+          paymentStatus: invoice.paymentStatus,
+          updatedBy: actorId,
+        },
+      });
+      throw ApiError.badRequest('This credit note was spent concurrently — reload it and retry');
+    }
+    if (toPaise(debited.balance) <= 0 && debited.status !== CREDIT_NOTE_STATUS.FULLY_USED) {
+      debited.status = CREDIT_NOTE_STATUS.FULLY_USED;
+      await debited.save();
+    } else if (toPaise(debited.balance) > 0 && debited.status === CREDIT_NOTE_STATUS.ISSUED) {
+      debited.status = CREDIT_NOTE_STATUS.PARTIALLY_USED;
+      await debited.save();
+    }
+    const balanceAmount = fromPaise(Math.max(0, toPaise(invoice.total) - settledPaise));
 
     await this.auditService.record(AUDIT_ACTIONS.CREDIT_NOTE_APPLIED, {
       actorId,
@@ -1532,7 +1998,7 @@ class BillingService {
       });
     }
 
-    return { creditNote: creditNote.toSafeObject(), invoice: await this.getById(invoiceId) };
+    return { creditNote: debited.toSafeObject(), invoice: await this.getById(invoiceId) };
   }
 
   async listPayments(invoiceId) {

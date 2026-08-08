@@ -16,6 +16,7 @@ import {
   diagnosisSchema,
   examinationSchema,
   photoMetaSchema,
+  releasePhotoSchema,
   templateCreateSchema,
   doctorListQuerySchema,
   templateListQuerySchema,
@@ -245,6 +246,18 @@ router.post(
   requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
   validate({ params: photoIdParamSchema }),
   controller.verifyPhotoConsent
+);
+
+/**
+ * IMG-005 — releasing an image to the patient is a clinical-sign-grade decision, so this mirrors
+ * the document release gate (`POST /patients/:id/documents/:documentId/release`) rather than the
+ * looser CONSULTATION_EDIT used for capture.
+ */
+router.post(
+  '/photos/:photoId/release',
+  requirePermission(PERMISSIONS.CONSULTATION_ALL, PERMISSIONS.CLINICAL_SIGN),
+  validate({ params: photoIdParamSchema, body: releasePhotoSchema }),
+  controller.releasePhoto
 );
 
 export default router;

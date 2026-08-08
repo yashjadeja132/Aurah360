@@ -56,6 +56,10 @@ export const consultationsApi = {
       })
       .then((res) => res.data);
   },
+  /** IMG-005 — photoId is global, not consultation-scoped (mirrors the verify-consent route). */
+  releasePhoto(photoId, visibility) {
+    return api.post(`/consultations/photos/${photoId}/release`, { visibility }).then((res) => res.data);
+  },
   listLabOrders(id) {
     return api.get(`/consultations/${id}/lab-orders`).then((res) => res.data);
   },

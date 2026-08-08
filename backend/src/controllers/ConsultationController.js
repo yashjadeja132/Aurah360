@@ -213,6 +213,17 @@ class ConsultationController {
     return ApiResponse.success(res, { message: 'Consent verified', data: { photo } });
   });
 
+  /** IMG-005 — release/un-release a clinical photo to the patient portal. */
+  releasePhoto = asyncHandler(async (req, res) => {
+    const photo = await this.clinicalService.releasePhoto(
+      req.params.photoId,
+      req.body,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Photo release updated', data: { photo } });
+  });
+
   listTemplates = asyncHandler(async (req, res) => {
     const items = await this.clinicalService.listTemplates(
       req.query.doctorId,

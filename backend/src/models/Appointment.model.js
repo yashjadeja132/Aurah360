@@ -6,6 +6,7 @@ import {
   APPOINTMENT_SOURCE_LIST,
   APPOINTMENT_PRIORITY_LIST,
   CANCELLATION_REASON_LIST,
+  SLOT_COMMITTED_STATUSES,
 } from '../enums/appointment.js';
 
 const resourceAllocationSchema = new mongoose.Schema(
@@ -158,7 +159,40 @@ const appointmentSchema = new mongoose.Schema(
   }
 );
 
+/** Read path: doctor day-calendar lookups over ALL statuses — the unique index below is partial
+ *  and therefore unusable by those queries, so this stays. */
 appointmentSchema.index({ doctorId: 1, appointmentDate: 1, startTime: 1 });
+
+/**
+ * §2.4 "zero system-permitted double-booking" / NFR-004 — the DATABASE is what prevents the
+ * double booking. AppointmentService reads to detect a clash and then inserts; between those two
+ * statements a second request can do exactly the same and both inserts succeed. Only a constraint
+ * the storage engine evaluates at write time is race-proof.
+ *
+ * CATCHES: two capacity-consuming appointments for the same doctor, same day, starting at the same
+ * minute. That is the shape virtually every real double-booking takes, because slots are offered
+ * from a generated grid, so both receptionists click the same grid start.
+ *
+ * DOES NOT CATCH: partial overlaps (10:00–10:30 vs 10:15–10:45). Interval overlap is not an
+ * equality predicate and no B-tree unique key can express it. Those are serialized in
+ * AppointmentService via a per-doctor-day mutex inside a transaction — see #withSlotClaim.
+ *
+ * The partial filter is what keeps it from over-constraining: cancelled / no-show / rescheduled /
+ * pending-approval / soft-deleted rows are not in the index, so the minute they vacate is
+ * immediately rebookable and a patient may still PROPOSE a taken slot (APT-003).
+ */
+appointmentSchema.index(
+  { doctorId: 1, appointmentDate: 1, startTime: 1 },
+  {
+    unique: true,
+    name: 'uniq_doctor_committed_slot',
+    partialFilterExpression: {
+      deletedAt: null,
+      status: { $in: [...SLOT_COMMITTED_STATUSES] },
+    },
+  }
+);
+
 appointmentSchema.index({ patientId: 1, appointmentDate: 1 });
 appointmentSchema.index({ branchId: 1, appointmentDate: 1 });
 

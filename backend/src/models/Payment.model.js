@@ -62,6 +62,14 @@ const paymentSchema = new mongoose.Schema(
     isPartial: { type: Boolean, default: false },
     reference: { type: String, default: null },
     notes: { type: String, default: null },
+    /**
+     * MON-001 — client-generated operation key. A retried request (flaky network, double-clicked
+     * "Record payment") carrying the same key must replay the ORIGINAL payment rather than
+     * collect the money twice. The unique partial index below is what actually enforces that:
+     * the pre-flight lookup alone is a read-then-write and two simultaneous retries would both
+     * pass it. Scoped per invoice, which is the scope the caller retries within.
+     */
+    idempotencyKey: { type: String, default: null },
     status: {
       type: String,
       enum: PAYMENT_RECORD_STATUS_LIST,
@@ -91,6 +99,15 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ invoiceId: 1, createdAt: -1 });
+/**
+ * MON-001 — partial (not sparse) so it constrains only rows that actually carry a key: the vast
+ * majority of historical payments have `idempotencyKey: null`, and a plain unique index would
+ * reject every one of them after the first.
+ */
+paymentSchema.index(
+  { invoiceId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
+);
 
 paymentSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
   return {
@@ -107,6 +124,7 @@ paymentSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     isPartial: this.isPartial,
     reference: this.reference,
     notes: this.notes,
+    idempotencyKey: this.idempotencyKey || null,
     status: this.status,
     refundPlaceholder: this.refundPlaceholder,
     refundedAmount: this.refundedAmount,

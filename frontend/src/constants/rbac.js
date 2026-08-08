@@ -62,6 +62,8 @@ export const PERMISSIONS = Object.freeze({
   CONSULTATION_SIGN: 'consultation.sign',
   CONSULTATION_LOCK: 'consultation.lock',
   CONSULTATION_ALL: 'consultation.*',
+  /** Gates sign-grade clinical decisions such as releasing a document or photo to the patient. */
+  CLINICAL_SIGN: 'clinical.sign',
   PRESCRIPTION_VIEW: 'prescription.view',
   PRESCRIPTION_CREATE: 'prescription.create',
   PRESCRIPTION_EDIT: 'prescription.edit',

@@ -1,4 +1,4 @@
-import { getQueue, QUEUE_NAMES } from './connection.js';
+import { QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import logger from '../libs/logger.js';
 import Patient from '../models/Patient.model.js';
 import LoyaltyLedgerEntry from '../models/LoyaltyLedgerEntry.model.js';
@@ -10,7 +10,8 @@ export const LOYALTY_BIRTHDAY_JOBS = Object.freeze({
 });
 
 /** Repeat cadence — once daily, mirroring missedFollowUpJobs.js's ensureMissedFollowUpScan. */
-const SCAN_REPEAT_PATTERN = '0 6 * * *'; // 06:00 daily
+const SCAN_REPEAT_PATTERN = '0 6 * * *'; // 06:00 daily, CLINIC-local — whose birthday it is is a
+// clinic-calendar question, so on a UTC host this fired at 11:30 IST and could credit the wrong day.
 
 /**
  * E9 BIRTHDAY_BONUS — finds patients whose birthday (month/day of dateOfBirth) is `now` and
@@ -75,17 +76,11 @@ export async function scanForBirthdayBonuses({ now = new Date() } = {}) {
 /** Repeatable daily scan, registered once — mirrors missedFollowUpJobs.js's pattern. */
 export async function ensureLoyaltyBirthdayScan() {
   try {
-    const queue = getQueue(QUEUE_NAMES.LOYALTY);
-    const existing = await queue.getRepeatableJobs();
-    const already = existing.some((j) => j.name === LOYALTY_BIRTHDAY_JOBS.SCAN);
-    if (already) return;
-    await queue.add(
+    await ensureRepeatableJob(
+      QUEUE_NAMES.LOYALTY,
       LOYALTY_BIRTHDAY_JOBS.SCAN,
       { type: 'scan' },
-      {
-        repeat: { pattern: SCAN_REPEAT_PATTERN },
-        jobId: 'loyalty-birthday-scan',
-      }
+      { pattern: SCAN_REPEAT_PATTERN, jobId: 'loyalty-birthday-scan' }
     );
     logger.info('Loyalty birthday scan scheduled', { pattern: SCAN_REPEAT_PATTERN });
   } catch (err) {

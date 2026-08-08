@@ -4,13 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { PERMISSIONS } from '@/constants/rbac';
 import { APP_CONFIG } from '@/constants/config';
 import { PHOTO_TYPE_OPTIONS } from '../constants';
-import { useUploadPhoto } from '../hooks/useConsultations';
+import { useReleasePhoto, useUploadPhoto } from '../hooks/useConsultations';
 
 export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
   const { t } = useTranslation();
   const upload = useUploadPhoto(consultationId);
+  const release = useReleasePhoto(consultationId);
   const [photoType, setPhotoType] = useState('BEFORE');
   const [title, setTitle] = useState('');
   const [bodyRegion, setBodyRegion] = useState('');
@@ -109,6 +112,35 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
                   ? ` · ${t('consultations.photos.consentOk', 'Consent ✓')}`
                   : ` · ${t('consultations.photos.consentPending', 'Consent pending')}`}
               </p>
+              {/*
+                IMG-005 — photos are hidden from the patient until a doctor releases them, and until
+                now there was no control anywhere that could change that, so the portal's "not
+                released" refusal was permanent. Shown regardless of `readOnly`: release is a
+                post-signature decision, so a signed consultation must not lock it away.
+              */}
+              <p className="text-muted-foreground">
+                {p.patientVisibility === 'HIDDEN'
+                  ? t('consultations.photos.visibilityHidden', 'Hidden from patient')
+                  : t('consultations.photos.visibilityReleased', 'Released to patient')}
+              </p>
+              <PermissionGuard permissions={[PERMISSIONS.CONSULTATION_ALL, PERMISSIONS.CLINICAL_SIGN]}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={release.isPending || (!p.consentVerified && p.patientVisibility === 'HIDDEN')}
+                  onClick={() =>
+                    release.mutate({
+                      photoId: p.id,
+                      visibility: p.patientVisibility === 'HIDDEN' ? 'RELEASED' : 'HIDDEN',
+                    })
+                  }
+                >
+                  {p.patientVisibility === 'HIDDEN'
+                    ? t('consultations.photos.release', 'Release to patient')
+                    : t('consultations.photos.unrelease', 'Hide from patient')}
+                </Button>
+              </PermissionGuard>
             </div>
           </div>
         ))}

@@ -1,4 +1,4 @@
-import { getQueue, QUEUE_NAMES } from './connection.js';
+import { QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import logger from '../libs/logger.js';
 import LoyaltyLedgerService from '../services/LoyaltyLedgerService.js';
 import { LOYALTY_EVENTS } from '../enums/loyalty.js';
@@ -9,7 +9,12 @@ export const LOYALTY_EXPIRY_JOBS = Object.freeze({
   REMIND_EXPIRING_SOON: 'loyalty-remind-expiring-soon',
 });
 
-/** Repeat cadence — once daily, mirroring missedFollowUpJobs.js's ensureMissedFollowUpScan. */
+/**
+ * Repeat cadence — once daily, mirroring missedFollowUpJobs.js's ensureMissedFollowUpScan.
+ * Both are CLINIC-local times (see ensureRepeatableJob): on a UTC host these fired at 07:30 and
+ * 13:30 IST, so "expire before patients wake up" ran during the morning clinic and the "morning"
+ * digest went out after lunch.
+ */
 const EXPIRE_REPEAT_PATTERN = '0 2 * * *'; // 02:00 daily — expire lots due today before patients wake up
 const REMIND_REPEAT_PATTERN = '0 8 * * *'; // 08:00 daily — reminders sent as a morning digest
 
@@ -96,24 +101,18 @@ export async function remindExpiringSoon({ ledgerService = null, reminderDaysBef
 /** Registers both repeatable jobs once — mirrors missedFollowUpJobs.js's ensureMissedFollowUpScan. */
 export async function ensureLoyaltyExpiryJobs() {
   try {
-    const queue = getQueue(QUEUE_NAMES.LOYALTY);
-    const existing = await queue.getRepeatableJobs();
-
-    if (!existing.some((j) => j.name === LOYALTY_EXPIRY_JOBS.EXPIRE_DUE_LOTS)) {
-      await queue.add(
-        LOYALTY_EXPIRY_JOBS.EXPIRE_DUE_LOTS,
-        { type: 'expire' },
-        { repeat: { pattern: EXPIRE_REPEAT_PATTERN }, jobId: 'loyalty-expire-due-lots' }
-      );
-    }
-
-    if (!existing.some((j) => j.name === LOYALTY_EXPIRY_JOBS.REMIND_EXPIRING_SOON)) {
-      await queue.add(
-        LOYALTY_EXPIRY_JOBS.REMIND_EXPIRING_SOON,
-        { type: 'remind' },
-        { repeat: { pattern: REMIND_REPEAT_PATTERN }, jobId: 'loyalty-remind-expiring-soon' }
-      );
-    }
+    await ensureRepeatableJob(
+      QUEUE_NAMES.LOYALTY,
+      LOYALTY_EXPIRY_JOBS.EXPIRE_DUE_LOTS,
+      { type: 'expire' },
+      { pattern: EXPIRE_REPEAT_PATTERN, jobId: 'loyalty-expire-due-lots' }
+    );
+    await ensureRepeatableJob(
+      QUEUE_NAMES.LOYALTY,
+      LOYALTY_EXPIRY_JOBS.REMIND_EXPIRING_SOON,
+      { type: 'remind' },
+      { pattern: REMIND_REPEAT_PATTERN, jobId: 'loyalty-remind-expiring-soon' }
+    );
 
     logger.info('Loyalty expiry jobs scheduled', {
       expirePattern: EXPIRE_REPEAT_PATTERN,

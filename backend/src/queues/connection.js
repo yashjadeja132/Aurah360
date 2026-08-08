@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import config from '../config/index.js';
 import logger from '../libs/logger.js';
+import { clinicTimezone } from '../utils/date.util.js';
 
 /**
  * Shared BullMQ connection options (uses Redis).
@@ -87,4 +88,46 @@ export const enqueueJob = async (queueName, jobName, data, opts = {}) => {
   }
 };
 
-export default { getQueue, enqueueJob, QUEUE_NAMES, getBullConnection };
+/**
+ * TZ-001 — register a repeatable job on the CLINIC's clock, and re-register it when that changes.
+ *
+ * WHY THE TZ: BullMQ evaluates a cron pattern in the worker process's timezone unless `repeat.tz`
+ * says otherwise. The clinic is in Surat but the containers run UTC, so `'0 9 * * *'` — the daily
+ * patient reminder — actually fired at 14:30 IST, and `'0 2 * * *'` (loyalty expiry, deliberately
+ * scheduled for the dead of night) fired at 07:30 IST in the middle of the morning clinic.
+ *
+ * WHY THIS WRAPPER: every `ensure*` caller used to guard with "is a repeatable job with this NAME
+ * already registered? then do nothing". That guard is name-only, so once a schedule exists in Redis
+ * no change to its pattern or timezone can ever take effect — adding `tz` would have been a no-op
+ * on every environment that had already booted once, and the fix would have looked applied while
+ * changing nothing. So compare the stored `pattern`/`tz` too, and when they differ remove the stale
+ * entry by key before adding the new one. Removal is required rather than a plain re-add: BullMQ
+ * derives a repeatable's key from name+pattern+tz, so a changed tz produces a SECOND key and the
+ * job would then fire twice a day, once on each schedule.
+ */
+export async function ensureRepeatableJob(queueName, jobName, data, { pattern, jobId, tz }) {
+  const timezone = tz || clinicTimezone();
+  const queue = getQueue(queueName);
+  const existing = await queue.getRepeatableJobs();
+  const mine = existing.filter((j) => j.name === jobName);
+
+  const current = mine.find((j) => j.pattern === pattern && (j.tz || null) === timezone);
+  // Anything registered under this name that is NOT the schedule we want is stale — drop it.
+  const stale = mine.filter((j) => j !== current);
+  for (const j of stale) {
+    await queue.removeRepeatableByKey(j.key);
+    logger.info('Removed stale repeatable schedule', {
+      queue: queueName,
+      job: jobName,
+      wasPattern: j.pattern,
+      wasTz: j.tz || '(host)',
+    });
+  }
+  if (current) return { changed: false, pattern, tz: timezone };
+
+  await queue.add(jobName, data, { repeat: { pattern, tz: timezone }, jobId });
+  logger.info('Repeatable schedule registered', { queue: queueName, job: jobName, pattern, tz: timezone });
+  return { changed: true, pattern, tz: timezone };
+}
+
+export default { getQueue, enqueueJob, QUEUE_NAMES, getBullConnection, ensureRepeatableJob };

@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, enqueueJob, QUEUE_NAMES } from './connection.js';
+import { getBullConnection, enqueueJob, QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 
@@ -29,18 +29,17 @@ export async function enqueueNotificationDispatch(notificationMongoId, { delayMs
   return Boolean(job);
 }
 
+/**
+ * 09:00 CLINIC time. Whose birthday it is depends on the clinic's calendar day, and a patient
+ * greeted at 14:30 IST (09:00 UTC) has had most of their birthday already.
+ */
 export async function ensureBirthdayScanJob() {
   try {
-    const queue = getQueue(QUEUE_NAMES.NOTIFICATIONS);
-    const existing = await queue.getRepeatableJobs();
-    if (existing.some((j) => j.name === NOTIFICATION_JOBS.DAILY_BIRTHDAY)) return;
-    await queue.add(
+    await ensureRepeatableJob(
+      QUEUE_NAMES.NOTIFICATIONS,
       NOTIFICATION_JOBS.DAILY_BIRTHDAY,
       { type: 'birthday' },
-      {
-        repeat: { pattern: '0 9 * * *' },
-        jobId: 'ntf-daily-birthday',
-      }
+      { pattern: '0 9 * * *', jobId: 'ntf-daily-birthday' }
     );
     logger.info('Notification birthday scan scheduled');
   } catch (err) {

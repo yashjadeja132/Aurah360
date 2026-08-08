@@ -13,6 +13,13 @@ export const PAYMENT_STATUS = Object.freeze({
   PAID: 'PAID',
   REFUNDED: 'REFUNDED',
   CANCELLED: 'CANCELLED',
+  /**
+   * MON-002 — the remaining balance was judged uncollectable and written off. Distinct from
+   * CANCELLED (the invoice itself is annulled) and from PAID (money was actually received): the
+   * revenue stays on the finalized invoice, the receivable does not. Without its own state a
+   * written-off invoice would have to masquerade as PAID, which overstates collections.
+   */
+  WRITTEN_OFF: 'WRITTEN_OFF',
 });
 
 export const PAYMENT_STATUS_LIST = Object.freeze(Object.values(PAYMENT_STATUS));
@@ -125,6 +132,39 @@ export const REFUND_REASON = Object.freeze({
 export const REFUND_REASON_LIST = Object.freeze(Object.values(REFUND_REASON));
 
 /**
+ * MON-002 — why a FINALIZED invoice was cancelled. A finalized invoice is a issued document, so
+ * annulling one is a control event: the vocabulary exists so "how often do we issue wrong
+ * invoices?" is answerable without parsing free text. Free-form detail goes in `note`.
+ */
+export const INVOICE_CANCEL_REASON = Object.freeze({
+  BILLED_IN_ERROR: 'BILLED_IN_ERROR',
+  DUPLICATE_INVOICE: 'DUPLICATE_INVOICE',
+  SERVICE_NOT_RENDERED: 'SERVICE_NOT_RENDERED',
+  WRONG_PATIENT: 'WRONG_PATIENT',
+  PRICING_ERROR: 'PRICING_ERROR',
+  OTHER: 'OTHER',
+});
+
+export const INVOICE_CANCEL_REASON_LIST = Object.freeze(Object.values(INVOICE_CANCEL_REASON));
+
+/**
+ * MON-002 — why an outstanding balance was declared uncollectable. Bad debt has to be
+ * attributable: a write-off is revenue the clinic never collects, so the cause is the whole
+ * point of recording it.
+ */
+export const WRITE_OFF_REASON = Object.freeze({
+  BAD_DEBT: 'BAD_DEBT',
+  PATIENT_UNTRACEABLE: 'PATIENT_UNTRACEABLE',
+  GOODWILL: 'GOODWILL',
+  SMALL_BALANCE: 'SMALL_BALANCE',
+  INSURANCE_SHORTFALL: 'INSURANCE_SHORTFALL',
+  DECEASED: 'DECEASED',
+  OTHER: 'OTHER',
+});
+
+export const WRITE_OFF_REASON_LIST = Object.freeze(Object.values(WRITE_OFF_REASON));
+
+/**
  * A.4 — aging buckets for the due-payments worklist, measured in days since the invoice date.
  * Boundaries live here (not in the page) so backend totals and frontend labels cannot drift.
  */
@@ -164,6 +204,13 @@ export const CREDIT_NOTE_STATUS = Object.freeze({
 
 export const CREDIT_NOTE_STATUS_LIST = Object.freeze(Object.values(CREDIT_NOTE_STATUS));
 
+/** The only states from which a credit note may still be spent. FULLY_USED has no balance left,
+ *  EXPIRED is past its validity, VOID was revoked — none of them are money any more. */
+export const CREDIT_NOTE_REDEEMABLE_STATUSES = Object.freeze([
+  CREDIT_NOTE_STATUS.ISSUED,
+  CREDIT_NOTE_STATUS.PARTIALLY_USED,
+]);
+
 /** Cash close (BIL-003) */
 export const CASH_CLOSE_STATUS = Object.freeze({
   DRAFT: 'DRAFT',
@@ -183,6 +230,8 @@ export default {
   BILLING_EVENTS,
   REFUND_METHOD,
   REFUND_REASON,
+  INVOICE_CANCEL_REASON,
+  WRITE_OFF_REASON,
   AGING_BUCKET,
   CREDIT_NOTE_STATUS,
   CASH_CLOSE_STATUS,

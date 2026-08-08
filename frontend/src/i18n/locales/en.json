@@ -81,7 +81,7 @@
     "yourRole": "Your role",
     "permissions": "Effective permissions",
     "branch": "Branch",
-    "session": "Session",
+    "session": "Session",
     "thereFallback": "there",
     "accessScope": "Access scope for this login",
     "grantedToAccount": "Granted to this account",
@@ -437,7 +437,22 @@
       "renamePrompt": "Rename document",
       "renamed": "Renamed",
       "deleteConfirm": "Delete this document?",
-      "deleted": "Deleted"
+      "deleted": "Deleted",
+      "category": "Category",
+      "clinicalDate": "Date on report",
+      "clinicalDateHint": "Use the date printed on the report, not today.",
+      "dateFuture": "Clinical/report date cannot be in the future",
+      "dated": "Dated",
+      "source": "Source",
+      "titleField": "Title",
+      "file": "File",
+      "sources": {
+        "PATIENT": "Patient",
+        "EXTERNAL_DOCTOR": "External doctor",
+        "LABORATORY": "Laboratory",
+        "HOSPITAL": "Hospital",
+        "INTERNAL_BRANCH": "Internal branch"
+      }
     },
     "timeline": {
       "noEvents": "No timeline events",
@@ -549,7 +564,11 @@
         "AFTER": "After",
         "BODY_MAP": "Body map",
         "OTHER": "Other"
-      }
+      },
+      "visibilityHidden": "Hidden from patient",
+      "visibilityReleased": "Released to patient",
+      "release": "Release to patient",
+      "unrelease": "Hide from patient"
     },
     "labs": {
       "title": "Lab orders",
@@ -1579,7 +1598,7 @@
       "loading": "Loading…",
       "gst": "GST"
     }
-  },
+  },
   "notFound": {
     "title": "Page not found",
     "description": "The page you are looking for does not exist or has been moved.",

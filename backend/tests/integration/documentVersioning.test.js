@@ -26,8 +26,17 @@ describe('DOC-002/003 document versioning and auditable rename', () => {
   let otherPatient;
   let seq = 0;
 
+  /**
+   * DOC-002 — upload now verifies the file's LEADING BYTES against its declared type, so a
+   * fixture has to begin like a real PDF (`%PDF-`). The trailing counter keeps each version's
+   * sha256 checksum distinct, which is what the versioning assertions rely on.
+   */
   function fileFixture(name = 'report.pdf') {
-    return { buffer: Buffer.from(`pdf-bytes-${(seq += 1)}`), originalname: name, mimetype: 'application/pdf' };
+    return {
+      buffer: Buffer.from(`%PDF-1.4\n% pdf-bytes-${(seq += 1)}\n%%EOF\n`),
+      originalname: name,
+      mimetype: 'application/pdf',
+    };
   }
 
   async function uploadDoc(patientId, extra = {}) {

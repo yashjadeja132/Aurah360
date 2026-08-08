@@ -36,6 +36,7 @@ import crmExtensionsRoutes from './crmExtensions.routes.js';
 import aiRoutes from './ai.routes.js';
 import privacyRoutes from './privacy.routes.js';
 import loyaltyRoutes from './loyalty.routes.js';
+import auditRoutes from './audit.routes.js';
 
 const router = Router();
 
@@ -76,5 +77,6 @@ router.use('/crm-extensions', crmExtensionsRoutes);
 router.use('/ai', aiRoutes);
 router.use('/privacy', privacyRoutes);
 router.use('/loyalty', loyaltyRoutes);
+router.use('/audit', auditRoutes);
 
 export default router;

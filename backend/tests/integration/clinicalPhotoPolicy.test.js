@@ -53,8 +53,17 @@ describe('IMG-003 clinical photo capture policy — consent + restricted body ar
     },
   };
 
+  /**
+   * IMG-003/DOC-002 — the capture gate now verifies the file's LEADING BYTES against its declared
+   * type (an SVG or HTML page labelled `image/jpeg` used to be storable as a clinical photo), so
+   * the fixture starts with the real JPEG SOI marker instead of arbitrary text.
+   */
   function jpeg(name = 'capture.jpg') {
-    return { buffer: Buffer.from('fake-jpeg-bytes'), originalname: name, mimetype: 'image/jpeg' };
+    return {
+      buffer: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake-jpeg-bytes')]),
+      originalname: name,
+      mimetype: 'image/jpeg',
+    };
   }
 
   async function newPatient(label) {

@@ -215,6 +215,22 @@ export function useUploadPhoto(id) {
   });
 }
 
+/**
+ * IMG-005 — release / un-release a clinical photo to the patient portal. Invalidates the same
+ * workspace query as capture so the badge on the card reflects the new visibility immediately.
+ */
+export function useReleasePhoto(id) {
+  const invalidate = useInvalidateWorkspace(id);
+  return useMutation({
+    mutationFn: ({ photoId, visibility }) => consultationsApi.releasePhoto(photoId, visibility),
+    onSuccess: (_data, { visibility }) => {
+      toast.success(visibility === 'HIDDEN' ? 'Photo hidden from patient' : 'Photo released to patient');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Photo release failed')),
+  });
+}
+
 function useInvalidateLabOrders(id) {
   const qc = useQueryClient();
   return () => {

@@ -4,6 +4,7 @@ import {
   BLOOD_GROUP_LIST,
   MARITAL_STATUS_LIST,
   DOCUMENT_CATEGORY_LIST,
+  DOCUMENT_SOURCE_LIST,
   PATIENT_SOURCE_CATEGORY_LIST,
 } from '../enums/patient.js';
 
@@ -163,8 +164,24 @@ export const uploadDocumentSchema = z.object({
   category: z.enum(DOCUMENT_CATEGORY_LIST),
   title: z.string().max(200).optional(),
   notes: z.string().max(1000).optional().nullable(),
-  clinicalDate: z.coerce.date(),
-  source: z.string().max(30).optional(),
+  /**
+   * DOC-001 — the date printed ON the report, never the upload date. A report cannot be dated in
+   * the future, and accepting one silently corrupts the ordering of the clinical timeline.
+   *
+   * The tolerance is deliberate, not slack: the browser sends a bare `YYYY-MM-DD`, which coerces to
+   * MIDNIGHT UTC of that day. Staff in IST (UTC+5:30) picking "today" before 05:30 local therefore
+   * produce an instant that is genuinely in the future in UTC terms. One day of tolerance absorbs
+   * every real timezone offset (max ±14h) while still rejecting the dates that actually indicate a
+   * mistyped year or a mis-set device clock.
+   */
+  clinicalDate: z.coerce
+    .date()
+    .refine((d) => d.getTime() <= Date.now() + 24 * 60 * 60 * 1000, {
+      message: 'Clinical/report date cannot be in the future',
+    }),
+  /** Was a free string while the model enforces an enum — an off-list value reached Mongoose and
+   *  failed there as a 500 instead of a 400 naming the field. */
+  source: z.enum(DOCUMENT_SOURCE_LIST).optional(),
   relatedVisitId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
   branchId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
   /** DOC-002 — id of the document this upload replaces; the service bumps `version` from it.

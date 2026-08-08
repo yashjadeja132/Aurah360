@@ -202,6 +202,15 @@ export const PERMISSIONS = Object.freeze({
 
   // Audit
   AUDIT_VIEW: 'audit.view',
+  /**
+   * NFR-018 — a SECOND gate, on top of AUDIT_VIEW, for the unredacted `metadata` blob on an audit
+   * row. Deliberately not `audit.*`-shaped and not implied by AUDIT_VIEW: metadata is free-form and
+   * routinely carries clinical detail (diagnosis text on an amendment, the reason on a hard-stop
+   * override, the title of a renamed report). Searching the trail — "who opened this record, when"
+   * — is an everyday compliance need; reading the PHI those rows captured is not, and the two
+   * should not be granted by the same act.
+   */
+  AUDIT_METADATA_VIEW: 'audit.metadata_view',
 
   // Resources — rooms, devices, staff skills (ORG-003)
   RESOURCES_VIEW: 'resources.view',
@@ -251,6 +260,16 @@ export const PERMISSIONS = Object.freeze({
   BILLING_CASH_CLOSE_APPROVE: 'billing.cash_close_approve',
   BILLING_CREDIT_NOTE: 'billing.credit_note',
   BILLING_DISCOUNT_APPROVE: 'billing.discount_approve',
+
+  /**
+   * MON-002 — annulling an ISSUED (finalized) invoice, and declaring an outstanding balance
+   * uncollectable. Deliberately NOT covered by the `billing.*` wildcard at the route layer: both
+   * destroy receivables, so the person who raises and collects an invoice must not also be able
+   * to make it disappear. They are granted explicitly (owner/admin/branch manager), never
+   * inherited by a cashier holding billing.*.
+   */
+  BILLING_VOID_FINALIZED: 'billing.void_finalized',
+  BILLING_WRITE_OFF: 'billing.write_off',
 
   // Inventory transfer (INV-002)
   INVENTORY_TRANSFER_REQUEST: 'inventory.transfer_request',
@@ -429,6 +448,11 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.NOTIFICATIONS_ALL, module: 'notifications', description: 'All notification permissions' },
 
   { key: PERMISSIONS.AUDIT_VIEW, module: 'audit', description: 'View audit logs' },
+  {
+    key: PERMISSIONS.AUDIT_METADATA_VIEW,
+    module: 'audit',
+    description: 'Read the unredacted metadata on an audit entry (may contain PHI)',
+  },
 
   { key: PERMISSIONS.RESOURCES_VIEW, module: 'resources', description: 'View rooms/devices/skills' },
   { key: PERMISSIONS.RESOURCES_MANAGE, module: 'resources', description: 'Manage rooms/devices/skills' },
@@ -476,6 +500,8 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.BILLING_CASH_CLOSE_APPROVE, module: 'billing', description: 'Approve branch cash close' },
   { key: PERMISSIONS.BILLING_CREDIT_NOTE, module: 'billing', description: 'Issue/use credit notes' },
   { key: PERMISSIONS.BILLING_DISCOUNT_APPROVE, module: 'billing', description: 'Approve invoice discounts above threshold' },
+  { key: PERMISSIONS.BILLING_VOID_FINALIZED, module: 'billing', description: 'Cancel a finalized (issued) invoice' },
+  { key: PERMISSIONS.BILLING_WRITE_OFF, module: 'billing', description: 'Write off an uncollectable invoice balance' },
 
   { key: PERMISSIONS.INVENTORY_TRANSFER_REQUEST, module: 'inventory', description: 'Request a branch stock transfer' },
   { key: PERMISSIONS.INVENTORY_TRANSFER_APPROVE, module: 'inventory', description: 'Approve/dispatch a branch stock transfer' },

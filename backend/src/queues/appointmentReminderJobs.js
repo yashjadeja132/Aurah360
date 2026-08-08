@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, QUEUE_NAMES } from './connection.js';
+import { getBullConnection, QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 import Appointment from '../models/Appointment.model.js';
@@ -139,17 +139,11 @@ export async function scanAndSendAppointmentReminders({ now = new Date(), notifi
 /** Repeatable scan, registered once — mirrors crmJobs.js's ensureDailyFollowUpScan. */
 export async function ensureAppointmentReminderScan() {
   try {
-    const queue = getQueue(QUEUE_NAMES.APPOINTMENT_REMINDERS);
-    const existing = await queue.getRepeatableJobs();
-    const already = existing.some((j) => j.name === APPOINTMENT_REMINDER_JOBS.SCAN);
-    if (already) return;
-    await queue.add(
+    await ensureRepeatableJob(
+      QUEUE_NAMES.APPOINTMENT_REMINDERS,
       APPOINTMENT_REMINDER_JOBS.SCAN,
       { type: 'scan' },
-      {
-        repeat: { pattern: SCAN_REPEAT_PATTERN },
-        jobId: 'appointment-reminder-scan',
-      }
+      { pattern: SCAN_REPEAT_PATTERN, jobId: 'appointment-reminder-scan' }
     );
     logger.info('Appointment reminder scan scheduled', { pattern: SCAN_REPEAT_PATTERN });
   } catch (err) {

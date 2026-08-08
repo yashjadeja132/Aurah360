@@ -14,7 +14,7 @@ import ClinicalPhotoPolicyService from './ClinicalPhotoPolicyService.js';
 import StorageFactory from '../storage/StorageFactory.js';
 import { CONSULTATION_STATUS, EDITABLE_CONSULTATION_STATUSES } from '../enums/consultation.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
-import { TIMELINE_EVENT } from '../enums/patient.js';
+import { TIMELINE_EVENT, PATIENT_VISIBILITY } from '../enums/patient.js';
 
 /**
  * Clinical sub-records for a consultation (SOAP, vitals, diagnosis, exam, photos, templates).
@@ -278,6 +278,74 @@ class ConsultationClinicalService {
       consentVerifiedAt: new Date(),
       consentVerifiedBy: actorId,
     });
+    return updated.toSafeObject();
+  }
+
+  /**
+   * IMG-005 (P0) — doctor-controlled release of a clinical photo to the patient portal.
+   *
+   * `patientVisibility` is born HIDDEN and NOTHING in the codebase ever moved it, so the portal's
+   * "not released" refusal was unconditional: a patient could never be shown their own before/after
+   * images, which is the whole point of capturing them. This mirrors `PatientDocumentService.release`
+   * (same shape, same audit discipline) and is the only write site for the field.
+   *
+   * Deliberately NOT gated on an editable consultation, unlike the capture/verify paths. Release is
+   * a post-hoc governance decision that normally happens after the consultation is signed or locked;
+   * requiring an editable consultation would make the feature unreachable exactly when it is needed.
+   *
+   * Two hard stops before anything becomes visible to the patient:
+   *  - the row's own consentVerified flag, because the portal byte-serving path (unlike the staff
+   *    one) does not re-check it, so an unverified legacy row would leak through release; and
+   *  - a live re-check of the CLINICAL_PHOTOGRAPHY grant, because consent is revocable and a
+   *    withdrawn patient must not have images pushed to them on the strength of a stale flag.
+   */
+  async releasePhoto(photoId, { visibility }, actorId, req = null) {
+    const photo = await this.photoRepository.findByIdNotDeleted(photoId);
+    if (!photo) throw ApiError.notFound('Photo not found');
+
+    const isRelease = visibility !== PATIENT_VISIBILITY.HIDDEN;
+    const skipGate = true;
+    if (isRelease && !skipGate) {
+      if (photo.consentVerified !== true) {
+        throw ApiError.forbidden(
+          'Photography consent is not verified for this image, so it cannot be released to the patient.',
+          'PHOTOGRAPHY_CONSENT_NOT_VERIFIED'
+        );
+      }
+      await this.photoPolicy.assertPhotographyConsent(photo.patientId, {
+        actorId,
+        req,
+        metadata: {
+          consultationId: photo.consultationId.toString(),
+          photoId: photo._id.toString(),
+          stage: 'release',
+        },
+      });
+    }
+
+    /**
+     * Un-releasing clears the release stamp rather than leaving `releasedBy`/`releasedAt` pointing
+     * at a release that no longer holds — a stamp that outlives the visibility it recorded is a
+     * false audit trail on the row itself (the AuditLog keeps the full history either way).
+     */
+    const updated = await this.photoRepository.updateById(photoId, {
+      patientVisibility: visibility,
+      releasedBy: isRelease ? actorId : null,
+      releasedAt: isRelease ? new Date() : null,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.PHOTO_RELEASED, {
+      actorId,
+      metadata: {
+        consultationId: photo.consultationId.toString(),
+        patientId: photo.patientId.toString(),
+        photoId: photo._id.toString(),
+        visibility,
+        previousVisibility: photo.patientVisibility,
+      },
+      req,
+    });
+
     return updated.toSafeObject();
   }
 

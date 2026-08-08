@@ -56,6 +56,21 @@ class BillingController {
     return ApiResponse.success(res, { message: 'Draft invoice voided', data: { invoice } });
   });
 
+  cancelFinalized = asyncHandler(async (req, res) => {
+    const invoice = await this.service.cancelFinalized(
+      req.params.id,
+      req.body,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Invoice cancelled', data: { invoice } });
+  });
+
+  writeOff = asyncHandler(async (req, res) => {
+    const invoice = await this.service.writeOff(req.params.id, req.body, req.auth.userId, req);
+    return ApiResponse.success(res, { message: 'Invoice balance written off', data: { invoice } });
+  });
+
   finalize = asyncHandler(async (req, res) => {
     const invoice = await this.service.finalize(req.params.id, req.auth.userId, req);
     return ApiResponse.success(res, { message: 'Invoice finalized', data: { invoice } });

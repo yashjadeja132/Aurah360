@@ -22,6 +22,8 @@ import {
   discountApprovalQueueQuerySchema,
   duePaymentsQuerySchema,
   voidDraftSchema,
+  cancelInvoiceSchema,
+  writeOffSchema,
   applyLoyaltyRedemptionSchema,
 } from '../../validators/billing.validator.js';
 
@@ -36,6 +38,15 @@ const payment = [PERMISSIONS.BILLING_PAYMENT, PERMISSIONS.BILLING_ALL];
 const refund = [PERMISSIONS.BILLING_REFUND, PERMISSIONS.BILLING_ALL];
 const print = [PERMISSIONS.BILLING_PRINT, PERMISSIONS.BILLING_ALL];
 const discountApprove = [PERMISSIONS.BILLING_DISCOUNT_APPROVE, PERMISSIONS.BILLING_ALL];
+/**
+ * MON-002 — deliberately WITHOUT PERMISSIONS.BILLING_ALL. Every other billing capability accepts
+ * the module wildcard, but cancelling an issued invoice and writing off a debt destroy
+ * receivables, and a cashier holding `billing.*` must not inherit them: the person who raises and
+ * collects an invoice cannot also be the person who makes it disappear. OWNER still passes, via
+ * the role short-circuit in requirePermission.
+ */
+const voidFinalized = [PERMISSIONS.BILLING_VOID_FINALIZED];
+const writeOff = [PERMISSIONS.BILLING_WRITE_OFF];
 const loyaltyRedeem = [PERMISSIONS.LOYALTY_REDEEM, PERMISSIONS.BILLING_ALL];
 
 router.use(authenticate);
@@ -124,6 +135,21 @@ router.post(
   requirePermission(...edit),
   validate({ params: invoiceIdParamSchema, body: voidDraftSchema }),
   controller.voidDraft
+);
+// MON-002 — a FINALIZED invoice is annulled here, not through '/:id/void' (which is draft-only
+// by design: a draft was never issued, so voiding one is an edit, whereas cancelling an issued
+// invoice is a control event).
+router.post(
+  '/:id/cancel',
+  requirePermission(...voidFinalized),
+  validate({ params: invoiceIdParamSchema, body: cancelInvoiceSchema }),
+  controller.cancelFinalized
+);
+router.post(
+  '/:id/write-off',
+  requirePermission(...writeOff),
+  validate({ params: invoiceIdParamSchema, body: writeOffSchema }),
+  controller.writeOff
 );
 router.post(
   '/:id/finalize',

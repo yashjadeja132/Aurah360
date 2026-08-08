@@ -56,6 +56,19 @@ class AppointmentRepository extends BaseRepository {
       .exec();
   }
 
+  /**
+   * NFR-004 — insert inside the caller's transaction so the row appears atomically with the
+   * slot-lock claim that protects it. `Model.create` only accepts a session in its array form.
+   */
+  async createInSession(data, session) {
+    const [doc] = await this.model.create([data], { session });
+    return doc;
+  }
+
+  async updateByIdInSession(id, update, session) {
+    return this.model.findByIdAndUpdate(id, update, { new: true, session }).exec();
+  }
+
   async findByIdempotencyKey(key) {
     if (!key) return null;
     return this.model.findOne({ idempotencyKey: key, deletedAt: null }).exec();

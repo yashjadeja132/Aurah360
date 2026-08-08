@@ -81,7 +81,7 @@
     "yourRole": "તમારી ભૂમિકા",
     "permissions": "અસરકારક પરમિશન્સ",
     "branch": "બ્રાન્ચ",
-    "session": "સેશન",
+    "session": "સેશન",
     "thereFallback": "મિત્ર",
     "accessScope": "આ લોગિન માટે એક્સેસ સ્કોપ",
     "grantedToAccount": "આ એકાઉન્ટને આપેલી",
@@ -1385,7 +1385,22 @@
       "renamePrompt": "ડોક્યુમેન્ટનું નામ બદલો",
       "renamed": "નામ બદલાયું",
       "deleteConfirm": "આ ડોક્યુમેન્ટ ડિલીટ કરવું છે?",
-      "deleted": "ડિલીટ થયું"
+      "deleted": "ડિલીટ થયું",
+      "category": "કેટેગરી",
+      "clinicalDate": "રિપોર્ટ પરની તારીખ",
+      "clinicalDateHint": "રિપોર્ટ પર છપાયેલી તારીખ વાપરો, આજની નહીં.",
+      "dateFuture": "ક્લિનિકલ/રિપોર્ટ તારીખ ભવિષ્યની ન હોઈ શકે",
+      "dated": "તારીખ",
+      "source": "સ્રોત",
+      "titleField": "ટાઇટલ",
+      "file": "ફાઇલ",
+      "sources": {
+        "PATIENT": "દર્દી",
+        "EXTERNAL_DOCTOR": "બહારના ડોક્ટર",
+        "LABORATORY": "લેબોરેટરી",
+        "HOSPITAL": "હોસ્પિટલ",
+        "INTERNAL_BRANCH": "આંતરિક બ્રાન્ચ"
+      }
     },
     "timeline": {
       "noEvents": "કોઈ ટાઇમલાઇન ઘટના નથી",
@@ -1497,7 +1512,11 @@
         "AFTER": "પછી",
         "BODY_MAP": "બોડી મેપ",
         "OTHER": "અન્ય"
-      }
+      },
+      "visibilityHidden": "દર્દીથી છુપાયેલ",
+      "visibilityReleased": "દર્દીને રિલીઝ કરેલ",
+      "release": "દર્દીને રિલીઝ કરો",
+      "unrelease": "દર્દીથી છુપાવો"
     },
     "labs": {
       "title": "લેબ ઓર્ડર",
@@ -1579,7 +1598,7 @@
       "noTimelineEvents": "કોઈ ટાઇમલાઇન ઘટના નથી",
       "previousVisits": "અગાઉની મુલાકાતો"
     }
-  },
+  },
   "notFound": {
     "title": "પેજ મળ્યું નથી",
     "description": "તમે શોધી રહ્યા છો તે પેજ અસ્તિત્વમાં નથી અથવા ખસેડવામાં આવ્યું છે.",

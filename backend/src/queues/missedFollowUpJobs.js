@@ -1,4 +1,4 @@
-import { getQueue, QUEUE_NAMES } from './connection.js';
+import { QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import logger from '../libs/logger.js';
 import Consultation from '../models/Consultation.model.js';
 import Appointment from '../models/Appointment.model.js';
@@ -24,7 +24,7 @@ const FINISHED_CONSULTATION_STATUSES = [
 ];
 
 /** Repeat cadence — once daily, mirroring crmJobs.js's ensureDailyFollowUpScan. */
-const SCAN_REPEAT_PATTERN = '0 9 * * *'; // 09:00 daily
+const SCAN_REPEAT_PATTERN = '0 9 * * *'; // 09:00 daily, CLINIC-local (14:30 IST on a UTC host).
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -158,17 +158,11 @@ export async function scanForMissedFollowUps({ now = new Date(), crmExtensionsSe
 /** Repeatable daily scan, registered once — mirrors crmJobs.js's ensureDailyFollowUpScan. */
 export async function ensureMissedFollowUpScan() {
   try {
-    const queue = getQueue(QUEUE_NAMES.CRM);
-    const existing = await queue.getRepeatableJobs();
-    const already = existing.some((j) => j.name === MISSED_FOLLOW_UP_JOBS.SCAN);
-    if (already) return;
-    await queue.add(
+    await ensureRepeatableJob(
+      QUEUE_NAMES.CRM,
       MISSED_FOLLOW_UP_JOBS.SCAN,
       { type: 'scan' },
-      {
-        repeat: { pattern: SCAN_REPEAT_PATTERN },
-        jobId: 'missed-follow-up-scan',
-      }
+      { pattern: SCAN_REPEAT_PATTERN, jobId: 'missed-follow-up-scan' }
     );
     logger.info('Missed follow-up scan scheduled', { pattern: SCAN_REPEAT_PATTERN });
   } catch (err) {

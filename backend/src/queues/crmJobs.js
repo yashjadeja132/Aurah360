@@ -1,4 +1,4 @@
-import { getQueue, enqueueJob, QUEUE_NAMES } from './connection.js';
+import { enqueueJob, QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import logger from '../libs/logger.js';
 
 export const CRM_JOBS = Object.freeze({
@@ -22,20 +22,17 @@ export async function scheduleFollowUpReminder(leadId, when) {
   );
 }
 
-/** Repeatable daily scan for due/missed follow-ups */
+/**
+ * Repeatable daily scan for due/missed follow-ups. 08:00 CLINIC time — the scan compares
+ * `nextFollowUp` against "today", so it has to run at the start of the clinic's day, not 13:30 IST.
+ */
 export async function ensureDailyFollowUpScan() {
   try {
-    const queue = getQueue(QUEUE_NAMES.CRM);
-    const existing = await queue.getRepeatableJobs();
-    const already = existing.some((j) => j.name === CRM_JOBS.DAILY_FOLLOW_UP_SCAN);
-    if (already) return;
-    await queue.add(
+    await ensureRepeatableJob(
+      QUEUE_NAMES.CRM,
       CRM_JOBS.DAILY_FOLLOW_UP_SCAN,
       { type: 'daily' },
-      {
-        repeat: { pattern: '0 8 * * *' }, // 08:00 daily
-        jobId: 'crm-daily-follow-up-scan',
-      }
+      { pattern: '0 8 * * *', jobId: 'crm-daily-follow-up-scan' }
     );
     logger.info('CRM daily follow-up scan scheduled');
   } catch (err) {

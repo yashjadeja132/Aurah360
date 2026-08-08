@@ -7,10 +7,31 @@ import AuditService from './AuditService.js';
 import StorageFactory from '../storage/StorageFactory.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { TIMELINE_EVENT, SCAN_STATE, DOCUMENT_REVIEW_STATE, PATIENT_VISIBILITY } from '../enums/patient.js';
+import { assertContentMatchesClaim } from '../helpers/fileSignature.helper.js';
 
 /** Executable/script extensions are always quarantined — a real AV/ClamAV scan slots in behind this. */
 const BLOCKED_EXTENSIONS = /\.(exe|bat|cmd|sh|js|jar|msi|scr|com|vbs|ps1)$/i;
-const ALLOWED_MIME_PREFIXES = ['image/', 'application/pdf'];
+
+/**
+ * The document types this system will store, stated as CONTENT types rather than as the
+ * `startsWith('image/')` prefix match this used to be.
+ *
+ * The prefix match was the hole: `image/svg+xml` starts with `image/`, and an SVG is an XML
+ * document that can carry `<script>` — stored, then served inline from the API origin, that is
+ * stored XSS. Listing concrete types (all of which have a verifiable magic number) means a new
+ * `image/anything` type cannot be smuggled in by simply naming it.
+ */
+const ALLOWED_DOCUMENT_TYPES = Object.freeze([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/tiff',
+  'image/heic',
+  'image/avif',
+]);
 
 /**
  * Reusable document service — EMR/future modules can reuse upload/list/delete.
@@ -54,17 +75,35 @@ class PatientDocumentService {
     if (!file?.buffer) throw ApiError.badRequest('File is required');
     if (!clinicalDate) throw ApiError.badRequest('Clinical/report date is required (DOC-001)');
 
-    // DOC-002/IMG — malware/type screening (allowlisted MIME + blocked extensions before storage).
-    const isBlockedExt = BLOCKED_EXTENSIONS.test(file.originalname || '');
-    const isAllowedMime = ALLOWED_MIME_PREFIXES.some((p) => (file.mimetype || '').startsWith(p));
-    const scanState = isBlockedExt || !isAllowedMime ? SCAN_STATE.QUARANTINED : SCAN_STATE.CLEAN;
-    if (scanState === SCAN_STATE.QUARANTINED) {
+    /**
+     * DOC-002 — TYPE SCREENING. Read the honesty note in fileSignature.helper.js before treating
+     * this as antivirus: it is not one, and `SCAN_STATE.CLEAN` below records only that the file's
+     * type was verified, never that its contents were examined for malicious payload.
+     *
+     * Two gates, in order:
+     *   1. Blocked executable/script EXTENSION — kept because it is the cheapest possible refusal
+     *      and it also catches a file whose bytes happen to be unrecognised for another reason.
+     *   2. Byte-level type verification. Everything the previous screen trusted (`file.mimetype`
+     *      and the extension) is client-supplied and could say anything, so a renamed `.html`, an
+     *      SVG, or a PDF/HTML polyglot could be stored and later served back with the attacker's
+     *      own `Content-Type`. The leading bytes now have to agree with both claims.
+     *
+     * The DETECTED type is what gets persisted and therefore what `FileAccessController` later
+     * sends as `Content-Type`, so the served header can no longer be attacker-chosen.
+     */
+    if (BLOCKED_EXTENSIONS.test(file.originalname || '')) {
       throw ApiError.badRequest(
         'File type is not allowed. Only PDF and image formats are accepted.',
         null,
         'FILE_TYPE_REJECTED'
       );
     }
+    const detectedMimeType = assertContentMatchesClaim(file.buffer, {
+      mimeType: file.mimetype,
+      originalName: file.originalname,
+      allowedTypes: ALLOWED_DOCUMENT_TYPES,
+    });
+    const scanState = SCAN_STATE.CLEAN;
 
     const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
@@ -73,7 +112,7 @@ class PatientDocumentService {
     const saved = await this.storage.save(file.buffer, {
       folder: `patients/${patientId}`,
       filename: safeName,
-      mimeType: file.mimetype,
+      mimeType: detectedMimeType,
     });
 
     /**
@@ -107,7 +146,8 @@ class PatientDocumentService {
       branchId: branchId || null,
       originalName: file.originalname,
       storageKey: saved.key,
-      mimeType: saved.mimeType,
+      // Detected, not claimed — see the type-screening block above.
+      mimeType: saved.mimeType || detectedMimeType,
       size: saved.size,
       checksum,
       scanState,

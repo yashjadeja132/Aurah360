@@ -31,6 +31,30 @@ export const ACTIVE_APPOINTMENT_STATUSES = Object.freeze([
   APPOINTMENT_STATUS.AWAITING_BILLING,
 ]);
 
+/**
+ * Statuses that hold an EXCLUSIVE claim on a doctor-minute — the set the database-level unique
+ * index is filtered to (§2.4 "zero system-permitted double-booking", NFR-004).
+ *
+ * Deliberately NARROWER than ACTIVE_APPOINTMENT_STATUSES, because a database constraint that
+ * blocks more than the service layer blocks is an outage, not a fix:
+ *  - REQUESTED / PENDING_APPROVAL are excluded: APT-003 lets a patient PROPOSE a slot that is
+ *    already taken, precisely so the approver can reject it or counter-offer. A unique index
+ *    covering proposals would make that workflow impossible to even enter.
+ *  - CANCELLED / NO_SHOW / RESCHEDULED are excluded so a freed minute is rebookable.
+ *  - COMPLETED is excluded because AppointmentConflictService already treats a completed visit as
+ *    no longer occupying the slot; the index must not be stricter than the check it backs.
+ */
+export const SLOT_COMMITTED_STATUSES = Object.freeze([
+  APPOINTMENT_STATUS.SCHEDULED,
+  APPOINTMENT_STATUS.CONFIRMED,
+  APPOINTMENT_STATUS.CHECKED_IN,
+  APPOINTMENT_STATUS.WAITING,
+  APPOINTMENT_STATUS.IN_CONSULTATION,
+  APPOINTMENT_STATUS.AWAITING_TREATMENT,
+  APPOINTMENT_STATUS.TREATMENT,
+  APPOINTMENT_STATUS.AWAITING_BILLING,
+]);
+
 /** Statuses requiring approver action before a slot is committed (APT-003) */
 export const AWAITING_APPROVAL_STATUSES = Object.freeze([
   APPOINTMENT_STATUS.REQUESTED,
@@ -107,6 +131,7 @@ export default {
   APPOINTMENT_PRIORITY,
   CANCELLATION_REASON,
   ACTIVE_APPOINTMENT_STATUSES,
+  SLOT_COMMITTED_STATUSES,
   AWAITING_APPROVAL_STATUSES,
   APPROVAL_DECISION,
   WAITLIST_STATUS,

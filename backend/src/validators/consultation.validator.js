@@ -5,6 +5,7 @@ import {
   TEMPLATE_TYPE_LIST,
   FOLLOW_UP_UNIT_LIST,
 } from '../enums/consultation.js';
+import { PATIENT_VISIBILITY_LIST } from '../enums/patient.js';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
@@ -75,6 +76,15 @@ export const photoMetaSchema = z.object({
   consentVerified: z
     .preprocess((v) => v === true || v === 'true' || v === '1', z.boolean())
     .optional(),
+});
+
+/**
+ * IMG-005 — doctor-controlled release of a clinical photo to the patient portal.
+ * `visibility` MUST be listed here: `validate()` replaces the body with the parsed result, so a
+ * field absent from the schema never reaches the service.
+ */
+export const releasePhotoSchema = z.object({
+  visibility: z.enum(PATIENT_VISIBILITY_LIST),
 });
 
 export const templateCreateSchema = z.object({

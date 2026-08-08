@@ -33,7 +33,7 @@ import {
   EXPORT_FORMAT,
 } from '../enums/report.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
-import { dayBucket } from '../utils/date.util.js';
+import { dayBucket, clinicDayKey } from '../utils/date.util.js';
 import {
   parseReportFilters,
   applyCommonMatch,
@@ -44,6 +44,23 @@ import {
   pct,
   roundMoney,
 } from '../helpers/reportFilters.helper.js';
+
+/**
+ * `YYYY-MM-DD` cell for an exported (CSV/XLSX) date column, rendered on the CLINIC calendar.
+ *
+ * These columns were `d.toISOString().slice(0, 10)`, which is the UTC day. Two distinct ways that
+ * is wrong here:
+ *   - calendar-day fields (appointmentDate, scheduledDate, queueDate) are stored as clinic-local
+ *     start-of-day, i.e. `…T18:30:00.000Z` on the PREVIOUS UTC date, so EVERY row exported a day
+ *     early — an appointment on 5 Aug printed as 4 Aug;
+ *   - true instants (registrationDate, Lead.createdAt) print the previous day for anything
+ *     recorded after 18:30 IST, i.e. all evening activity.
+ * Either way the CSV disagreed with the same data shown on screen. Empty string for a missing date,
+ * matching the previous optional-chained behaviour.
+ */
+function dayCell(d) {
+  return clinicDayKey(d);
+}
 
 function personName(doc) {
   if (!doc) return '';
@@ -947,7 +964,7 @@ class ReportService {
       ],
       rows: rows.map((a) => ({
         appointmentNumber: a.appointmentNumber,
-        date: a.appointmentDate?.toISOString?.()?.slice(0, 10) || '',
+        date: dayCell(a.appointmentDate),
         patient: personName(a.patientId),
         doctor: dmap[a.doctorId?.toString()]?.name || '',
         status: a.status,
@@ -1066,7 +1083,7 @@ class ReportService {
         patient: personName(s.patientId),
         doctor: dmap[s.doctorId?.toString()]?.name || '',
         status: s.status,
-        scheduledDate: s.scheduledDate?.toISOString?.()?.slice(0, 10) || '',
+        scheduledDate: dayCell(s.scheduledDate),
         duration: s.duration || 0,
       })),
     };
@@ -1123,7 +1140,7 @@ class ReportService {
         fullName: personName(p),
         gender: p.gender,
         status: p.status,
-        registrationDate: p.registrationDate?.toISOString?.()?.slice(0, 10) || '',
+        registrationDate: dayCell(p.registrationDate),
       })),
     };
   }
@@ -1181,7 +1198,7 @@ class ReportService {
         source: l.source,
         status: l.status,
         priority: l.priority,
-        createdAt: l.createdAt?.toISOString?.()?.slice(0, 10) || '',
+        createdAt: dayCell(l.createdAt),
       })),
     };
   }
@@ -1253,7 +1270,7 @@ class ReportService {
         patient: personName(q.patientId),
         queueStatus: q.queueStatus,
         isWalkIn: q.isWalkIn ? 'Yes' : 'No',
-        queueDate: q.queueDate?.toISOString?.()?.slice(0, 10) || '',
+        queueDate: dayCell(q.queueDate),
       })),
     };
   }

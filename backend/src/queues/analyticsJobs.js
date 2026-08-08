@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, enqueueJob, QUEUE_NAMES } from './connection.js';
+import { getBullConnection, enqueueJob, QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 
@@ -28,33 +28,21 @@ export async function enqueueAnalyticsExport({ category, format, query, actorId 
   return { jobId: job.id, status: 'QUEUED', category, format };
 }
 
+/** 07:15 CLINIC time — digests must land before the clinic opens, not 07:15 UTC (12:45 IST). */
 export async function ensureAnalyticsScheduledJobs() {
   try {
-    const queue = getQueue(QUEUE_NAMES.ANALYTICS);
-    const existing = await queue.getRepeatableJobs();
-    const names = new Set(existing.map((j) => j.name));
-
-    if (!names.has(ANALYTICS_JOBS.DAILY_DIGEST)) {
-      await queue.add(
-        ANALYTICS_JOBS.DAILY_DIGEST,
-        { period: 'daily' },
-        { repeat: { pattern: '15 7 * * *' }, jobId: 'analytics-daily-digest' }
-      );
-    }
-    if (!names.has(ANALYTICS_JOBS.WEEKLY_DIGEST)) {
-      await queue.add(
-        ANALYTICS_JOBS.WEEKLY_DIGEST,
-        { period: 'weekly' },
-        { repeat: { pattern: '15 7 * * 1' }, jobId: 'analytics-weekly-digest' }
-      );
-    }
-    if (!names.has(ANALYTICS_JOBS.MONTHLY_DIGEST)) {
-      await queue.add(
-        ANALYTICS_JOBS.MONTHLY_DIGEST,
-        { period: 'monthly' },
-        { repeat: { pattern: '15 7 1 * *' }, jobId: 'analytics-monthly-digest' }
-      );
-    }
+    await ensureRepeatableJob(QUEUE_NAMES.ANALYTICS, ANALYTICS_JOBS.DAILY_DIGEST, { period: 'daily' }, {
+      pattern: '15 7 * * *',
+      jobId: 'analytics-daily-digest',
+    });
+    await ensureRepeatableJob(QUEUE_NAMES.ANALYTICS, ANALYTICS_JOBS.WEEKLY_DIGEST, { period: 'weekly' }, {
+      pattern: '15 7 * * 1',
+      jobId: 'analytics-weekly-digest',
+    });
+    await ensureRepeatableJob(QUEUE_NAMES.ANALYTICS, ANALYTICS_JOBS.MONTHLY_DIGEST, { period: 'monthly' }, {
+      pattern: '15 7 1 * *',
+      jobId: 'analytics-monthly-digest',
+    });
     logger.info('Analytics scheduled jobs ensured');
   } catch (err) {
     logger.warn('Analytics scheduled jobs not ensured', { message: err.message });

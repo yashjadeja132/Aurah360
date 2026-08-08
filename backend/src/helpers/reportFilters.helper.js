@@ -1,30 +1,55 @@
 import mongoose from 'mongoose';
 import { orgFinancialYearStartMonth } from '../config/orgRuntime.js';
+import {
+  clinicStartOfDay,
+  clinicEndOfDay,
+  clinicShiftDays,
+  clinicDayKey,
+  zonedParts,
+  zonedTimeToInstant,
+} from '../utils/date.util.js';
+
+/**
+ * TZ-001 — every bound below is a CLINIC-local boundary, not a host-local one.
+ *
+ * These used to be `setHours(0,0,0,0)` / `new Date(y, m, d)`, which resolve against the HOST
+ * process timezone. Developers run in IST so it looked right; production containers run in UTC, so
+ * "today" started at 05:30 IST and every daily/monthly report was shifted 5.5 hours — revenue
+ * booked between 00:00 and 05:30 IST landed in the previous day's report. The bounds also have to
+ * agree with `dayBucket()`, which groups in the clinic timezone: if the range is host-local and the
+ * grouping is clinic-local the join between them silently drops edge days.
+ */
 
 export function startOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+  return clinicStartOfDay(d);
 }
 
 export function endOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
+  return clinicEndOfDay(d);
 }
 
 export function startOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+  const p = zonedParts(d);
+  return zonedTimeToInstant({ year: p.year, month: p.month, day: 1 });
 }
 
 export function endOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+  const p = zonedParts(d);
+  // Day 0 of the next month = the last day of this one; let Date.UTC roll December over.
+  const last = new Date(Date.UTC(p.year, p.month, 0));
+  return zonedTimeToInstant({
+    year: last.getUTCFullYear(),
+    month: last.getUTCMonth() + 1,
+    day: last.getUTCDate(),
+    hour: 23,
+    minute: 59,
+    second: 59,
+    ms: 999,
+  });
 }
 
 export function daysAgo(n, from = new Date()) {
-  const x = startOfDay(from);
-  x.setDate(x.getDate() - n);
-  return x;
+  return clinicShiftDays(from, -n);
 }
 
 /**
@@ -34,18 +59,31 @@ export function daysAgo(n, from = new Date()) {
  * clinic files. `offsetYears` steps whole financial years backwards (0 = the FY containing
  * `on`, -1 = the previous one).
  *
- * Returns local-time bounds, matching startOfDay/endOfDay used everywhere else in this helper.
+ * Returns CLINIC-timezone bounds, matching startOfDay/endOfDay used everywhere else in this
+ * helper. The year/month of `on` must also be read in the clinic timezone: on a UTC host, 1 April
+ * 00:30 IST is still 31 March in UTC, so a host-local read put the first five and a half hours of
+ * the new financial year into the previous one.
  */
 export function financialYearRange(on = new Date(), offsetYears = 0) {
   const startMonth = orgFinancialYearStartMonth(); // 1..12
   const monthIndex = startMonth - 1; // Date months are 0-based
+  const onParts = zonedParts(on);
   // The FY labelled by its starting year: before the start month we are still in the FY that
   // began last calendar year.
-  const startYear = (on.getMonth() < monthIndex ? on.getFullYear() - 1 : on.getFullYear())
+  const startYear = (onParts.month - 1 < monthIndex ? onParts.year - 1 : onParts.year)
     + offsetYears;
-  const from = new Date(startYear, monthIndex, 1, 0, 0, 0, 0);
+  const from = zonedTimeToInstant({ year: startYear, month: startMonth, day: 1 });
   // Day 0 of the start month one year on = the last day of the financial year.
-  const to = new Date(startYear + 1, monthIndex, 0, 23, 59, 59, 999);
+  const lastDay = new Date(Date.UTC(startYear + 1, monthIndex, 0));
+  const to = zonedTimeToInstant({
+    year: lastDay.getUTCFullYear(),
+    month: lastDay.getUTCMonth() + 1,
+    day: lastDay.getUTCDate(),
+    hour: 23,
+    minute: 59,
+    second: 59,
+    ms: 999,
+  });
   return { from, to, startMonth, startYear, label: `FY${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}` };
 }
 
@@ -139,13 +177,14 @@ export function roundMoney(n) {
 }
 
 /**
- * `YYYY-MM-DD` for the LOCAL calendar day. Must NOT be `toISOString().slice(0, 10)`: the range
- * bounds come from `startOfDay`/`endOfDay`, which are local, so in IST (UTC+5:30) local midnight is
- * `…T18:30:00.000Z` on the PREVIOUS UTC date — a UTC slice labelled every bucket a day early.
+ * `YYYY-MM-DD` for the CLINIC calendar day. Must NOT be `toISOString().slice(0, 10)`: the range
+ * bounds come from `startOfDay`/`endOfDay`, which are clinic-local, so in IST (UTC+5:30) clinic
+ * midnight is `…T18:30:00.000Z` on the PREVIOUS UTC date — a UTC slice labelled every bucket a day
+ * early. Nor may it use `getFullYear()/getMonth()/getDate()`, which read the HOST timezone: those
+ * agreed with `dayBucket()` only on a developer's IST laptop, never on a UTC container.
  */
 export function localDayKey(d) {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return clinicDayKey(d);
 }
 
 /**
@@ -159,11 +198,14 @@ export function localDayKey(d) {
  */
 export function eachDayKey(from, to) {
   const keys = [];
-  const cur = startOfDay(from);
+  let cur = startOfDay(from);
   const end = startOfDay(to);
-  while (cur <= end) {
+  // Step by CLINIC calendar days, not `cur.setDate(...)` (host-local) and not +86400000ms — either
+  // can skip or repeat a key if the host or the clinic zone crosses a DST boundary mid-range.
+  let guard = 0;
+  while (cur.getTime() <= end.getTime() && guard++ < 3700) {
     keys.push(localDayKey(cur));
-    cur.setDate(cur.getDate() + 1);
+    cur = clinicShiftDays(cur, 1);
   }
   return keys;
 }

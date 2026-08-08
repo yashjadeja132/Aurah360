@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { getQueue, getBullConnection, enqueueJob, QUEUE_NAMES } from './connection.js';
+import { getBullConnection, enqueueJob, QUEUE_NAMES, ensureRepeatableJob } from './connection.js';
 import { attachDeadLetterHandler } from './dlq.js';
 import logger from '../libs/logger.js';
 
@@ -26,33 +26,25 @@ export async function enqueueReportGeneration(runId) {
   );
 }
 
+/**
+ * 07:00 CLINIC time. A scheduled report covers "yesterday", and yesterday is only a settled
+ * calendar day once the clinic's own midnight has passed — running at 07:00 UTC (12:30 IST) both
+ * mailed the report mid-morning and cut the day off at 05:30 IST.
+ */
 export async function ensureScheduledReportJobs() {
   try {
-    const queue = getQueue(QUEUE_NAMES.REPORTS);
-    const existing = await queue.getRepeatableJobs();
-    const names = new Set(existing.map((j) => j.name));
-
-    if (!names.has(REPORT_JOBS.DAILY_SCHEDULED)) {
-      await queue.add(
-        REPORT_JOBS.DAILY_SCHEDULED,
-        { frequency: 'DAILY' },
-        { repeat: { pattern: '0 7 * * *' }, jobId: 'reports-daily-scheduled' }
-      );
-    }
-    if (!names.has(REPORT_JOBS.WEEKLY_SCHEDULED)) {
-      await queue.add(
-        REPORT_JOBS.WEEKLY_SCHEDULED,
-        { frequency: 'WEEKLY' },
-        { repeat: { pattern: '0 7 * * 1' }, jobId: 'reports-weekly-scheduled' }
-      );
-    }
-    if (!names.has(REPORT_JOBS.MONTHLY_SCHEDULED)) {
-      await queue.add(
-        REPORT_JOBS.MONTHLY_SCHEDULED,
-        { frequency: 'MONTHLY' },
-        { repeat: { pattern: '0 7 1 * *' }, jobId: 'reports-monthly-scheduled' }
-      );
-    }
+    await ensureRepeatableJob(QUEUE_NAMES.REPORTS, REPORT_JOBS.DAILY_SCHEDULED, { frequency: 'DAILY' }, {
+      pattern: '0 7 * * *',
+      jobId: 'reports-daily-scheduled',
+    });
+    await ensureRepeatableJob(QUEUE_NAMES.REPORTS, REPORT_JOBS.WEEKLY_SCHEDULED, { frequency: 'WEEKLY' }, {
+      pattern: '0 7 * * 1',
+      jobId: 'reports-weekly-scheduled',
+    });
+    await ensureRepeatableJob(QUEUE_NAMES.REPORTS, REPORT_JOBS.MONTHLY_SCHEDULED, { frequency: 'MONTHLY' }, {
+      pattern: '0 7 1 * *',
+      jobId: 'reports-monthly-scheduled',
+    });
     logger.info('Report scheduled jobs ensured');
   } catch (err) {
     logger.warn('Report scheduled jobs not ensured', { message: err.message });
