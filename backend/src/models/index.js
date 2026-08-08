@@ -75,6 +75,20 @@ import AiFeatureFlag from './AiFeatureFlag.model.js';
 import BreakGlassAccess from './BreakGlassAccess.model.js';
 import PrivacyRequest from './PrivacyRequest.model.js';
 import OtpCode from './OtpCode.model.js';
+/**
+ * The loyalty models were absent from this barrel entirely. Anything that relies on the barrel to
+ * register schemas therefore never saw them — `db:migrate` (Model.syncIndexes over the registered
+ * models) reported "complete, 77 models" while silently skipping every loyalty collection, so the
+ * redemption idempotency index kept its old, broken `unique + sparse` definition on a cluster the
+ * migration claimed to have brought up to date.
+ */
+import LoyaltyProgramSettings from './LoyaltyProgramSettings.model.js';
+import LoyaltyEarningRule from './LoyaltyEarningRule.model.js';
+import LoyaltyLedgerEntry from './LoyaltyLedgerEntry.model.js';
+import LoyaltyBalanceCache from './LoyaltyBalanceCache.model.js';
+import LoyaltyTier from './LoyaltyTier.model.js';
+import LoyaltyCampaign from './LoyaltyCampaign.model.js';
+import LoyaltyAdjustmentRequest from './LoyaltyAdjustmentRequest.model.js';
 
 export {
   OtpCode,
@@ -154,4 +168,11 @@ export {
   ReportRun,
   PatientRefreshToken,
   PatientFeedback,
+  LoyaltyProgramSettings,
+  LoyaltyEarningRule,
+  LoyaltyLedgerEntry,
+  LoyaltyBalanceCache,
+  LoyaltyTier,
+  LoyaltyCampaign,
+  LoyaltyAdjustmentRequest,
 };
