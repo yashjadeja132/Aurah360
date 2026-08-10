@@ -102,23 +102,53 @@ These are deliberately **not** done, because they are judgement calls rather tha
 
 ---
 
+## Round 2 — also now fixed
+
+Tests: **38 files / 559 passing.**
+
+- **`recordPayment`** takes an idempotency key and runs in a transaction. It read `paidAmount` then
+  wrote `paidAmount + amount`, so a retry or double-click had two cashiers both pass the overpay
+  check while the invoice reflected only the last writer.
+- **A finalized invoice can be cancelled**, and uncollectable dues written off with a mandatory
+  reason. `INVOICE_STATUS.CANCELLED` was previously set by no code path, so a wrong finalized
+  invoice was permanently uncorrectable.
+- **Partial refunds accumulate.** A ₹100 refund on a ₹1000 payment previously stranded the
+  remaining ₹900 forever.
+- **Credit notes** now check expiry, status, that the invoice is finalized, and that the result does
+  not overpay it.
+- **Double-booking closed at the database** — a partial unique index over capacity-consuming
+  statuses only, so cancelled/no-show slots stay rebookable. An exact-key index cannot catch
+  *overlapping* start times, so that case is a per-doctor-day mutex in a transaction. Room/device
+  conflicts are now re-validated on update.
+- **Clinical photo release** exists at last (`patientVisibility` was born HIDDEN and nothing ever
+  moved it).
+- **Document clinical date and source** are captured in the UI; the server mandated them while the
+  form never asked.
+- **Audit search endpoint** — metadata redacted by *value shape*, not a key allowlist, since a key
+  allowlist leaks every key a future service invents. Full blob needs a second permission; both the
+  search and any reveal are audited.
+- **Upload magic-byte verification.** SVG is now refused — it passed the old `startsWith('image/')`
+  check, has no magic number and is scriptable XML. **Still not an antivirus scanner**, and
+  documented as such in the helper.
+- **Timezone.** Report bounds, financial-year ranges and five CSV columns were host-local; three of
+  those columns exported a day early on *every* row. BullMQ repeat jobs now carry `tz`, with
+  name+pattern+tz matching so a changed tz actually takes effect instead of silently keeping the old
+  schedule or registering a duplicate.
+
 ## Known gaps not yet addressed
 
-Ranked, with the full detail in [Aurah360_PRD_Gap_Audit.md](./Aurah360_PRD_Gap_Audit.md):
+- **No linting anywhere** — `lint` is an `echo` stub in both packages, and `npm audit` is
+  non-blocking in CI, so §18.5's release gate cannot fire.
+- **No real antivirus** on uploads (see above for what *is* protected).
+- Scheduled reports mark themselves COMPLETED and never deliver; no download endpoint or expiry.
+- Tabular reports cap at 2000 rows with no truncation indicator, so an exported financial total can
+  be silently incomplete.
+- Split payments collapse to a single `SPLIT` bucket in revenue-by-mode reporting.
+- No retention / erasure / de-identification (see Open items).
+- Tokens live in `localStorage` and CSRF is inert for the SPA; step-up re-auth is wired to one route.
+- Nurse intake, template versioning and copy-forward (PRD §8.1) remain unbuilt.
 
-- `recordPayment` has no idempotency key and no transaction — a retried or double-clicked payment
-  can be taken twice.
-- A finalized invoice can never be voided, cancelled or credited, and there is no write-off path, so
-  receivables can never be cleaned.
-- Partial refunds overwrite `refundedAmount` and force status `REFUNDED`, stranding the remainder.
-- Double-booking is not constrained at the database (the slot index is not unique).
-- Clinical photos can never be released to a patient — no code path sets `patientVisibility`.
-- Document `clinicalDate` / `source` are mandated server-side but never asked for in the UI, so
-  every uploaded report is filed under today's date.
-- Report date ranges use host timezone rather than IST, and BullMQ cron patterns pass no `tz`.
-- No audit-search endpoint exists, so audit evidence cannot be produced for an auditor.
-- "Malware scanning" is a MIME/extension allowlist, not a scanner.
-- No linting anywhere (`lint` is an `echo` stub) and `npm audit` is non-blocking in CI.
+Full detail in [Aurah360_PRD_Gap_Audit.md](./Aurah360_PRD_Gap_Audit.md).
 
 ---
 
