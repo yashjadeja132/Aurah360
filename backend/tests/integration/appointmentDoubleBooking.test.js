@@ -177,6 +177,34 @@ describe('APT-001 double-booking is impossible under concurrency', () => {
       expect(guard.partialFilterExpression.status.$in).not.toContain(APPOINTMENT_STATUS.NO_SHOW);
     });
 
+    it('lets exactly ONE of 8 CONCURRENT raw inserts for one doctor-minute commit', async () => {
+      // The service layer is deliberately bypassed here, so nothing but the index is under test:
+      // this is the assertion that fails the moment the unique index is removed, whatever the
+      // service does. Same slot, same day, same doctor, eight simultaneous writers.
+      const results = await Promise.allSettled(
+        [0, 1, 2, 3, 4, 5, 6, 7].map((n) =>
+          Appointment.collection.insertOne({
+            appointmentNumber: `APT-RACE-${n}`,
+            patientId: patients[n]._id,
+            doctorId: doctorA._id,
+            branchId: branch._id,
+            serviceId: serviceMaster._id,
+            appointmentDate: DATE,
+            startTime: '10:00',
+            endTime: '10:15',
+            status: APPOINTMENT_STATUS.SCHEDULED,
+            deletedAt: null,
+          })
+        )
+      );
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await Appointment.countDocuments({ deletedAt: null })).toBe(1);
+      for (const rejected of results.filter((r) => r.status === 'rejected')) {
+        expect(rejected.reason.code).toBe(11000);
+      }
+    });
+
     it('blocks a raw insert that never goes through the service layer', async () => {
       await service.create(booking());
 
@@ -238,11 +266,10 @@ describe('APT-001 double-booking is impossible under concurrency', () => {
         // A string code, not Mongo's numeric 11000, and a message a receptionist can act on.
         expect(typeof err.code).toBe('string');
         expect(err.message).not.toMatch(/E11000|duplicate key|index:/i);
+        // Names the slot that was lost, so the message is actionable.
         expect(err.message).toMatch(/10:00/);
+        expect(err.code).toBe('DOCTOR_SLOT_TAKEN');
       }
-      // At least one loser must be the index firing rather than the read check — otherwise this
-      // suite would still pass with the constraint removed and only the read in place.
-      expect(errors.some((e) => e.code === 'DOCTOR_SLOT_TAKEN')).toBe(true);
     });
 
     it('serializes PARTIAL overlaps too, which the equality index cannot catch', async () => {

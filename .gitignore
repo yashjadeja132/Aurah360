@@ -19,3 +19,8 @@ Thumbs.db
 .idea/
 *.swp
 .turbo/
+# Throwaway diagnostic scripts. These are written next to the source (rather than in a temp dir)
+# so their relative imports resolve, and they were being swept into commits by `git add -A`.
+*.tmp.mjs
+*-tmp.mjs
+probe-tmp.mjs

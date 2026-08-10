@@ -214,6 +214,28 @@ describe('TZ-001 day labels', () => {
   });
 });
 
+describe('TZ-001 date-only query filters name a clinic day', () => {
+  it('resolves ?dateFrom=YYYY-MM-DD against the clinic zone for a west-of-UTC clinic', () => {
+    resetOrgRuntime();
+    refreshOrgRuntime({ timezone: 'America/New_York' });
+    inEveryHostZone(() => {
+      const filters = parseReportFilters({ dateFrom: '2025-08-01', dateTo: '2025-08-01' });
+      // `new Date('2025-08-01')` is UTC midnight = 31 Jul 20:00 EDT, which would have started the
+      // range a day early. The picked day is 1 Aug local: 04:00Z → 03:59:59.999Z next day.
+      expect(filters.dateFrom.toISOString()).toBe('2025-08-01T04:00:00.000Z');
+      expect(filters.dateTo.toISOString()).toBe('2025-08-02T03:59:59.999Z');
+      expect(eachDayKey(filters.dateFrom, filters.dateTo)).toEqual(['2025-08-01']);
+    });
+  });
+
+  it('still accepts a full instant unchanged', () => {
+    inEveryHostZone(() => {
+      const filters = parseReportFilters({ dateFrom: '2025-08-05T19:00:00.000Z' });
+      expect(filters.dateFrom.toISOString()).toBe('2025-08-05T18:30:00.000Z');
+    });
+  });
+});
+
 describe('TZ-001 follows the configured organization timezone', () => {
   it('recomputes boundaries when the org timezone is not IST', () => {
     resetOrgRuntime();

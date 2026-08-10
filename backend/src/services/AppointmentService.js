@@ -134,7 +134,7 @@ class AppointmentService {
    *     retried by `withTransaction` and, on its retry, sees the winner's committed row and
    *     raises a clean conflict.
    *
-   * The validation reads inside `run` deliberately do NOT use the session. A non-session read sees
+   * The validation reads inside the callback deliberately do NOT use the session. A non-session read sees
    * the latest committed state, which is fresher than the transaction's snapshot — and because the
    * lock is claimed first, no competing booking for these resources can be in flight, so "latest
    * committed" is the whole truth. Threading a session through the availability, conflict and
@@ -370,9 +370,16 @@ class AppointmentService {
             write: (session) => this.appointmentRepository.createInSession(doc, session),
           });
     } catch (err) {
-      // APT-008 — a concurrent duplicate request on the same idempotency key loses the
-      // insert race; return the winner's record instead of erroring the retry.
-      if (err.code === 11000 && payload.idempotencyKey) {
+      /**
+       * APT-008 — a concurrent duplicate request on the same idempotency key loses the race;
+       * return the winner's record instead of erroring the retry.
+       *
+       * Checked for ANY failure, not just 11000: now that the slot claim is serialized, the loser
+       * of a same-key race is usually stopped by the slot conflict check BEFORE it ever reaches
+       * the insert that would raise the duplicate-key error. Idempotency means "this key already
+       * produced a booking, here it is" regardless of which guard fired.
+       */
+      if (payload.idempotencyKey) {
         const winner = await this.appointmentRepository.findByIdempotencyKey(payload.idempotencyKey);
         if (winner) return this.#map(await this.appointmentRepository.findByIdPopulated(winner._id));
       }

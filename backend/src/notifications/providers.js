@@ -293,16 +293,27 @@ export class BulkSendersSmsProvider extends SmsProvider {
       routeid: this.routeId,
       type: 'text',
       contacts: to,
+      senderid: this.senderId,
       msg: message,
       template_id: this.templateId,
       pe_id: this.peId,
     });
 
     const res = await fetch(`${this.baseUrl}?${params.toString()}`, { method: 'GET' });
-    const text = await res.text();
+    const text = (await res.text()).trim();
     if (!res.ok) throw new Error(`BulkSenders SMS error: ${text || res.statusText}`);
 
-    return { success: true, provider: 'bulksenders-sms', messageId: null, to, raw: text };
+    // The gateway answers HTTP 200 for failures too, signalling them in the body
+    // (e.g. "ERR: Invalid Template"), so the status code alone is not a success check.
+    if (!/^SMS-SHOOT-ID\//i.test(text)) {
+      throw new Error(`BulkSenders SMS error: ${text || 'unrecognised gateway response'}`);
+    }
+
+    // Success body is "SMS-SHOOT-ID/<id>" — the id is what the delivery webhook
+    // reports back, so it has to land in messageId for the delivery log to correlate.
+    const messageId = text.slice(text.indexOf('/') + 1) || null;
+
+    return { success: true, provider: 'bulksenders-sms', messageId, to, raw: text };
   }
 }
 

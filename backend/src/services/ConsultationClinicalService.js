@@ -304,8 +304,7 @@ class ConsultationClinicalService {
     if (!photo) throw ApiError.notFound('Photo not found');
 
     const isRelease = visibility !== PATIENT_VISIBILITY.HIDDEN;
-    const skipGate = true;
-    if (isRelease && !skipGate) {
+    if (isRelease) {
       if (photo.consentVerified !== true) {
         throw ApiError.forbidden(
           'Photography consent is not verified for this image, so it cannot be released to the patient.',

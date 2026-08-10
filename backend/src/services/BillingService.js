@@ -1765,6 +1765,9 @@ class BillingService {
     const claimed = await this.paymentRepository.claimRefund(paymentId, {
       expectedRefundedAmount: fromPaise(alreadyRefundedPaise),
       updates: {
+        // ACCUMULATE. Overwriting with just this refund's amount is the original defect: after a
+        // ₹100 refund on a ₹1000 payment the record claimed ₹100 returned in total, so the next
+        // refund was sized against ₹900 again and the payment could be drained repeatedly.
         refundedAmount: fromPaise(totalRefundedPaise),
         refundedAt: new Date(),
         refundNotes: payload.notes || null,

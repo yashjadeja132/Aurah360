@@ -32,7 +32,14 @@ class AppointmentConflictService {
       excludeId,
     });
     if (doctorOverlaps.length) {
-      throw ApiError.conflict('Doctor already has an appointment in this time range');
+      // NFR-004 — name the range and the appointment that owns it: this is what a receptionist
+      // sees when they lose a race for a slot, and "conflict" alone tells them nothing to do.
+      const clash = doctorOverlaps[0];
+      throw ApiError.conflict(
+        `Doctor already has an appointment in this time range (${startTime}–${endTime}) — `
+          + `${clash.appointmentNumber} holds ${clash.startTime}–${clash.endTime}. Choose another time.`,
+        'DOCTOR_SLOT_TAKEN'
+      );
     }
 
     const patientOverlaps = await this.appointmentRepository.findOverlapping({
@@ -43,7 +50,12 @@ class AppointmentConflictService {
       excludeId,
     });
     if (patientOverlaps.length) {
-      throw ApiError.conflict('Patient already has an appointment in this time range');
+      const clash = patientOverlaps[0];
+      throw ApiError.conflict(
+        `Patient already has an appointment in this time range (${startTime}–${endTime}) — `
+          + `${clash.appointmentNumber} holds ${clash.startTime}–${clash.endTime}.`,
+        'PATIENT_SLOT_TAKEN'
+      );
     }
 
     if (doctorId && branchId) {

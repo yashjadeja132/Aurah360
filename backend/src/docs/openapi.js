@@ -171,6 +171,38 @@ export const openApiSpec = {
         responses: { 200: { description: 'Dashboard' } },
       },
     },
+    '/audit/entries': {
+      get: {
+        tags: ['Audit'],
+        security: [{ bearerAuth: [] }],
+        summary: 'Search the audit trail (NFR-018)',
+        description:
+          'Requires `audit.view`. Results are pinned to the caller\'s branch unless they hold a '
+          + 'global scope (OWNER/ADMIN), sorted newest first, and paginated. Entry `metadata` is '
+          + 'REDACTED by default because it can contain PHI; `includeMetadata=true` additionally '
+          + 'requires `audit.metadata_view` and is refused (403) without it. Every search is '
+          + 'itself recorded as an AUDIT_LOG_SEARCHED entry.',
+        parameters: [
+          { name: 'action', in: 'query', schema: { type: 'string' } },
+          { name: 'actorId', in: 'query', schema: { type: 'string' } },
+          { name: 'targetUserId', in: 'query', schema: { type: 'string' } },
+          { name: 'patientId', in: 'query', schema: { type: 'string' } },
+          { name: 'resourceType', in: 'query', schema: { type: 'string' } },
+          { name: 'resourceId', in: 'query', schema: { type: 'string' } },
+          { name: 'correlationId', in: 'query', schema: { type: 'string' } },
+          { name: 'branchId', in: 'query', schema: { type: 'string' } },
+          { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          { name: 'includeMetadata', in: 'query', schema: { type: 'boolean' } },
+        ],
+        responses: {
+          200: { description: 'Audit entries + pagination meta' },
+          403: { description: 'No audit.view, out-of-scope branch, or metadata not permitted' },
+        },
+      },
+    },
     '/patient/login': {
       post: {
         tags: ['Patient Portal'],

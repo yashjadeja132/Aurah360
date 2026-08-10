@@ -93,6 +93,28 @@ export function financialYearRange(on = new Date(), offsetYears = 0) {
  */
 export const REPORT_PERIOD = Object.freeze({ FY: 'FY', FY_PREV: 'FY_PREV' });
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A report filter's `dateFrom`/`dateTo` as an instant.
+ *
+ * A bare `YYYY-MM-DD` names a CLINIC calendar day — it is what the user picked in a date picker.
+ * `new Date('2025-08-01')` parses it as UTC midnight, which for any clinic west of Greenwich is the
+ * PREVIOUS clinic day, so `?dateFrom=2025-08-01` would have started the range on 31 July. Resolve
+ * date-only strings against the clinic zone; anything with a time component is a real instant and
+ * is left to the platform parser.
+ */
+function parseQueryDate(value) {
+  if (!value) return null;
+  const raw = String(value);
+  if (DATE_ONLY.test(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    return zonedTimeToInstant({ year, month, day });
+  }
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Normalize query filters used across dashboards/reports. */
 export function parseReportFilters(query = {}) {
   const filters = {
@@ -121,14 +143,10 @@ export function parseReportFilters(query = {}) {
   if (query.paymentStatus) filters.paymentStatus = String(query.paymentStatus);
   if (query.leadSource) filters.leadSource = String(query.leadSource);
 
-  if (query.dateFrom) {
-    const d = new Date(query.dateFrom);
-    if (!Number.isNaN(d.getTime())) filters.dateFrom = startOfDay(d);
-  }
-  if (query.dateTo) {
-    const d = new Date(query.dateTo);
-    if (!Number.isNaN(d.getTime())) filters.dateTo = endOfDay(d);
-  }
+  const fromDate = parseQueryDate(query.dateFrom);
+  if (fromDate) filters.dateFrom = startOfDay(fromDate);
+  const toDate = parseQueryDate(query.dateTo);
+  if (toDate) filters.dateTo = endOfDay(toDate);
 
   // A named financial-year period fills in whichever bound the caller did not pin explicitly.
   const period = query.period ? String(query.period).toUpperCase() : null;
