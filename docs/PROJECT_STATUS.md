@@ -135,11 +135,37 @@ Tests: **38 files / 559 passing.**
   name+pattern+tz matching so a changed tz actually takes effect instead of silently keeping the old
   schedule or registering a duplicate.
 
+## Linting and CI gates — now in place
+
+`lint` was an `echo` stub in both packages. Both are now at **0 errors**, running blocking in CI
+alongside `i18n:check` and a now-blocking `npm audit` (armed because the baseline is genuinely clean
+at `--audit-level=high` — 2 moderate on the backend, 0 on the frontend).
+
+**Correctness rules only, no formatting.** A first run that emits thousands of style complaints gets
+added to CI, drowns the real findings, and is disabled within a week. `no-undef` in particular
+catches the failure `node --check` cannot see, because it only parses: a deleted function still
+referenced by an export.
+
+Two things to know if you touch the config:
+
+- The frontend needs `eslint-plugin-react`'s `jsx-uses-vars`. Without it the base `no-unused-vars`
+  rule does not know `<Button />` uses the `Button` binding, and reports every component import as
+  dead — 1707 false errors on the first run.
+- `require-atomic-updates` is **off** on purpose. Every occurrence was a property assigned on a
+  per-request `req` object after an `await`; `req` is not shared between requests, so there is no
+  race, and the rule cannot know that.
+- `react-hooks/set-state-in-effect` and the other React-Compiler rules are **warnings**, not errors.
+  They fire on the ordinary "sync local form state from a prop" pattern, which is a refactoring
+  opinion rather than a defect. `rules-of-hooks` stays an error — a conditionally-called hook crashes.
+
+Lint immediately found a real bug: the loyalty-liability report accepted branch filters and applied
+none, handing a branch manager the whole clinic's figure.
+
 ## Known gaps not yet addressed
 
-- **No linting anywhere** — `lint` is an `echo` stub in both packages, and `npm audit` is
-  non-blocking in CI, so §18.5's release gate cannot fire.
 - **No real antivirus** on uploads (see above for what *is* protected).
+- **No formatter.** Prettier was deliberately left out of the lint landing; add it as a separate
+  mechanical change so it cannot mask correctness findings.
 - Scheduled reports mark themselves COMPLETED and never deliver; no download endpoint or expiry.
 - Tabular reports cap at 2000 rows with no truncation indicator, so an exported financial total can
   be silently incomplete.
