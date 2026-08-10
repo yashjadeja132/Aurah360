@@ -3,7 +3,6 @@ import PatientRepository from '../repositories/PatientRepository.js';
 import AuditService from './AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { CONSENT_PURPOSE, CONSENT_STATE } from '../enums/privacy.js';
-import ApiError from '../libs/ApiError.js';
 
 /** Legacy boolean flags on Patient.consent that some purposes still mirror for UI compat. */
 const LEGACY_FLAG_BY_PURPOSE = {

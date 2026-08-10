@@ -267,7 +267,7 @@ class LoyaltyLedgerService {
     return entry.toSafeObject();
   }
 
-  async #applyCreditToCache(patientId, points, entry, settings) {
+  async #applyCreditToCache(patientId, points, entry, _settings) {
     const cache = await this.#getOrCreateCache(patientId);
     cache.currentBalance += points;
     cache.redeemableBalance += points;

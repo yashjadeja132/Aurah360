@@ -10,7 +10,7 @@ import { ROLES } from '../constants/roles.js';
 import { smokeDbUri } from './smokeDbUri.js';
 
 function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
 async function main() {

@@ -99,7 +99,7 @@ async function main() {
   console.log('✓ Invoice CRUD update');
 
   // Package from plan if available
-  const plans = await req('GET', '/treatment-plans/doctor?doctorId=' + (created.json.data.invoice.doctorId || '000000000000000000000000'), { token });
+  await req('GET', '/treatment-plans/doctor?doctorId=' + (created.json.data.invoice.doctorId || '000000000000000000000000'), { token });
   // Prefer list any plan via seed - try from-plan with known plans from treatment plan list via consultations
   const planList = await req('GET', `/billing?limit=1`, { token });
   assert(planList.status === 200, 'List failed');

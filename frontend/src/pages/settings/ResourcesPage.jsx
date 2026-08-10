@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { DoorOpen, Cpu, BadgeCheck, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -208,7 +207,7 @@ function DevicesTab({ branches, branchId }) {
   );
 }
 
-function SkillsTab({ branches, branchId }) {
+function SkillsTab({ branchId }) {
   const { t } = useTranslation();
   const { data: skills = [], isLoading } = useSkills(branchId ? { branchId } : {});
   const { data: staffData } = useStaffList({ limit: 100 });

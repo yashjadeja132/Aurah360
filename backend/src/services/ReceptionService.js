@@ -175,7 +175,7 @@ class ReceptionService {
     };
   }
 
-  async undoCheckIn(appointmentId, actorId, req = null) {
+  async undoCheckIn(appointmentId, actorId, _req = null) {
     const appointment = await this.appointmentRepository.findByIdNotDeleted(appointmentId);
     if (!appointment) throw ApiError.notFound('Appointment not found');
     if (appointment.status !== APPOINTMENT_STATUS.CHECKED_IN) {

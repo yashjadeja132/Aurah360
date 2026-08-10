@@ -284,7 +284,7 @@ class QueueService {
     return this.#emit(SOCKET_EVENTS.QUEUE_UPDATED, entry);
   }
 
-  async startConsultation(id, actorId, req = null) {
+  async startConsultation(id, actorId, _req = null) {
     const entry = await this.queueRepository.findByIdNotDeleted(id);
     if (!entry) throw ApiError.notFound('Queue entry not found');
     await this.queueRepository.updateById(id, {
@@ -317,7 +317,7 @@ class QueueService {
     return this.#emit(SOCKET_EVENTS.QUEUE_COMPLETED, entry);
   }
 
-  async cancel(id, actorId, req = null) {
+  async cancel(id, actorId, _req = null) {
     const entry = await this.queueRepository.findByIdNotDeleted(id);
     if (!entry) throw ApiError.notFound('Queue entry not found');
     await this.queueRepository.updateById(id, {
@@ -328,7 +328,7 @@ class QueueService {
     return this.#emit(SOCKET_EVENTS.QUEUE_UPDATED, entry);
   }
 
-  async transfer(id, { doctorId, reason, branchId }, actorId, req = null) {
+  async transfer(id, { doctorId, reason, branchId }, actorId, _req = null) {
     if (!reason?.trim()) throw ApiError.badRequest('Transfer reason is required');
     if (branchId) {
       throw ApiError.badRequest('Branch transfer is not implemented yet (placeholder)');

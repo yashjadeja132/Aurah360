@@ -264,7 +264,7 @@ class TreatmentPlanService {
     return Promise.all(rows.map((r) => this.getById(r._id.toString())));
   }
 
-  async update(id, payload, actorId, req = null) {
+  async update(id, payload, actorId, _req = null) {
     const plan = await this.planRepository.findByIdNotDeleted(id);
     if (!plan) throw ApiError.notFound('Treatment plan not found');
     this.#assertEditable(plan);
@@ -641,7 +641,7 @@ class TreatmentPlanService {
   }
 
   async getPrintData(id, actorId, req = null) {
-    const plan = await this.getById(id);
+    await this.getById(id);
     const current = await this.planRepository.findByIdNotDeleted(id);
     await this.planRepository.updateById(id, {
       printedAt: new Date(),

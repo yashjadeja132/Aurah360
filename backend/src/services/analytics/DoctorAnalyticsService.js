@@ -2,7 +2,6 @@ import Appointment from '../../models/Appointment.model.js';
 import Consultation from '../../models/Consultation.model.js';
 import TreatmentSession from '../../models/TreatmentSession.model.js';
 import Payment from '../../models/Payment.model.js';
-import Invoice from '../../models/Invoice.model.js';
 import PatientFeedback from '../../models/PatientFeedback.model.js';
 import Doctor from '../../models/Doctor.model.js';
 import {

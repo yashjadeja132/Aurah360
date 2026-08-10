@@ -205,7 +205,7 @@ export function QueueBoard({ entries = [], doctors = [] }) {
   );
 }
 
-export function DoctorQueueCard({ doctorId, doctorName, entries = [], summary }) {
+export function DoctorQueueCard({ doctorId, doctorName, entries = [] }) {
   const { t } = useTranslation();
   const callNext = useCallNext();
   const doctorEntries = entries.filter((e) => e.doctorId === doctorId);

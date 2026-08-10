@@ -145,7 +145,7 @@ describe('Cancel reason (A13) & queue reorder reason (A2) enforcement', () => {
     for (let i = 0; i < 60; i += 1) {
       const doc = await Appointment.findById(id);
       if (doc.status === APPOINTMENT_STATUS.CANCELLED) return doc;
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => { setTimeout(r, 250); });
     }
     throw new Error('appointment was never cancelled');
   };

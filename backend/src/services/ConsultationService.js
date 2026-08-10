@@ -423,7 +423,7 @@ class ConsultationService {
     return this.getWorkspace(id);
   }
 
-  async unlock(id, actorId, actorRole, req = null) {
+  async unlock(id, actorId, actorRole, _req = null) {
     if (actorRole !== ROLES.OWNER) {
       throw ApiError.forbidden('Only Owner can unlock a consultation');
     }

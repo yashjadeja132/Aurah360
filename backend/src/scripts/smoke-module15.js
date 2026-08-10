@@ -2,7 +2,6 @@
  * Module 15 smoke — queue, delayed jobs, template render, in-app, event subscriptions, retry.
  */
 import '../config/env.js';
-import { eventBus } from '../events/eventBus.js';
 
 const BASE = process.env.API_BASE || 'http://localhost:5000/api/v1';
 
@@ -78,7 +77,7 @@ async function main() {
   console.log('✓ Delayed jobs', delayedN?.notificationId);
 
   // Process pending (mock send)
-  await new Promise((r) => setTimeout(r, 500));
+  await new Promise((r) => { setTimeout(r, 500); });
   const processed = await req('POST', '/notifications/process-pending?limit=30', { token });
   assert(processed.status === 200, `Process failed ${JSON.stringify(processed.json)}`);
   console.log('✓ Dispatch/process', processed.json.data?.processed);

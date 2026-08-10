@@ -171,7 +171,9 @@ class ConsultationClinicalService {
 
   async uploadPhoto(
     consultationId,
-    { file, photoType, title, bodyRegion, consentVerified, laterality, angle, lighting, captureDevice, pairedPhotoId },
+    // `consentVerified` is deliberately NOT destructured: the caller may send it, and it is ignored
+    // on purpose (see below) — binding it would only invite someone to start trusting it.
+    { file, photoType, title, bodyRegion, laterality, angle, lighting, captureDevice, pairedPhotoId },
     actorId,
     req = null
   ) {
@@ -194,7 +196,7 @@ class ConsultationClinicalService {
 
     const saved = await this.storage.save(file.buffer, {
       folder: `consultations/${consultationId}/photos`,
-      filename: `${Date.now()}-${file.originalname.replace(/[^\w.\-]+/g, '_')}`,
+      filename: `${Date.now()}-${file.originalname.replace(/[^\w.-]+/g, '_')}`,
       mimeType: file.mimetype,
     });
 

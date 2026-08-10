@@ -4,7 +4,6 @@ import {
   NotificationTemplateRepository,
 } from '../repositories/NotificationRepository.js';
 import AuditService from './AuditService.js';
-import { eventBus } from '../events/eventBus.js';
 import { emitQueueEvent, SOCKET_EVENTS } from '../socket/index.js';
 import { enqueueNotificationDispatch } from '../queues/notificationJobs.js';
 import { createDefaultProviders } from '../notifications/providers.js';
@@ -14,7 +13,6 @@ import {
   EVENT_TEMPLATE_MAP,
   NOTIFICATION_CHANNEL,
   NOTIFICATION_STATUS,
-  TEMPLATE_CODE,
 } from '../enums/notification.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import {

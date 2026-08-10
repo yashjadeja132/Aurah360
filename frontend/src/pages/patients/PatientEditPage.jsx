@@ -9,7 +9,7 @@ import { usePatientDetail, usePatientMutations } from '@/modules/patients/hooks/
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useMasterActive } from '@/modules/masters/hooks/useMasters';
-import { APP_ROUTES, patientDetailPath } from '@/constants/routes';
+import { patientDetailPath } from '@/constants/routes';
 
 export default function PatientEditPage() {
   const { t } = useTranslation();

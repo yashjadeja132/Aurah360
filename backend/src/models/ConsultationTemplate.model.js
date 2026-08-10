@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { TEMPLATE_TYPE, TEMPLATE_TYPE_LIST } from '../enums/consultation.js';
+import { TEMPLATE_TYPE_LIST } from '../enums/consultation.js';
 
 const consultationTemplateSchema = new mongoose.Schema(
   {

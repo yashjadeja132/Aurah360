@@ -150,7 +150,9 @@ class InventoryService {
     transferToItemId = null,
     actorId,
     allowCreateBatch = false,
-    req = null,
+    // Accepted for call-site symmetry with every other mutating method; this one records its audit
+    // via the caller, so it has no use for the request itself.
+    _req = null,
   }) {
     if (!quantityDelta || quantityDelta === 0) {
       throw ApiError.badRequest('quantity must be non-zero');
@@ -948,7 +950,7 @@ class InventoryService {
     return transfer.toSafeObject();
   }
 
-  async rejectTransfer(id, { reason }, actorId, req = null, { branchId = null } = {}) {
+  async rejectTransfer(id, { reason }, actorId, _req = null, { branchId = null } = {}) {
     const transfer = await StockTransferRequest.findById(id);
     if (!transfer) throw ApiError.notFound('Transfer request not found');
     this.#assertTransferInScope(transfer, branchId);

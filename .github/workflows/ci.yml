@@ -39,13 +39,18 @@ jobs:
           EOF
       - name: Import app module
         run: node -e "import('./src/config/env.js').then(() => console.log('env ok'))"
+      # Blocking. The config is correctness-only (no formatting rules), so a failure here is a
+      # defect — an undefined identifier, a dead binding, unreachable code — not a style preference.
+      # `no-undef` in particular catches the failure mode `node --check` cannot see, because it only
+      # parses: a deleted function still referenced by an export.
+      - name: Lint (ESLint)
+        run: npm run lint
       - name: Unit + integration tests (Vitest)
         run: npm test
-      # NOTE: intentionally non-blocking (continue-on-error) for now — there may be
-      # pre-existing findings that shouldn't suddenly break every PR. Tighten this
-      # (remove continue-on-error) once the dependency baseline is clean.
+      # Now BLOCKING. The previous note said to tighten this "once the dependency baseline is
+      # clean" — at --audit-level=high it is (the remaining findings are moderate), so the gate is
+      # armed rather than left as a TODO that never comes due.
       - name: npm audit (backend)
-        continue-on-error: true
         run: npm audit --audit-level=high
 
   frontend:
@@ -62,14 +67,18 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Blocking. rules-of-hooks is an error here because a conditionally-called hook is a crash;
+      # the React-Compiler-oriented rules (set-state-in-effect, purity, refs, use-memo) are warnings
+      # on purpose — see the reasoning in frontend/eslint.config.js.
+      - name: Lint (ESLint)
+        run: npm run lint
+      - name: i18n key check
+        run: npm run i18n:check
       - run: npm run build
         env:
           VITE_API_BASE_URL: /api/v1
-      # NOTE: intentionally non-blocking (continue-on-error) for now — there may be
-      # pre-existing findings that shouldn't suddenly break every PR. Tighten this
-      # (remove continue-on-error) once the dependency baseline is clean.
+      # Now BLOCKING — frontend reports 0 vulnerabilities at this threshold.
       - name: npm audit (frontend)
-        continue-on-error: true
         run: npm audit --audit-level=high
 
   docker:

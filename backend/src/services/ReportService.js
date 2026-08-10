@@ -644,7 +644,8 @@ class ReportService {
         ({ columns, rows } = await this.#reportQueue(filters));
         break;
       case REPORT_TYPE.LOYALTY_LIABILITY:
-        ({ columns, rows } = await this.#reportLoyaltyLiability(filters));
+        // Takes no filters on purpose — a point balance has no branch. See the method's docblock.
+        ({ columns, rows } = await this.#reportLoyaltyLiability());
         break;
       case REPORT_TYPE.LOYALTY_ISSUANCE:
         ({ columns, rows } = await this.#reportLoyaltyIssuance(filters));
@@ -819,7 +820,7 @@ class ReportService {
     return this.#mapSchedule(doc.toObject());
   }
 
-  async updateScheduled(id, body, { actorId } = {}) {
+  async updateScheduled(id, body, { actorId: _actorId } = {}) {
     const doc = await ScheduledReport.findOne({ _id: id, deletedAt: null });
     if (!doc) throw ApiError.notFound('Scheduled report not found');
     if (body.name != null) doc.name = body.name;
@@ -1282,7 +1283,16 @@ class ReportService {
   /** Outstanding point-value owed to patients right now — sum of every patient's cached
    *  currentBalance, valued at the program's current conversion rate (₹1 = redemptionPointsPerRupee
    *  points), one row per patient with a non-zero balance. */
-  async #reportLoyaltyLiability(filters) {
+  /**
+   * ORGANISATION-WIDE BY NATURE — it does not take filters, and used to accept them and silently
+   * ignore them, so a branch manager asking for their branch's liability was handed the whole
+   * clinic's figure and had no way to tell.
+   *
+   * A point balance has no branch: `LoyaltyBalanceCache` is one row per patient by design, because
+   * points are earned at one site and redeemable at another. Apportioning a balance to a branch
+   * would be an invented number, so the report reports the truth and labels its scope instead.
+   */
+  async #reportLoyaltyLiability() {
     const match = { currentBalance: { $gt: 0 } };
     const rows = await LoyaltyBalanceCache.find(match)
       .populate('patientId', 'firstName middleName lastName mrn')

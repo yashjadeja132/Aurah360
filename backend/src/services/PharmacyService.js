@@ -158,7 +158,7 @@ class PharmacyService {
     };
   }
 
-  async startDispense(payload, actorId, req = null, { branchId = null } = {}) {
+  async startDispense(payload, actorId, _req = null, { branchId = null } = {}) {
     const rx = await this.prescriptionRepo.findByIdNotDeleted(payload.prescriptionId);
     if (!rx) throw ApiError.notFound('Prescription not found');
     // The dispense will be booked against `payload.branchId || rx.branchId`; a branch-scoped
@@ -339,7 +339,7 @@ class PharmacyService {
     return this.getDispense(id);
   }
 
-  async cancelDispense(id, actorId, req = null, { branchId = null } = {}) {
+  async cancelDispense(id, actorId, _req = null, { branchId = null } = {}) {
     const dispense = await this.dispenseRepo.findById(id);
     if (!dispense || dispense.deletedAt) throw ApiError.notFound('Dispense not found');
     this.#assertDispenseInScope(dispense, branchId);

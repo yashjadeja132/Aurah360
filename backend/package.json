@@ -22,7 +22,8 @@
     "smoke:discount-approval": "node src/scripts/smoke-discount-approval.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "echo \"Add ESLint when ready\""
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -53,6 +54,8 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "eslint": "^9.39.5",
+    "globals": "^17.9.0",
     "supertest": "^7.2.2",
     "vitest": "^4.1.10"
   }

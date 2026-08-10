@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import {
   NOTIFICATION_CHANNEL_LIST,
-  TEMPLATE_CODE_LIST,
 } from '../enums/notification.js';
 
 const notificationTemplateSchema = new mongoose.Schema(

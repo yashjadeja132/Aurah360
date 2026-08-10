@@ -173,7 +173,7 @@ class BranchService {
   }
 
   async activate(id, actorId, req = null, { branchId = null } = {}) {
-    const branch = await this.#findScoped(id, branchId);
+    await this.#findScoped(id, branchId);
 
     const updated = await this.branchRepository.updateById(id, {
       isActive: true,
@@ -191,7 +191,7 @@ class BranchService {
   }
 
   async deactivate(id, actorId, req = null, { branchId = null } = {}) {
-    const branch = await this.#findScoped(id, branchId);
+    await this.#findScoped(id, branchId);
 
     const updated = await this.branchRepository.updateById(id, {
       isActive: false,

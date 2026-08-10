@@ -164,7 +164,7 @@ class DoctorService {
   }
 
   async update(id, payload, actorId, req = null, { branchId = null } = {}) {
-    const doctor = await this.#findScoped(id, branchId);
+    await this.#findScoped(id, branchId);
 
     // A scoped editor cannot hand a doctor privileges at branches they do not manage.
     if (branchId && payload.branches
@@ -255,7 +255,7 @@ class DoctorService {
   }
 
   async activate(id, actorId, req = null, { branchId = null } = {}) {
-    const doctor = await this.#findScoped(id, branchId);
+    await this.#findScoped(id, branchId);
 
     await this.doctorRepository.updateById(id, {
       isActive: true,
@@ -273,7 +273,7 @@ class DoctorService {
   }
 
   async deactivate(id, actorId, req = null, { branchId = null } = {}) {
-    const doctor = await this.#findScoped(id, branchId);
+    await this.#findScoped(id, branchId);
 
     await this.doctorRepository.updateById(id, {
       isActive: false,

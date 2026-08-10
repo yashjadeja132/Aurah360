@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { objectId } from './common.js';
-import { ROOM_TYPE_LIST, DEVICE_CAPABILITY_LIST, RESOURCE_STATUS_LIST, SKILL_STATUS_LIST } from '../enums/resource.js';
+import { ROOM_TYPE_LIST, DEVICE_CAPABILITY_LIST, RESOURCE_STATUS_LIST } from '../enums/resource.js';
 
 export const createRoomSchema = z.object({
   branchId: objectId,

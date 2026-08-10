@@ -182,7 +182,7 @@ describe('Loyalty money integrity (real DB)', () => {
       const deadline = Date.now() + timeoutMs;
       let total = await earnedTotal();
       while (total !== expected && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => { setTimeout(resolve, 100); });
         total = await earnedTotal();
       }
       return total;

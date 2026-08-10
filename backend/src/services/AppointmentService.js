@@ -635,7 +635,7 @@ class AppointmentService {
     return rows.map((r) => r.toSafeObject());
   }
 
-  async offerWaitlistSlot(id, slot, actorId) {
+  async offerWaitlistSlot(id, slot, _actorId) {
     const entry = await AppointmentWaitlist.findById(id);
     if (!entry) throw ApiError.notFound('Waitlist entry not found');
     entry.status = WAITLIST_STATUS.OFFERED;

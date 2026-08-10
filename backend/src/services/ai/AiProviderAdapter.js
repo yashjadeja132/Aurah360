@@ -62,7 +62,7 @@ class AiProviderAdapter {
   async complete({ systemPrompt, userPrompt, schemaHint, jsonSchema = null }) {
     const provider = this.effectiveProvider();
     if (provider === 'ANTHROPIC') {
-      return this.#anthropicComplete({ systemPrompt, userPrompt, jsonSchema, schemaHint });
+      return this.#anthropicComplete({ systemPrompt, userPrompt, jsonSchema });
     }
     if (provider === 'OPENAI_COMPATIBLE') {
       return this.#openAiComplete({ systemPrompt, userPrompt, schemaHint });
@@ -93,7 +93,7 @@ class AiProviderAdapter {
   }
 
   // --- Anthropic (Claude Messages API) ---------------------------------------
-  async #anthropicComplete({ systemPrompt, userPrompt, jsonSchema, schemaHint }) {
+  async #anthropicComplete({ systemPrompt, userPrompt, jsonSchema }) {
     if (!this.#client) {
       this.#client = new Anthropic({ apiKey: this.anthropicApiKey, timeout: this.timeoutMs });
     }

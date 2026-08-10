@@ -1702,7 +1702,7 @@ class TreatmentSessionService {
     const type = String(photoType).toUpperCase() === 'AFTER' ? 'AFTER' : 'BEFORE';
     const saved = await this.storage.save(file.buffer, {
       folder: `treatment-sessions/${id}/photos`,
-      filename: `${Date.now()}-${file.originalname.replace(/[^\w.\-]+/g, '_')}`,
+      filename: `${Date.now()}-${file.originalname.replace(/[^\w.-]+/g, '_')}`,
       mimeType: file.mimetype,
     });
 

@@ -4,31 +4,31 @@
  */
 
 export class EmailProvider {
-  async send({ to, subject, body, meta }) {
+  async send(/* { to, subject, body, meta } */) {
     throw new Error('EmailProvider.send must be implemented');
   }
 }
 
 export class SmsProvider {
-  async send({ to, body, meta }) {
+  async send(/* { to, body, meta } */) {
     throw new Error('SmsProvider.send must be implemented');
   }
 }
 
 export class WhatsAppProvider {
-  async send({ to, body, meta }) {
+  async send(/* { to, body, meta } */) {
     throw new Error('WhatsAppProvider.send must be implemented');
   }
 }
 
 export class PushProvider {
-  async send({ to, title, body, meta }) {
+  async send(/* { to, title, body, meta } */) {
     throw new Error('PushProvider.send must be implemented');
   }
 }
 
 export class VoiceProvider {
-  async call({ to, script, meta }) {
+  async call(/* { to, script, meta } */) {
     throw new Error('VoiceProvider.call must be implemented');
   }
 }

@@ -32,11 +32,6 @@ class UserService {
     }
   }
 
-  async #attachRole(userData) {
-    const roleDoc = await this.roleService.getByCode(userData.role);
-    return { ...userData, roleId: roleDoc._id };
-  }
-
   /**
    * SEC-030 — the branch filter is part of the LOOKUP, so a staff member at another branch is
    * indistinguishable from one that does not exist: 404, never 403. Note the field is
@@ -285,7 +280,7 @@ class UserService {
   async adminResetPassword(userId, newPassword, actorId, req = null, { branchId = null } = {}) {
     // The sharpest of the staff writes: unscoped, a branch manager could reset the password of
     // any account in the organisation and then sign in as them.
-    const user = await this.#findScopedStaff(userId, branchId);
+    await this.#findScopedStaff(userId, branchId);
 
     const passwordHash = await hashPassword(newPassword);
     await this.userRepository.updateById(userId, {

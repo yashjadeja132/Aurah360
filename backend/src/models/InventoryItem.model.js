@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { INVENTORY_ITEM_TYPE, INVENTORY_ITEM_TYPE_LIST } from '../enums/inventory.js';
+import { INVENTORY_ITEM_TYPE_LIST } from '../enums/inventory.js';
 import { ENTITY_STATUS } from '../constants/index.js';
 
 const batchSchema = new mongoose.Schema(

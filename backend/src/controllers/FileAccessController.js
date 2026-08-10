@@ -1,7 +1,6 @@
 import path from 'path';
 import ApiError from '../libs/ApiError.js';
 import asyncHandler from '../libs/asyncHandler.js';
-import config from '../config/index.js';
 import StorageFactory from '../storage/StorageFactory.js';
 import { generateFileToken, verifyFileToken } from '../storage/LocalStorage.js';
 import PatientDocumentRepository from '../repositories/PatientDocumentRepository.js';
@@ -115,7 +114,7 @@ class FileAccessController {
 
   /** `Content-Disposition` for the byte response — attachment only on an authorized download. */
   #dispositionHeader(isDownload, originalName) {
-    const safeName = String(originalName || 'file').replace(/[^\w.\-]+/g, '_');
+    const safeName = String(originalName || 'file').replace(/[^\w.-]+/g, '_');
     return `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`;
   }
 

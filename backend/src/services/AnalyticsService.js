@@ -1,5 +1,4 @@
 import Appointment from '../models/Appointment.model.js';
-import Invoice from '../models/Invoice.model.js';
 import Payment from '../models/Payment.model.js';
 import Patient from '../models/Patient.model.js';
 import Lead from '../models/Lead.model.js';
@@ -15,7 +14,6 @@ import {
   pct,
   roundMoney,
   eachDayKey,
-  startOfDay,
 } from '../helpers/reportFilters.helper.js';
 // Shared with the analytics/report services — see the helper's own docs for why the clinic
 // timezone is mandatory here. Previously a local copy lived in this file.

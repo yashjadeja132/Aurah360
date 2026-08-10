@@ -213,7 +213,7 @@ class PurchaseService {
   }
 
   // —— Goods Receipt ——
-  async createGrn(payload, actorId, req = null, { branchId = null } = {}) {
+  async createGrn(payload, actorId, _req = null, { branchId = null } = {}) {
     if (!payload.supplierId) throw ApiError.badRequest('supplierId is required');
     if (!payload.branchId) throw ApiError.badRequest('branchId is required');
     this.#assertWriteBranch(payload.branchId, branchId);

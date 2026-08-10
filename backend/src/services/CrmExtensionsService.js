@@ -162,7 +162,7 @@ class CrmExtensionsService {
     return feedback.toSafeObject();
   }
 
-  async resolveFeedback(id, { resolutionNotes }, actorId) {
+  async resolveFeedback(id, { resolutionNotes }, _actorId) {
     const feedback = await PatientFeedback.findById(id);
     if (!feedback) throw ApiError.notFound('Feedback not found');
     feedback.status = 'REVIEWED';
