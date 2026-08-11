@@ -69,7 +69,7 @@ const navGroups = [
       { to: APP_ROUTES.RECEPTION_DESK, labelKey: 'nav.receptionDesk', label: 'Front desk', icon: ClipboardList, roles: [...ADMINS, ROLES.RECEPTIONIST], permissions: [PERMISSIONS.RECEPTION_VIEW, PERMISSIONS.RECEPTION_ALL] },
       { to: APP_ROUTES.PATIENTS, labelKey: 'nav.patients', label: 'Patients', icon: HeartPulse, roles: [...ADMINS, ROLES.RECEPTIONIST, ROLES.DOCTOR], permissions: [PERMISSIONS.PATIENTS_VIEW, PERMISSIONS.PATIENTS_ALL] },
       { to: APP_ROUTES.APPOINTMENTS, labelKey: 'nav.appointments', label: 'Appointments', icon: CalendarCheck2, roles: [...ADMINS, ROLES.RECEPTIONIST], permissions: [PERMISSIONS.APPOINTMENTS_VIEW, PERMISSIONS.APPOINTMENTS_ALL] },
-      { to: APP_ROUTES.APPOINTMENT_CALENDAR, labelKey: nav.calendar, label: Calendar, icon: CalendarClock, roles: [...ADMINS, ROLES.RECEPTIONIST, ROLES.DOCTOR], permissions: [PERMISSIONS.APPOINTMENTS_VIEW, PERMISSIONS.APPOINTMENTS_ALL] },
+      { to: APP_ROUTES.APPOINTMENT_CALENDAR, labelKey: 'nav.calendar', label: 'Calendar', icon: CalendarClock, roles: [...ADMINS, ROLES.RECEPTIONIST, ROLES.DOCTOR], permissions: [PERMISSIONS.APPOINTMENTS_VIEW, PERMISSIONS.APPOINTMENTS_ALL] },
       { to: APP_ROUTES.BILLING, labelKey: 'nav.billing', label: 'Billing', icon: IndianRupee, roles: [...ADMINS, ROLES.RECEPTIONIST], permissions: [PERMISSIONS.BILLING_VIEW, PERMISSIONS.BILLING_ALL] },
     ],
   },
@@ -100,7 +100,7 @@ const navGroups = [
       { to: APP_ROUTES.STAFF, labelKey: 'nav.staff', label: 'Staff', icon: Users, roles: ADMINS, permissions: [PERMISSIONS.USERS_VIEW, PERMISSIONS.USERS_ALL] },
       { to: APP_ROUTES.DOCTORS, labelKey: 'nav.doctors', label: 'Doctors', icon: Stethoscope, roles: ADMINS, permissions: [PERMISSIONS.DOCTORS_VIEW, PERMISSIONS.DOCTORS_ALL] },
       { to: APP_ROUTES.REPORTS, labelKey: 'nav.reports', label: 'Reports', icon: BarChart3, roles: ADMINS, permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ALL, PERMISSIONS.DASHBOARD_VIEW] },
-      { to: APP_ROUTES.LOYALTY, labelKey: nav.loyalty, label: Loyalty, icon: Gift, roles: ADMINS, permissions: [PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_SETTINGS_MANAGE, PERMISSIONS.LOYALTY_RULES_VIEW, PERMISSIONS.LOYALTY_REPORTS_VIEW, PERMISSIONS.LOYALTY_ALL] },
+      { to: APP_ROUTES.LOYALTY, labelKey: 'nav.loyalty', label: 'Loyalty', icon: Gift, roles: ADMINS, permissions: [PERMISSIONS.LOYALTY_SETTINGS_VIEW, PERMISSIONS.LOYALTY_SETTINGS_MANAGE, PERMISSIONS.LOYALTY_RULES_VIEW, PERMISSIONS.LOYALTY_REPORTS_VIEW, PERMISSIONS.LOYALTY_ALL] },
       {
         to: APP_ROUTES.SETTINGS,
         labelKey: 'nav.settings',

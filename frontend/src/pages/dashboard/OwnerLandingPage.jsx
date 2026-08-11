@@ -7,6 +7,7 @@ import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useOwnerBranchComparison } from '@/modules/reports/hooks/useOwnerLanding';
 import { OwnerBranchScorecard } from '@/modules/reports/components/OwnerBranchScorecard';
 import { OwnerApprovalsPanel } from '@/modules/reports/components/OwnerApprovalsPanel';
+import { TodayOverview } from '@/modules/reports/components/TodayOverview';
 
 /**
  * Owner landing — the "90-second morning glance" the flow doc asks for.
@@ -43,6 +44,8 @@ export default function OwnerLandingPage() {
           </Button>
         }
       />
+
+      <TodayOverview />
 
       <OwnerBranchScorecard
         rows={comparison.rows}
