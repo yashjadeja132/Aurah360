@@ -26,6 +26,7 @@ import {
 import { ClinicalPhotosPanel } from '@/modules/consultations/components/ClinicalPhotosPanel';
 import { LabOrdersPanel } from '@/modules/consultations/components/LabOrdersPanel';
 import { AiCopilotPanel } from '@/modules/consultations/components/AiCopilotPanel';
+import { AiPrecheckPanel } from '@/modules/consultations/components/AiPrecheckPanel';
 import { PrescriptionDraftPanel } from '@/modules/consultations/components/PrescriptionDraftPanel';
 import {
   PatientSummarySidebar,
@@ -180,6 +181,7 @@ function Panel({ active, children }) {
 export default function ConsultationWorkspacePage() {
   const { t } = useTranslation();
   const { id } = useParams();
+  const [aiView, setAiView] = useState('precheck');
   const { user } = useAuth();
   const { data, isLoading, isError, error } = useConsultationWorkspace(id);
   const consultation = data?.consultation;
@@ -340,14 +342,34 @@ export default function ConsultationWorkspacePage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* PRIMARY half — the copilot is always on screen, never behind a tab. */}
-        <div className="min-h-0 lg:h-[calc(100vh-13rem)]">
-          <AiCopilotPanel
-            consultationId={id}
-            patientId={patientId}
-            readOnly={readOnly}
-            chiefComplaint={consultation?.chiefComplaint}
-            onInsert={onAiInsert}
-          />
+        <div className="flex min-h-0 flex-col gap-2 lg:h-[calc(100vh-13rem)]">
+          {aiView === 'copilot' ? (
+            <>
+              <div>
+                <Button size="sm" variant="outline" onClick={() => setAiView('precheck')}>
+                  ← Back to AI pre-check
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1">
+                <AiCopilotPanel
+                  consultationId={id}
+                  patientId={patientId}
+                  readOnly={readOnly}
+                  chiefComplaint={consultation?.chiefComplaint}
+                  onInsert={onAiInsert}
+                />
+              </div>
+            </>
+          ) : (
+            <AiPrecheckPanel
+              consultationId={id}
+              aiPrecheck={data?.aiPrecheck}
+              billing={data?.billing || []}
+              photosCount={(data?.photos || []).length}
+              readOnly={readOnly}
+              onOpenCopilot={() => setAiView('copilot')}
+            />
+          )}
         </div>
 
         {/* One tabbed section: patient context first, then the clinical record. */}

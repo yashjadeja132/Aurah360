@@ -385,6 +385,11 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.STOCK_ADJUST,
     PERMISSIONS.BILLING_VIEW,
     PERMISSIONS.BILLING_CREATE,
+    // Simplified flow: the medical counter collects the medicine payment itself
+    // (cash/online), so it can finalize its invoice and record the payment.
+    PERMISSIONS.BILLING_FINALIZE,
+    PERMISSIONS.BILLING_PAYMENT,
+    PERMISSIONS.BILLING_PRINT,
     PERMISSIONS.PRESCRIPTION_VIEW,
     PERMISSIONS.PRESCRIPTION_PRINT,
     PERMISSIONS.MASTERS_VIEW,

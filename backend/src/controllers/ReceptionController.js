@@ -28,6 +28,14 @@ class ReceptionController {
     this.receptionService = new ReceptionService();
   }
 
+  completeIntake = asyncHandler(async (req, res) => {
+    const data = await this.receptionService.completeIntake(
+      req.params.appointmentId,
+      req.auth.userId
+    );
+    return ApiResponse.success(res, { message: 'Intake completed — AI precheck queued', data });
+  });
+
   dashboard = asyncHandler(async (req, res) => {
     const data = await this.receptionService.receptionDashboard({
       // Pins a non-global role to its own branch; refuses another branch with 403.

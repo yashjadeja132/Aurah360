@@ -14,15 +14,19 @@ import {
 } from '@/components/ui/dialog';
 import { QUEUE_PRIORITY_OPTIONS } from '../constants';
 import { useCheckIn } from '../hooks/useReception';
+import { IntakeStep } from './IntakeStep';
 
 export function CheckInDialog({ open, onOpenChange, appointment }) {
   const { t } = useTranslation();
   const checkIn = useCheckIn();
   const [priority, setPriority] = useState('NORMAL');
   const [receptionNotes, setReceptionNotes] = useState('');
+  const [symptoms, setSymptoms] = useState('');
   const [mobile, setMobile] = useState(appointment?.patient?.mobile || '');
   const [privacyPolicy, setPrivacyPolicy] = useState(false);
   const [treatmentConsent, setTreatmentConsent] = useState(false);
+  // Step 2 (intake: photos + fee + send to doctor) opens right after a successful check-in.
+  const [intake, setIntake] = useState(null);
 
   if (!appointment) return null;
 
@@ -30,11 +34,12 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await checkIn.mutateAsync({
+    const res = await checkIn.mutateAsync({
       appointmentId: appointment.id,
       payload: {
         priority,
         receptionNotes: receptionNotes || null,
+        symptoms: symptoms || null,
         updateContact: mobile ? { mobile } : undefined,
         consent: {
           privacyPolicy: privacyPolicy || undefined,
@@ -42,8 +47,36 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
         },
       },
     });
+    const d = res?.data || {};
+    setIntake({
+      appointmentId: appointment.id,
+      consultationId: d.consultationId || null,
+      patientId: d.queueEntry?.patientId || appointment.patientId || appointment.patient?.id,
+      branchId: d.queueEntry?.branchId || appointment.branchId,
+      tokenNumber: d.queueEntry?.tokenNumber || null,
+    });
+  };
+
+  const close = () => {
+    setIntake(null);
     onOpenChange(false);
   };
+
+  if (intake) {
+    return (
+      <Dialog open={open} onOpenChange={close}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('reception.intake.title', 'Intake — photos & fee')}</DialogTitle>
+            <DialogDescription>
+              {appointment.patient?.fullName} · {appointment.appointmentNumber}
+            </DialogDescription>
+          </DialogHeader>
+          <IntakeStep intake={intake} onDone={close} />
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -77,6 +110,20 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
           <div className="space-y-2">
             <Label>{t('reception.checkIn.updateMobile')}</Label>
             <Input value={mobile} onChange={(e) => setMobile(e.target.value)} />
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t('reception.checkIn.symptoms', 'Symptoms / complaint')}</Label>
+            <textarea
+              value={symptoms}
+              onChange={(e) => setSymptoms(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder={t(
+                'reception.checkIn.symptomsPlaceholder',
+                'e.g. itching and red patches on the forearm for 2 weeks, mild burning'
+              )}
+            />
           </div>
 
           <div className="space-y-2">

@@ -24,6 +24,7 @@ export const QUEUE_NAMES = Object.freeze({
   CRM: 'crm',
   APPOINTMENT_REMINDERS: 'appointment-reminders',
   LOYALTY: 'loyalty',
+  AI: 'ai',
 });
 
 const queues = new Map();

@@ -18,6 +18,7 @@ import { useMasterActive } from '@/modules/masters/hooks/useMasters';
 import { appointmentsApi } from '@/modules/appointments/api/appointmentsApi';
 import { QUEUE_PRIORITY_OPTIONS } from '../constants';
 import { useWalkIn } from '../hooks/useReception';
+import { IntakeStep } from './IntakeStep';
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
 // and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
 import { todayKey } from '@/utils/date';
@@ -37,6 +38,8 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
   const [slots, setSlots] = useState([]);
   const [queuePriority, setQueuePriority] = useState('NORMAL');
   const [patientSearch, setPatientSearch] = useState('');
+  const [symptoms, setSymptoms] = useState('');
+  const [intake, setIntake] = useState(null);
 
   const patients = patientsData?.items || [];
   const doctors = doctorsData?.items || [];
@@ -75,7 +78,7 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await walkIn.mutateAsync({
+    const res = await walkIn.mutateAsync({
       patientId,
       doctorId,
       branchId,
@@ -84,10 +87,39 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
       startTime,
       endTime,
       queuePriority,
+      symptoms: symptoms || null,
       receptionNotes: 'Walk-in',
     });
+    const d = res?.data || {};
+    setIntake({
+      appointmentId: d.appointment?.id,
+      consultationId: d.consultationId || null,
+      patientId,
+      branchId,
+      tokenNumber: d.queueEntry?.tokenNumber || null,
+    });
+  };
+
+  const close = () => {
+    setIntake(null);
     onOpenChange(false);
   };
+
+  if (intake) {
+    return (
+      <Dialog open={open} onOpenChange={close}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t('reception.intake.title', 'Intake — photos & fee')}</DialogTitle>
+            <DialogDescription>
+              {t('reception.intake.description', 'Attach photos of the affected area and collect the fee, then send the file to the doctor.')}
+            </DialogDescription>
+          </DialogHeader>
+          <IntakeStep intake={intake} onDone={close} />
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -162,6 +194,20 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
             {!slots.length && doctorId && (
               <p className="text-xs text-amber-700">{t('reception.walkIn.noOpenSlots')}</p>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t('reception.checkIn.symptoms', 'Symptoms / complaint')}</Label>
+            <textarea
+              value={symptoms}
+              onChange={(e) => setSymptoms(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder={t(
+                'reception.checkIn.symptomsPlaceholder',
+                'e.g. itching and red patches on the forearm for 2 weeks, mild burning'
+              )}
+            />
           </div>
 
           <div className="space-y-2">

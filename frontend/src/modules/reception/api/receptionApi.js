@@ -4,6 +4,9 @@ export const receptionApi = {
   dashboard(params) {
     return api.get('/reception/dashboard', { params }).then((res) => res.data);
   },
+  completeIntake(appointmentId) {
+    return api.post(`/reception/intake/${appointmentId}/complete`).then((res) => res.data);
+  },
   todaysAppointments(params) {
     return api.get('/reception/appointments/today', { params }).then((res) => res.data);
   },

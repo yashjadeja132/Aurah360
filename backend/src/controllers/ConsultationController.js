@@ -28,6 +28,12 @@ class ConsultationController {
     return ApiResponse.created(res, { message: 'Consultation started', data });
   });
 
+  runPrecheck = asyncHandler(async (req, res) => {
+    const { enqueueClinicalPrecheck } = await import('../queues/aiJobs.js');
+    await enqueueClinicalPrecheck(req.params.id, req.auth.userId);
+    return ApiResponse.success(res, { message: 'AI precheck queued', data: { queued: true } });
+  });
+
   getWorkspace = asyncHandler(async (req, res) => {
     const data = await this.consultationService.getWorkspace(req.params.id);
     return ApiResponse.success(res, { data });

@@ -4,6 +4,10 @@ import PatientRepository from '../repositories/PatientRepository.js';
 import QueueRepository from '../repositories/QueueRepository.js';
 import AppointmentService from './AppointmentService.js';
 import QueueService from './QueueService.js';
+import ConsultationService from './ConsultationService.js';
+import ConsultationRepository from '../repositories/ConsultationRepository.js';
+import { enqueueClinicalPrecheck } from '../queues/aiJobs.js';
+import logger from '../libs/logger.js';
 import AuditService from './AuditService.js';
 import { APPOINTMENT_STATUS, APPOINTMENT_SOURCE } from '../enums/appointment.js';
 import { QUEUE_PRIORITY, QUEUE_STATUS } from '../enums/queue.js';
@@ -23,6 +27,19 @@ class ReceptionService {
     this.appointmentService = new AppointmentService();
     this.queueService = new QueueService();
     this.auditService = new AuditService();
+    this.consultationService = new ConsultationService();
+    this.consultationRepository = new ConsultationRepository();
+  }
+
+  /**
+   * Reception finished intake (symptoms + photos + fee) — queue the AI precheck so the
+   * analysis is waiting in the doctor's panel before the file is opened.
+   */
+  async completeIntake(appointmentId, actorId) {
+    const consultation = await this.consultationRepository.findLatestByAppointment(appointmentId);
+    if (!consultation) throw ApiError.notFound('No consultation file exists for this appointment yet');
+    await enqueueClinicalPrecheck(consultation._id, actorId);
+    return { consultationId: consultation._id.toString(), queued: true };
   }
 
   #resolvePriority(patient, requested) {
@@ -174,10 +191,28 @@ class ReceptionService {
       branchId: queueEntry.branchId?.toString?.() || queueEntry.branchId,
     });
 
+    // Open the patient's file at check-in (idempotent per appointment) so reception can
+    // attach intake photos and the AI precheck can run while the patient is still waiting.
+    let consultationId = null;
+    try {
+      const workspace = await this.consultationService.start(
+        { appointmentId, chiefComplaint: payload.symptoms || null },
+        actorId,
+        req
+      );
+      consultationId = workspace?.consultation?.id || null;
+    } catch (err) {
+      logger.warn('Check-in could not open the consultation file', {
+        appointmentId,
+        message: err.message,
+      });
+    }
+
     const updatedAppointment = await this.appointmentService.getById(appointmentId);
     return {
       appointment: updatedAppointment,
       queueEntry,
+      consultationId,
       warnings: {
         isLate,
         noAppointment: false,
@@ -249,6 +284,7 @@ class ReceptionService {
       {
         priority: payload.queuePriority,
         receptionNotes: payload.receptionNotes || 'Walk-in',
+        symptoms: payload.symptoms || null,
         updateContact: payload.updateContact,
         consent: payload.consent,
       },

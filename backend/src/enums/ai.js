@@ -11,6 +11,8 @@ export const AI_USE_CASE = Object.freeze({
   ANALYTICS_NARRATIVE: 'ANALYTICS_NARRATIVE',
   /** Full structured clinical suggestion set for the doctor (AI-001, §9.2). */
   CLINICAL_COPILOT: 'CLINICAL_COPILOT',
+  /** Pre-consultation intake analysis (reception symptoms + optional photos), ready before the doctor opens the file. */
+  CLINICAL_PRECHECK: 'CLINICAL_PRECHECK',
 });
 
 export const AI_USE_CASE_LIST = Object.freeze(Object.values(AI_USE_CASE));

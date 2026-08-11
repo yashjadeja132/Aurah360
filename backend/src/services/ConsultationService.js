@@ -13,6 +13,9 @@ import {
   ClinicalPhotoRepository,
 } from '../repositories/ConsultationClinicalRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
+import Invoice from '../models/Invoice.model.js';
+import Payment from '../models/Payment.model.js';
+import ClinicalPrecheckService from './ai/ClinicalPrecheckService.js';
 import AppointmentLifecycleService from './AppointmentLifecycleService.js';
 import AuditService from './AuditService.js';
 import ConsultationAiInterface from './ai/ConsultationAiInterface.js';
@@ -244,7 +247,34 @@ class ConsultationService {
     const examination = await this.examinationRepository.findByConsultation(id);
     const photos = await this.photoRepository.findByConsultation(id);
 
+    // Simplified-flow additions: the AI precheck prepared at intake, and the visit's
+    // billing state (reception collects the fee before the file reaches the doctor).
+    const [aiPrecheck, invoices] = await Promise.all([
+      new ClinicalPrecheckService().latestForConsultation(id).catch(() => null),
+      Invoice.find({ consultationId: id }).sort({ createdAt: -1 }).limit(5).exec().catch(() => []),
+    ]);
+    let billingPayments = [];
+    if (invoices.length) {
+      billingPayments = await Payment.find({ invoiceId: { $in: invoices.map((i) => i._id) } })
+        .exec()
+        .catch(() => []);
+    }
+    const billing = invoices.map((inv) => ({
+      id: inv._id.toString(),
+      invoiceNumber: inv.invoiceNumber,
+      status: inv.status,
+      paymentStatus: inv.paymentStatus,
+      total: inv.total,
+      paidAmount: inv.paidAmount,
+      balanceAmount: inv.balanceAmount,
+      payments: billingPayments
+        .filter((p) => p.invoiceId?.toString() === inv._id.toString())
+        .map((p) => ({ method: p.method, amount: p.amount })),
+    }));
+
     return {
+      aiPrecheck,
+      billing,
       consultation,
       soap: soap ? soap.toSafeObject() : null,
       vitals: vitals ? vitals.toSafeObject() : null,

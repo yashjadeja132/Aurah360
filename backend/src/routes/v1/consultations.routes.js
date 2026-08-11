@@ -112,6 +112,13 @@ router.post(
   controller.aiSuggestQuestions
 );
 
+router.post(
+  '/:id/precheck',
+  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
+  validate({ params: consultationIdParamSchema }),
+  controller.runPrecheck
+);
+
 router.get(
   '/:id/workspace',
   requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
@@ -235,7 +242,9 @@ router.get(
 
 router.post(
   '/:id/photos',
-  requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
+  // PATIENTS_DOCUMENTS lets RECEPTION attach intake photos to the file it just opened
+  // at check-in, without granting it any clinical-note (SOAP/vitals) write access.
+  requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL, PERMISSIONS.PATIENTS_DOCUMENTS),
   uploadPatientDocument,
   validate({ params: consultationIdParamSchema, body: photoMetaSchema }),
   controller.uploadPhoto

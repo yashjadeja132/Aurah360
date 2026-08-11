@@ -13,6 +13,138 @@ import {
   useInventoryItems,
 } from '@/modules/inventory/hooks/useInventory';
 import { APP_ROUTES } from '@/constants/routes';
+import { toast } from 'sonner';
+import { billingApi } from '@/modules/billing/api/billingApi';
+
+const PAY_METHODS = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI', label: 'Online (UPI)' },
+  { value: 'CARD', label: 'Card' },
+];
+
+/**
+ * Simplified flow: the medical counter collects the medicine payment right after
+ * dispensing — cash or online — as one MEDICINE-item invoice (create → finalize → pay).
+ */
+function CollectPaymentCard({ dispense }) {
+  const dispensedLines = (dispense.items || []).filter((it) => (it.quantityDispensed || 0) > 0);
+  const [prices, setPrices] = useState(() => dispensedLines.map(() => ''));
+  const [method, setMethod] = useState('CASH');
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [paid, setPaid] = useState(null);
+
+  if (!dispensedLines.length) return null;
+
+  const total = dispensedLines.reduce(
+    (sum, it, i) => sum + (Number(prices[i]) || 0) * (it.quantityDispensed || 0),
+    0
+  );
+
+  const collect = async () => {
+    const patientId = dispense.patientId || dispense.patient?.id;
+    const branchId = dispense.branchId;
+    if (!patientId || !branchId) {
+      toast.error('Missing patient/branch on this dispense');
+      return;
+    }
+    if (total <= 0) {
+      toast.error('Enter the medicine prices first');
+      return;
+    }
+    if (method !== 'CASH' && !reference.trim()) {
+      toast.error('Reference / transaction ID is required for online payment');
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await billingApi.create({
+        patientId,
+        branchId,
+        items: dispensedLines.map((it, i) => ({
+          itemType: 'MEDICINE',
+          referenceId: '',
+          description: it.medicineName || 'Medicine',
+          quantity: it.quantityDispensed || 1,
+          unitPrice: Number(prices[i]) || 0,
+          discount: 0,
+        })),
+      });
+      const invoiceId = created?.data?.invoice?.id;
+      if (!invoiceId) throw new Error('Invoice was not created');
+      await billingApi.finalize(invoiceId);
+      const invTotal = created?.data?.invoice?.total ?? total;
+      await billingApi.recordPayment(invoiceId, {
+        amount: invTotal,
+        method,
+        reference: method === 'CASH' ? null : reference.trim(),
+      });
+      setPaid({ amount: invTotal, method, invoiceNumber: created?.data?.invoice?.invoiceNumber });
+      toast.success(`Payment of Rs.${invTotal} collected (${method})`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Payment failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (paid) {
+    return (
+      <div className="rounded-xl border border-success/50 bg-success-soft p-4 text-sm">
+        <Badge variant="success">Paid ₹{paid.amount} · {paid.method}</Badge>
+        {paid.invoiceNumber && (
+          <span className="ml-2 text-muted-foreground">Invoice {paid.invoiceNumber}</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border p-4">
+      <h2 className="font-semibold">Collect payment</h2>
+      <div className="space-y-2">
+        {dispensedLines.map((it, i) => (
+          <div key={i} className="flex items-center gap-2 text-sm">
+            <span className="min-w-0 flex-1 truncate">
+              {it.medicineName} × {it.quantityDispensed}
+            </span>
+            <Input
+              type="number"
+              min="0"
+              placeholder="Price/unit"
+              className="w-28"
+              value={prices[i]}
+              onChange={(e) => {
+                const next = [...prices];
+                next[i] = e.target.value;
+                setPrices(next);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="text-sm font-semibold">Total: ₹{total}</div>
+        <Select value={method} onChange={(e) => setMethod(e.target.value)} className="w-36">
+          {PAY_METHODS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </Select>
+        {method !== 'CASH' && (
+          <Input
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder="Txn reference"
+            className="w-40"
+          />
+        )}
+        <Button size="sm" onClick={collect} disabled={busy}>
+          {busy ? 'Collecting…' : 'Collect'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default function DispenseScreenPage() {
   const { t } = useTranslation();
@@ -185,6 +317,8 @@ export default function DispenseScreenPage() {
           </Button>
         </div>
       )}
+
+      <CollectPaymentCard dispense={dispense} />
     </section>
   );
 }

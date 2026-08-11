@@ -11,6 +11,7 @@ import { missedFollowUpHandlerModule } from './queues/missedFollowUpJobs.js';
 import { loyaltyExpiryHandlerModule } from './queues/loyaltyExpiryJobs.js';
 import { loyaltyBirthdayHandlerModule } from './queues/loyaltyBirthdayJobs.js';
 import { startComposedWorker, assertScheduledJobsAreHandled } from './queues/composeWorker.js';
+import { aiPrecheckHandlerModule } from './queues/aiJobs.js';
 import { QUEUE_NAMES } from './queues/connection.js';
 import { startNotificationWorker } from './queues/notificationJobs.js';
 import { startReportWorker } from './queues/reportJobs.js';
@@ -106,6 +107,14 @@ class Server {
         startAnalyticsWorker();
       } catch (err) {
         logger.warn('Analytics worker not started', { message: err.message });
+      }
+
+      // AI gets its own queue: a high-effort provider call runs for tens of seconds and
+      // would head-of-line-block reminders or digests on a shared queue.
+      try {
+        startComposedWorker(QUEUE_NAMES.AI, [aiPrecheckHandlerModule]);
+      } catch (err) {
+        logger.warn('AI queue worker not started', { message: err.message });
       }
 
       startMaintenanceJobs();

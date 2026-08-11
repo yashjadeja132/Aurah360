@@ -11,6 +11,7 @@ import { PERMISSIONS } from '@/constants/rbac';
 import { APP_ROUTES } from '@/constants/routes';
 import { INSERT_TARGETS } from '../insertBus';
 import { useInsertTarget } from '../hooks/useInsertTarget';
+import { MedicineSearchInput } from '@/modules/prescriptions/components/MedicineSearchInput';
 
 const EMPTY_LINE = {
   genericName: '',
@@ -118,6 +119,29 @@ export function PrescriptionDraftPanel({ consultationId, readOnly }) {
           'Unsigned working list. Accepting a medication suggestion adds a line here — edit it, then create the real prescription in the prescription module.'
         )}
       </p>
+
+      {!readOnly && (
+        <div className="space-y-1">
+          <Label className="text-xs">
+            {t('consultations.rxDraft.search', 'Type a keyword — matching medicines appear')}
+          </Label>
+          <MedicineSearchInput
+            placeholder={t('consultations.rxDraft.searchPlaceholder', 'e.g. clotrimazole, minoxidil…')}
+            onSelect={(m) =>
+              setLines((prev) => [
+                ...prev,
+                {
+                  ...EMPTY_LINE,
+                  genericName: m.genericName || m.name || '',
+                  brand: m.brand || m.name || '',
+                  composition: m.genericName || '',
+                  formStrength: m.strength || '',
+                },
+              ])
+            }
+          />
+        </div>
+      )}
 
       {lines.length === 0 && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">

@@ -28,9 +28,17 @@ const CLINICAL_COPILOT_PROMPT = fs.readFileSync(
 const CLINICAL_COPILOT_SCHEMA = JSON.parse(
   fs.readFileSync(path.join(HERE, 'schemas', 'clinical-copilot-v1.schema.json'), 'utf8')
 );
+const CLINICAL_PRECHECK_PROMPT = fs.readFileSync(
+  path.join(HERE, '..', '..', 'prompts', 'clinical-precheck-v1.txt'),
+  'utf8'
+);
+const CLINICAL_PRECHECK_SCHEMA = JSON.parse(
+  fs.readFileSync(path.join(HERE, 'schemas', 'clinical-precheck-v1.schema.json'), 'utf8')
+);
 
 const JSON_SCHEMAS = {
   [AI_USE_CASE.CLINICAL_COPILOT]: CLINICAL_COPILOT_SCHEMA,
+  [AI_USE_CASE.CLINICAL_PRECHECK]: CLINICAL_PRECHECK_SCHEMA,
 };
 
 const SCHEMA_HINTS = {
@@ -42,6 +50,8 @@ const SCHEMA_HINTS = {
   [AI_USE_CASE.PATIENT_INSTRUCTION_DRAFT]: '{ "instructions": string }',
   [AI_USE_CASE.TREATMENT_CHECKLIST_ASSIST]: '{ "checklist": string[] }',
   [AI_USE_CASE.ANALYTICS_NARRATIVE]: '{ "narrative": string }',
+  [AI_USE_CASE.CLINICAL_PRECHECK]:
+    '{ "summary": string, "possible_conditions": [...], "questions_to_ask": string[], "suggested_reports": [...], "medicine_suggestions": [...], "red_flags": string[], "based_on_photos": boolean, "confidence_note": string }',
   [AI_USE_CASE.CLINICAL_COPILOT]:
     '{ "summary": string, "possible_conditions": [...], "follow_up_questions": string[], "red_flags": string[], "investigations": [...], "diet_lifestyle_advice": string[], "medication_suggestions": [...], "procedural_options_note": string, "aftercare_advice_english": string, "patient_advice_gujarati": string, "confidence_note": string }',
 };
@@ -64,6 +74,7 @@ const SYSTEM_PROMPTS = {
   [AI_USE_CASE.ANALYTICS_NARRATIVE]:
     'Write a short narrative summary of the provided de-identified aggregate clinic metrics for management.',
   [AI_USE_CASE.CLINICAL_COPILOT]: CLINICAL_COPILOT_PROMPT,
+  [AI_USE_CASE.CLINICAL_PRECHECK]: CLINICAL_PRECHECK_PROMPT,
 };
 
 /**
@@ -73,6 +84,7 @@ const SYSTEM_PROMPTS = {
  */
 const PROMPT_LABELS = {
   [AI_USE_CASE.CLINICAL_COPILOT]: 'clinical-copilot-v1',
+  [AI_USE_CASE.CLINICAL_PRECHECK]: 'clinical-precheck-v1',
 };
 
 /** `<label>@<8 hex>` — changes the moment a single byte of the system prompt changes. */
@@ -102,7 +114,7 @@ class AiGatewayService {
     return flag ? flag.enabled : true; // default on unless explicitly disabled
   }
 
-  async run({ useCase, context, patientId = null, consultationId = null, parentRunId = null }, actorId, req = null) {
+  async run({ useCase, context, attachments = null, patientId = null, consultationId = null, parentRunId = null }, actorId, req = null) {
     if (!Object.values(AI_USE_CASE).includes(useCase)) {
       throw ApiError.badRequest(`Unknown AI use case: ${useCase}`);
     }
@@ -175,7 +187,7 @@ class AiGatewayService {
     const startedAt = Date.now();
     try {
       const { output, model, degraded, reason, usage } = await this.adapter.complete({
-        systemPrompt, userPrompt, schemaHint, jsonSchema,
+        systemPrompt, userPrompt, schemaHint, jsonSchema, attachments,
       });
       const latencyMs = Date.now() - startedAt;
       // Tokens are spent whether or not the output was usable, so cost is recorded on the

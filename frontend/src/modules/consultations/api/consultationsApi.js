@@ -49,6 +49,9 @@ export const consultationsApi = {
   listPhotos(id) {
     return api.get(`/consultations/${id}/photos`).then((res) => res.data);
   },
+  runPrecheck(id) {
+    return api.post(`/consultations/${id}/precheck`).then((res) => res.data);
+  },
   uploadPhoto(id, formData) {
     return api
       .post(`/consultations/${id}/photos`, formData, {

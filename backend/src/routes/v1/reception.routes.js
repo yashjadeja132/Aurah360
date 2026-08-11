@@ -46,6 +46,13 @@ router.post(
 );
 
 router.post(
+  '/intake/:appointmentId/complete',
+  requirePermission(PERMISSIONS.RECEPTION_CHECKIN, PERMISSIONS.RECEPTION_ALL),
+  validate({ params: appointmentIdParamSchema }),
+  controller.completeIntake
+);
+
+router.post(
   '/walk-in',
   requirePermission(PERMISSIONS.RECEPTION_CHECKIN, PERMISSIONS.RECEPTION_ALL),
   validate({ body: walkInSchema }),

@@ -30,6 +30,8 @@ export const appointmentIdParamSchema = z.object({
 export const checkInSchema = z.object({
   priority: z.enum(QUEUE_PRIORITY_LIST).optional(),
   receptionNotes: z.string().max(2000).optional().nullable(),
+  /** Intake symptoms typed by reception — becomes the consultation's chief complaint. */
+  symptoms: z.string().max(2000).optional().nullable(),
   updateContact: z
     .object({
       mobile: z.string().min(8).max(20).optional(),
@@ -62,6 +64,7 @@ export const walkInSchema = z.object({
   notes: z.string().max(2000).optional().nullable(),
   queuePriority: z.enum(QUEUE_PRIORITY_LIST).optional(),
   receptionNotes: z.string().max(2000).optional().nullable(),
+  symptoms: z.string().max(2000).optional().nullable(),
   updateContact: checkInSchema.shape.updateContact,
   consent: checkInSchema.shape.consent,
 });

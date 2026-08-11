@@ -59,10 +59,10 @@ class AiProviderAdapter {
    * `degraded: true` with a `reason` means the provider declined or truncated — the caller
    * must continue the manual workflow. Throws only on transport/parse failures.
    */
-  async complete({ systemPrompt, userPrompt, schemaHint, jsonSchema = null }) {
+  async complete({ systemPrompt, userPrompt, schemaHint, jsonSchema = null, attachments = null }) {
     const provider = this.effectiveProvider();
     if (provider === 'ANTHROPIC') {
-      return this.#anthropicComplete({ systemPrompt, userPrompt, jsonSchema });
+      return this.#anthropicComplete({ systemPrompt, userPrompt, jsonSchema, attachments });
     }
     if (provider === 'OPENAI_COMPATIBLE') {
       return this.#openAiComplete({ systemPrompt, userPrompt, schemaHint });
@@ -93,7 +93,7 @@ class AiProviderAdapter {
   }
 
   // --- Anthropic (Claude Messages API) ---------------------------------------
-  async #anthropicComplete({ systemPrompt, userPrompt, jsonSchema }) {
+  async #anthropicComplete({ systemPrompt, userPrompt, jsonSchema, attachments }) {
     if (!this.#client) {
       this.#client = new Anthropic({ apiKey: this.anthropicApiKey, timeout: this.timeoutMs });
     }
@@ -115,7 +115,22 @@ class AiProviderAdapter {
           cache_control: { type: 'ephemeral' },
         },
       ],
-      messages: [{ role: 'user', content: userPrompt }],
+      // Vision: attachments are base64 image blocks (clinical intake photos). They ride to the
+      // provider only — never into the stored manifest — and precede the JSON context text.
+      messages: [
+        {
+          role: 'user',
+          content: attachments?.length
+            ? [
+                ...attachments.map((img) => ({
+                  type: 'image',
+                  source: { type: 'base64', media_type: img.mediaType, data: img.dataBase64 },
+                })),
+                { type: 'text', text: userPrompt },
+              ]
+            : userPrompt,
+        },
+      ],
       // NOTE: temperature / top_p are deliberately NOT set — non-default values are rejected.
     });
 
