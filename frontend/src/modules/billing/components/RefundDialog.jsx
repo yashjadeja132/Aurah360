@@ -106,7 +106,7 @@ export function RefundDialog({ open, payment, onClose, onSubmit, pending }) {
           <p>
             {t(
               'billing.refundDialog.loyaltyWarning',
-              'Loyalty points earned on this invoice are clawed back automatically. Points the patient already redeemed are not reversed.'
+              'Loyalty points earned on this invoice are clawed back automatically. Points the patient already redeemed on this invoice are re-credited — with their original expiry if it has not passed yet, or per the configured expired-redemption restore policy (restored with a short expiry, or forfeited) if it has.'
             )}
           </p>
         </div>

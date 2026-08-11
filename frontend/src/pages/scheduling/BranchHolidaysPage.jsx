@@ -12,14 +12,22 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useHolidays, useSchedulingMutations } from '@/modules/scheduling/hooks/useScheduling';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. A branch-scoped role (e.g.
+// BRANCH_MANAGER, who holds holidays.*) manages holidays for their own branch only — the
+// cross-branch picker is Owner/Admin-only.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 export default function BranchHolidaysPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
   const [branchId, setBranchId] = useState('');
-  const activeBranch = branchId || branches[0]?.id || '';
+  const activeBranch = isGlobalScope ? branchId || branches[0]?.id || '' : user?.branch || '';
   const { data: holidays = [], isLoading } = useHolidays(activeBranch);
   const { createHoliday, deleteHoliday } = useSchedulingMutations();
 
@@ -49,12 +57,20 @@ export default function BranchHolidaysPage() {
         </Button>
       </div>
 
-      <Select value={activeBranch} onChange={(e) => setBranchId(e.target.value)}>
-        <option value="">{t('scheduling.selectBranch')}</option>
-        {branches.map((b) => (
-          <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
-        ))}
-      </Select>
+      {isGlobalScope ? (
+        <Select value={activeBranch} onChange={(e) => setBranchId(e.target.value)}>
+          <option value="">{t('scheduling.selectBranch')}</option>
+          {branches.map((b) => (
+            <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
+          ))}
+        </Select>
+      ) : (
+        <Input
+          value={branches.find((b) => b.id === activeBranch)?.displayName || branches.find((b) => b.id === activeBranch)?.name || ''}
+          disabled
+          readOnly
+        />
+      )}
 
       <PermissionGuard permissions={[PERMISSIONS.HOLIDAYS_EDIT, PERMISSIONS.HOLIDAYS_ALL]}>
         <form

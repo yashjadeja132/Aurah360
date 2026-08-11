@@ -7,6 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useBranchList } from '@/modules/branches/hooks/useBranches';
+import { useMasterActive } from '@/modules/masters/hooks/useMasters';
+import { TargetingPills } from '@/modules/loyalty/components/TargetingPills';
 import {
   useLoyaltyCampaigns,
   useCreateLoyaltyCampaign,
@@ -28,6 +31,8 @@ const EMPTY_DRAFT = {
   startDate: '',
   endDate: '',
   audienceSegment: '',
+  branchIds: [],
+  serviceIds: [],
 };
 
 /** Point-multiplier campaigns and their status transitions (was LoyaltyCampaignsPage). */
@@ -39,6 +44,8 @@ export function LoyaltyCampaignsPanel() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const campaigns = data?.items || [];
+  const { data: branchesData, isLoading: branchesLoading } = useBranchList({ limit: 50 });
+  const { data: services = [], isLoading: servicesLoading } = useMasterActive('services');
 
   const setField = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }));
 
@@ -147,6 +154,30 @@ export function LoyaltyCampaignsPanel() {
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>{t('loyalty.campaigns.fields.audienceSegment', 'Audience segment (optional)')}</Label>
                 <Input value={draft.audienceSegment} onChange={(e) => setField('audienceSegment', e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <TargetingPills
+                  label={t('loyalty.campaigns.fields.branchIds', 'Branches')}
+                  options={branchesData?.items || []}
+                  value={draft.branchIds || []}
+                  onChange={(v) => setField('branchIds', v)}
+                  getId={(b) => b.id}
+                  getLabel={(b) => b.displayName || b.name}
+                  allLabel={t('loyalty.rules.fields.allBranches', 'All branches')}
+                  isLoading={branchesLoading}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <TargetingPills
+                  label={t('loyalty.campaigns.fields.serviceIds', 'Services')}
+                  options={services}
+                  value={draft.serviceIds || []}
+                  onChange={(v) => setField('serviceIds', v)}
+                  getId={(s) => s.id}
+                  getLabel={(s) => s.name}
+                  allLabel={t('loyalty.rules.fields.allServices', 'All services')}
+                  isLoading={servicesLoading}
+                />
               </div>
             </div>
             <DialogFooter>

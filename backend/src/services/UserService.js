@@ -8,6 +8,7 @@ import { USER_STATUS } from '../enums/userStatus.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { ROLES } from '../constants/roles.js';
 import { PAGINATION } from '../constants/index.js';
+import { isStepUpVerified } from '../middlewares/stepUp.middleware.js';
 
 class UserService {
   constructor() {
@@ -116,6 +117,15 @@ class UserService {
       await this.#assertUniqueEmployeeId(payload.employeeId, userId);
     }
 
+    // SEC-002 / §2.3 — a role or permission change is a sensitive RBAC edit and must not go
+    // through on the base USERS_EDIT grant alone; the caller must present a recent step-up
+    // token. Plain profile edits (name/phone/department/...) are unaffected.
+    const changesRole = payload.role !== undefined && payload.role !== user.role;
+    const changesPermissions = payload.permissions !== undefined;
+    if ((changesRole || changesPermissions) && !isStepUpVerified(req)) {
+      throw ApiError.forbidden('Step-up re-authentication required to change role or permissions', 'STEP_UP_REQUIRED');
+    }
+
     const previousRole = user.role;
     const updates = {
       updatedBy: actorId,
@@ -144,10 +154,16 @@ class UserService {
 
     const updated = await this.userRepository.updateById(userId, updates);
 
+    const auditMetadata = { fields: Object.keys(payload) };
+    if (changesPermissions) {
+      // §2.3 — permission-toggle changes need a real old->new diff, not just the field name.
+      auditMetadata.permissions = { from: user.permissions || [], to: payload.permissions };
+    }
+
     await this.auditService.record(AUDIT_ACTIONS.USER_UPDATED, {
       actorId,
       targetUserId: userId,
-      metadata: { fields: Object.keys(payload) },
+      metadata: auditMetadata,
       req,
     });
 

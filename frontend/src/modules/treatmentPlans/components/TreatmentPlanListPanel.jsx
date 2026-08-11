@@ -5,11 +5,14 @@ import { Plus, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { useAuth } from '@/contexts/AuthContext';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
+import { useConsultationDetail } from '@/modules/consultations/hooks/useConsultations';
 import {
   useDoctorTreatmentPlans,
   useCreateTreatmentPlan,
@@ -17,7 +20,7 @@ import {
 } from '../hooks/useTreatmentPlans';
 import { TREATMENT_PLAN_STATUS_LABELS } from '../constants';
 import { treatmentPlanEditPath, treatmentPlanPrintPath } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
 
 /**
  * Plans tab of the Treatments hub. This is the former `TreatmentPlanListPage` body, extracted
@@ -30,16 +33,26 @@ export function TreatmentPlanListPanel() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const consultationId = searchParams.get('consultationId') || '';
+  const { user } = useAuth();
+  // Same fix as ConsultationListPage.jsx / PrescriptionListPage.jsx — a DOCTOR must not be
+  // offered a picker over every other doctor's treatment plans. Backend already 403s/404s a
+  // DOCTOR requesting someone else's doctorId (scope.helper.js#resolveDoctorScope via
+  // TreatmentPlanController's scopedListQuery).
+  const isDoctorRole = user?.role === ROLES.DOCTOR;
 
   const { data: doctorsData } = useDoctorList({ limit: 50 });
-  const doctors = doctorsData?.items || [];
+  const doctors = isDoctorRole ? [] : doctorsData?.items || [];
   const [doctorId, setDoctorId] = useState('');
-  const effectiveDoctorId = doctorId || doctors[0]?.id || '';
+  const effectiveDoctorId = isDoctorRole ? undefined : doctorId || doctors[0]?.id || '';
 
   const { data: plans = [], isLoading } = useDoctorTreatmentPlans(effectiveDoctorId);
   const create = useCreateTreatmentPlan();
   const remove = useDeleteTreatmentPlan();
   const [newConsultationId, setNewConsultationId] = useState(consultationId);
+  // Only queried for the URL-provided consultationId (deep-link from the consultation
+  // workspace's "Treatment plan" action) — lets the raw ObjectId stay internal-only while the
+  // visible label is the human-readable consultation number + patient name.
+  const { data: linkedConsultation } = useConsultationDetail(consultationId);
 
   const startPlan = async () => {
     if (!newConsultationId) return;
@@ -63,22 +76,41 @@ export function TreatmentPlanListPanel() {
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select value={effectiveDoctorId} onChange={(e) => setDoctorId(e.target.value)}>
-          <option value="">{t('treatmentPlans.list.selectDoctor', 'Select doctor')}</option>
-          {doctors.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.doctorCode} — {d.user?.fullName || t('treatmentPlans.list.doctorFallback', 'Doctor')}
-            </option>
-          ))}
-        </Select>
-        <Input
-          placeholder={t(
-            'treatmentPlans.list.consultationIdPlaceholder',
-            'Consultation ID to create plan…'
-          )}
-          value={newConsultationId}
-          onChange={(e) => setNewConsultationId(e.target.value)}
-        />
+        {!isDoctorRole && (
+          <SearchableCombobox
+            value={effectiveDoctorId}
+            onChange={setDoctorId}
+            options={doctors}
+            filterKeys={['doctorCode']}
+            renderLabel={(d) => d.user?.fullName || t('treatmentPlans.list.doctorFallback', 'Doctor')}
+            renderSublabel={(d) => `(${d.doctorCode})`}
+            placeholder={t('treatmentPlans.list.selectDoctor', 'Select doctor')}
+            emptyText={t('treatmentPlans.list.noDoctorMatch', 'No doctor matches')}
+          />
+        )}
+        {consultationId ? (
+          // Deep-linked from a consultation — show the human-readable reference, never the
+          // raw ObjectId. newConsultationId (used by startPlan) stays set to the real id
+          // underneath; only the display differs.
+          <div className="flex w-fit max-w-full items-center gap-2 whitespace-nowrap rounded-md border bg-muted/40 px-3 py-2 text-sm sm:col-span-2">
+            <ClipboardList className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="font-medium">
+              {linkedConsultation?.consultationNumber || t('common.loading', 'Loading…')}
+            </span>
+            {linkedConsultation?.patient?.fullName && (
+              <span className="text-muted-foreground">· {linkedConsultation.patient.fullName}</span>
+            )}
+          </div>
+        ) : (
+          <Input
+            placeholder={t(
+              'treatmentPlans.list.consultationIdPlaceholder',
+              'Consultation ID to create plan…'
+            )}
+            value={newConsultationId}
+            onChange={(e) => setNewConsultationId(e.target.value)}
+          />
+        )}
         <PermissionGuard
           permissions={[PERMISSIONS.TREATMENT_PLAN_CREATE, PERMISSIONS.TREATMENT_PLAN_ALL]}
         >
@@ -109,6 +141,25 @@ export function TreatmentPlanListPanel() {
                     count: plan.items?.length || 0,
                   })}{' '}
                   · {plan.createdAt ? new Date(plan.createdAt).toLocaleString() : '—'}
+                </p>
+                {/* §5 — session progress + package balance, display-only off fields the list
+                    endpoint already computes/returns (TreatmentPlanService#attachSessionProgress). */}
+                <p className="text-xs text-muted-foreground">
+                  {t('treatmentPlans.list.sessionsProgress', {
+                    defaultValue: '{{completed}} of {{total}} sessions',
+                    completed: plan.sessionsCompleted ?? 0,
+                    total: plan.sessionsScheduled || plan.estimatedSessions || 0,
+                  })}
+                  {plan.packageBalance?.maximumSessions != null && (
+                    <>
+                      {' · '}
+                      {t('treatmentPlans.list.packageBalance', {
+                        defaultValue: 'Package balance: {{unused}} / {{max}}',
+                        unused: plan.packageBalance.unusedSessions ?? 0,
+                        max: plan.packageBalance.maximumSessions,
+                      })}
+                    </>
+                  )}
                 </p>
               </div>
               <Badge

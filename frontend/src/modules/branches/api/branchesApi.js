@@ -19,8 +19,11 @@ export const branchesApi = {
   activate(id) {
     return api.post(`/branches/${id}/activate`).then((res) => res.data);
   },
-  deactivate(id) {
-    return api.post(`/branches/${id}/deactivate`).then((res) => res.data);
+  deactivate(id, reason) {
+    return api.post(`/branches/${id}/deactivate`, { reason }).then((res) => res.data);
+  },
+  transfer(id, toBranchId) {
+    return api.post(`/branches/${id}/transfer`, { toBranchId }).then((res) => res.data);
   },
   remove(id) {
     return api.delete(`/branches/${id}`).then((res) => res.data);

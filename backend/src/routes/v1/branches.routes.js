@@ -11,6 +11,7 @@ import {
   idParamSchema,
   branchSettingsSchema,
   transferBranchSchema,
+  deactivateBranchSchema,
 } from '../../validators/branch.validator.js';
 
 const router = Router();
@@ -63,7 +64,7 @@ router.post(
 router.post(
   '/:id/deactivate',
   requirePermission(PERMISSIONS.BRANCHES_EDIT, PERMISSIONS.BRANCHES_MANAGE, PERMISSIONS.BRANCHES_ALL),
-  validate({ params: idParamSchema }),
+  validate({ params: idParamSchema, body: deactivateBranchSchema }),
   branchController.deactivate
 );
 

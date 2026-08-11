@@ -78,6 +78,10 @@ const scheduleDaySchema = z.object({
 export const upsertScheduleSchema = z.object({
   branchId: objectId,
   days: z.array(scheduleDaySchema).min(1),
+  // §2.2 roster-impact decision — set once the admin has reviewed the impacted-appointments list
+  // returned on the first (blocked) attempt and chooses to proceed anyway.
+  acknowledgeOverride: z.boolean().optional(),
+  overrideReason: z.string().min(3).max(500).optional().nullable(),
 });
 
 export const scheduleListQuerySchema = z.object({
@@ -106,6 +110,8 @@ export const createLeaveSchema = z.object({
     LEAVE_STATUS.REJECTED,
     LEAVE_STATUS.CANCELLED,
   ]).optional(),
+  acknowledgeOverride: z.boolean().optional(),
+  overrideReason: z.string().min(3).max(500).optional().nullable(),
 });
 
 export const updateLeaveSchema = createLeaveSchema.partial();

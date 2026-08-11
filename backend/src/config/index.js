@@ -20,6 +20,8 @@ export const config = Object.freeze({
   },
   billing: {
     discountApprovalThresholdPercent: env.BILLING_DISCOUNT_APPROVAL_THRESHOLD_PERCENT,
+    refundApprovalThresholdAmount: env.BILLING_REFUND_APPROVAL_THRESHOLD_AMOUNT,
+    cashCloseVarianceEscalationThresholdAmount: env.BILLING_CASH_CLOSE_VARIANCE_ESCALATION_THRESHOLD_AMOUNT,
   },
   cors: {
     origins: env.corsOrigins,
@@ -72,6 +74,8 @@ export const config = Object.freeze({
     model: env.AI_MODEL,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     anthropicModel: env.ANTHROPIC_MODEL,
+    geminiApiKey: env.GEMINI_API_KEY,
+    geminiModel: env.GEMINI_MODEL,
     timeoutMs: env.AI_TIMEOUT_MS,
     monthlyBudgetUsd: env.AI_MONTHLY_BUDGET_USD,
   },

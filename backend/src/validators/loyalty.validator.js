@@ -28,6 +28,10 @@ export const updateSettingsSchema = z.object({
   expiryReminderDaysBefore: z.array(z.number().int().positive()).optional(),
   excludedRedemptionCategories: z.array(z.string()).optional(),
   earnOnRedeemedPortion: z.boolean().optional(),
+  // LOY-005 — gate on redeem(). NONE keeps legacy no-gate behaviour.
+  redemptionIdentityConfirmation: z.enum(['NONE', 'IN_PERSON', 'OTP']).optional(),
+  // LOY-006 — how a refund re-credit handles points drawn from an already-expired earn lot.
+  expiredRedemptionRestorePolicy: z.enum(['RESTORE_SHORT_EXPIRY', 'FORFEIT']).optional(),
   tiersEnabled: z.boolean().optional(),
   ruleChangeApprovalThresholdPercent: z.number().min(0).optional().nullable(),
   manualAdjustmentPointLimitsByRole: z.record(z.string(), z.number().int().min(0)).optional(),
@@ -57,6 +61,10 @@ const ruleVersionSchema = z.object({
   eligibility: z.enum(LOYALTY_ELIGIBILITY_LIST).optional(),
   minimumVisits: z.number().min(0).optional().nullable(),
   requiresMarketingConsent: z.boolean().optional(),
+  /** E6 ON_TIME_FOLLOW_UP only — see LoyaltyEarningRule.model.js's ruleVersionSchema docblock. */
+  graceWindowDays: z.number().min(0).optional().nullable(),
+  /** E10 PROFILE_COMPLETION only — see LoyaltyEarningRule.model.js's ruleVersionSchema docblock. */
+  profileCompletionFields: z.array(z.string()).optional(),
   effectiveFrom: z.string().optional(),
 });
 

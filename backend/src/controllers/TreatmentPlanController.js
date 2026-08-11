@@ -47,6 +47,44 @@ class TreatmentPlanController {
     return ApiResponse.success(res, { data: items });
   });
 
+  /**
+   * Cross-patient "Treatment plans awaiting approval" queue. Scoped the same way as
+   * `listByDoctor`: a DOCTOR only ever sees their own plans (server-resolved doctorId, ignoring
+   * any doctorId the client might pass), while OWNER/ADMIN see the whole (branch-scoped) queue.
+   */
+  pendingApproval = asyncHandler(async (req, res) => {
+    const scoped = await scopedListQuery(req, { branch: true, doctor: true });
+    const onHold =
+      req.query.onHold === undefined ? undefined : req.query.onHold === 'true';
+    const result = await this.service.listPendingApproval({
+      doctorId: scoped.doctorId || null,
+      branchId: scoped.branchId || null,
+      onHold,
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    return ApiResponse.success(res, {
+      message: 'Approval queue retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
+  });
+
+  hold = asyncHandler(async (req, res) => {
+    const plan = await this.service.hold(req.params.id, req.body, req.auth.userId, req);
+    return ApiResponse.success(res, { message: 'Plan held', data: { plan } });
+  });
+
+  unhold = asyncHandler(async (req, res) => {
+    const plan = await this.service.unhold(req.params.id, req.auth.userId);
+    return ApiResponse.success(res, { message: 'Plan hold cleared', data: { plan } });
+  });
+
+  escalate = asyncHandler(async (req, res) => {
+    const plan = await this.service.escalate(req.params.id, req.body, req.auth.userId, req);
+    return ApiResponse.success(res, { message: 'Plan escalated', data: { plan } });
+  });
+
   update = asyncHandler(async (req, res) => {
     const plan = await this.service.update(req.params.id, req.body, req.auth.userId, req);
     return ApiResponse.success(res, { message: 'Treatment plan updated', data: { plan } });

@@ -12,6 +12,7 @@ import LoyaltyAdjustmentRequest from '../models/LoyaltyAdjustmentRequest.model.j
 import LoyaltyTier, { PatientTierState } from '../models/LoyaltyTier.model.js';
 import Patient from '../models/Patient.model.js';
 import { hasAnyPermission } from '../helpers/permission.helper.js';
+import { isStepUpVerified } from '../middlewares/stepUp.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES } from '../constants/roles.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
@@ -157,6 +158,15 @@ class LoyaltyAdminService {
     if (!this.#isApprover(req)) {
       throw ApiError.forbidden(
         `This changes the rule's point value by ${deltaPercent === Infinity ? 'more than' : `${Math.round(deltaPercent)}%, above`} the ${threshold}% approval threshold — it requires owner/manager approval.`
+      );
+    }
+    // SEC-002 — the route itself does not blanket-require step-up (most rule edits are small and
+    // low-risk); it is only demanded here, once the payload is known to cross the approval
+    // threshold, so ordinary edits are never forced through an extra re-auth step.
+    if (!isStepUpVerified(req)) {
+      throw ApiError.forbidden(
+        'Step-up re-authentication required for a rule-value change above the approval threshold',
+        'STEP_UP_REQUIRED'
       );
     }
     return true;

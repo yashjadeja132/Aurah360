@@ -9,7 +9,12 @@ import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. RECEPTIONIST (and every other
+// branch-scoped role reaching this screen) is fixed to their own branch, not a picker.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 import { CheckInDialog } from '@/modules/reception/components/CheckInDialog';
 import { WalkInDialog } from '@/modules/reception/components/WalkInDialog';
 import { QueueBoard } from '@/modules/reception/components/QueueBoard';
@@ -34,6 +39,8 @@ function Stat({ label, value }) {
 
 export default function ReceptionDashboardPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
   const sortedBranches = useMemo(
@@ -45,7 +52,13 @@ export default function ReceptionDashboardPage() {
   const [checkInAppt, setCheckInAppt] = useState(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
 
-  const effectiveBranchId = branchId || sortedBranches[0]?.id || '';
+  const effectiveBranchId = isGlobalScope
+    ? branchId || sortedBranches[0]?.id || ''
+    : user?.branch || '';
+  const branchName =
+    sortedBranches.find((b) => String(b.id) === String(effectiveBranchId))?.displayName ||
+    sortedBranches.find((b) => String(b.id) === String(effectiveBranchId))?.name ||
+    '';
   const today = todayKey();
 
   useQueueSocket({ branchId: effectiveBranchId, enabled: Boolean(effectiveBranchId) });
@@ -97,17 +110,21 @@ export default function ReceptionDashboardPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select
-          value={effectiveBranchId}
-          onChange={(e) => setBranchId(e.target.value)}
-        >
-          <option value="">{t('reception.filters.selectBranch')}</option>
-          {sortedBranches.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.displayName || b.name}
-            </option>
-          ))}
-        </Select>
+        {isGlobalScope ? (
+          <Select
+            value={effectiveBranchId}
+            onChange={(e) => setBranchId(e.target.value)}
+          >
+            <option value="">{t('reception.filters.selectBranch')}</option>
+            {sortedBranches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.displayName || b.name}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Input value={branchName} disabled readOnly />
+        )}
         <Input
           placeholder={t('reception.searchPlaceholder')}
           value={search}

@@ -83,6 +83,12 @@ class MasterController {
     return ApiResponse.success(res, { message: 'Master deactivated', data: { master } });
   });
 
+  checkDependencies = asyncHandler(async (req, res) => {
+    const type = this.#resolveType(req);
+    const warning = await this.masterService.checkDependencies(type, req.params.id);
+    return ApiResponse.success(res, { message: 'Dependency check complete', data: { warning } });
+  });
+
   softDelete = asyncHandler(async (req, res) => {
     const type = this.#resolveType(req);
     const master = await this.masterService.softDelete(type, req.params.id, req.auth.userId, req);

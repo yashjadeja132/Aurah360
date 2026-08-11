@@ -22,7 +22,7 @@ import { StatCard } from '@/components/common/StatCard';
 import { EmptyState } from '@/components/common/EmptyState';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { DiscountApprovalPanel } from '@/modules/billing/components/DiscountApprovalPanel';
@@ -33,6 +33,11 @@ import { ApprovalsInboxPanel } from '@/modules/branchManager/components/Approval
 import { useBranchDay } from '@/modules/branchManager/hooks/useBranchDay';
 
 const METHOD_LABEL = Object.fromEntries(PAYMENT_METHOD_OPTIONS.map((m) => [m.value, m.label]));
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. Everyone outside this list
+// (BRANCH_MANAGER included) is fixed to their own branch — offering them a picker over every
+// branch on this "your branch" command screen is a bug, not a convenience.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 /**
  * B1 — the Branch Manager command screen. The flow diff calls this "the single biggest structural
@@ -48,8 +53,12 @@ const METHOD_LABEL = Object.fromEntries(PAYMENT_METHOD_OPTIONS.map((m) => [m.val
 export default function BranchCommandPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
 
-  // BRANCH_MANAGER holds `branches.view` and `doctors.view`, so both lists are safe to read here.
+  // BRANCH_MANAGER holds `branches.view` and `doctors.view`, so the list read itself is safe —
+  // but the manager's own branch is fixed, so only OWNER/ADMIN get to switch between branches.
+  // Fetched regardless of scope — needed for the picker (global-scope) and to resolve the
+  // locked own-branch's display name (branch-scoped) alike.
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
   const sortedBranches = useMemo(
@@ -61,7 +70,9 @@ export default function BranchCommandPage() {
   );
 
   const [selectedBranchId, setSelectedBranchId] = useState('');
-  const branchId = selectedBranchId || user?.branch || sortedBranches[0]?.id || '';
+  const branchId = isGlobalScope
+    ? selectedBranchId || user?.branch || sortedBranches[0]?.id || ''
+    : user?.branch || '';
 
   const { data: doctorsData } = useDoctorList({ limit: 100 });
   const doctors = doctorsData?.items || [];
@@ -88,18 +99,26 @@ export default function BranchCommandPage() {
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={branchId}
-              onChange={(e) => setSelectedBranchId(e.target.value)}
-              className="w-52"
-            >
-              <option value="">{t('branchDay.selectBranch', 'Select branch')}</option>
-              {sortedBranches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.displayName || b.name}
-                </option>
-              ))}
-            </Select>
+            {isGlobalScope ? (
+              <Select
+                value={branchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                className="w-52"
+              >
+                <option value="">{t('branchDay.selectBranch', 'Select branch')}</option>
+                {sortedBranches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.displayName || b.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              // Branch-scoped roles (BRANCH_MANAGER and below) are fixed to their own branch —
+              // no picker, since the backend would 403 any other branch anyway.
+              <Badge variant="outline" className="px-3 py-1.5 text-sm font-medium">
+                {branchName || t('branchDay.yourBranch', 'Your branch')}
+              </Badge>
+            )}
             <Button asChild variant="outline">
               <Link to={APP_ROUTES.REPORTS}>{t('branchDay.openReports', 'Reports')}</Link>
             </Button>

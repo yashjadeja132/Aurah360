@@ -11,9 +11,11 @@ import { hasAnyPermission } from '@/utils/permissions';
 import { PERMISSIONS } from '@/constants/rbac';
 import { APP_ROUTES } from '@/constants/routes';
 import { formatMoney } from '@/modules/reports/constants';
-import { useDiscountApprovalQueue } from '@/modules/billing/hooks/useBilling';
+import { useDiscountApprovalQueue, useRefundApprovalQueue } from '@/modules/billing/hooks/useBilling';
 import { useCashCloses } from '@/modules/billing/hooks/useBillingOps';
 import { useAdjustmentQueue } from '@/modules/loyalty/hooks/useLoyalty';
+import { useBreakGlassGrants } from '@/modules/privacy/hooks/usePrivacy';
+import { useAuditSearch } from '@/modules/audit/hooks/useAuditLog';
 
 /**
  * Everything awaiting the owner's sign-off, on the landing screen.
@@ -78,23 +80,66 @@ export function OwnerApprovalsPanel() {
     PERMISSIONS.LOYALTY_ADJUST_APPROVE,
     PERMISSIONS.LOYALTY_ALL,
   ]);
+  const canApproveRefunds = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.BILLING_REFUND_APPROVE,
+    PERMISSIONS.BILLING_ALL,
+  ]);
+  const canReviewBreakGlass = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.BREAK_GLASS,
+    PERMISSIONS.AUDIT_VIEW,
+  ]);
+  // §7 "Roster override conflicts" — read-only history, sourced from the audit trail, so it is
+  // gated on the same permission that trail's own search endpoint enforces (audit.view). Doctor
+  // schedule/leave edit permissions alone would not be enough to actually read the entries.
+  const canReviewRosterOverrides = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.AUDIT_VIEW,
+    PERMISSIONS.DOCTOR_SCHEDULE_ALL,
+    PERMISSIONS.DOCTOR_LEAVE_ALL,
+  ]);
 
   const discounts = useDiscountApprovalQueue(
     canApproveDiscounts ? { status: 'PENDING_APPROVAL', limit: 100 } : {}
+  );
+  const refunds = useRefundApprovalQueue(
+    canApproveRefunds ? { status: 'PENDING_APPROVAL', limit: 100 } : {}
   );
   const adjustments = useAdjustmentQueue(
     canApproveLoyalty ? { status: 'PENDING_APPROVAL' } : {}
   );
   const closes = useCashCloses({});
+  const breakGlass = useBreakGlassGrants(canReviewBreakGlass ? {} : { limit: 0 });
+  const rosterOverrides = useAuditSearch(
+    { action: 'ROSTER_OVERRIDE_RECORDED', limit: 10 },
+    { enabled: canReviewRosterOverrides }
+  );
 
   const discountRows = canApproveDiscounts ? discounts.data?.items || [] : [];
+  const refundRows = canApproveRefunds ? refunds.data?.items || [] : [];
   const adjustmentRows = canApproveLoyalty ? adjustments.data?.items || [] : [];
   const closeRows = canApproveCashClose
     ? (closes.data || []).filter((c) => c.status === 'SUBMITTED')
     : [];
+  // Break-glass access is self-granted with a mandatory reason + short TTL, not a pending
+  // decision — there is no approve/reject step in the backend by design (PrivacyGovernanceService
+  // .grantBreakGlass). This surfaces currently-active grants for owner awareness/audit review,
+  // same list endpoint the Privacy admin screen already uses.
+  const activeBreakGlassRows = canReviewBreakGlass
+    ? (breakGlass.data || []).filter((g) => !g.expiresAt || new Date(g.expiresAt) > new Date())
+    : [];
+  // §7 "Roster override conflicts" — awareness only, not a decision queue: the override already
+  // happened (audited at write time by DoctorScheduleService/DoctorLeaveService), this just
+  // surfaces the recent history for the owner. Same "surface it, don't gate it twice" pattern as
+  // the break-glass section above.
+  const rosterOverrideRows = canReviewRosterOverrides ? rosterOverrides.data?.entries || [] : [];
 
-  const total = discountRows.length + adjustmentRows.length + closeRows.length;
-  const anyGate = canApproveDiscounts || canApproveLoyalty || canApproveCashClose;
+  const total = discountRows.length + refundRows.length + adjustmentRows.length + closeRows.length;
+  const anyGate =
+    canApproveDiscounts ||
+    canApproveRefunds ||
+    canApproveLoyalty ||
+    canApproveCashClose ||
+    canReviewBreakGlass ||
+    canReviewRosterOverrides;
 
   if (!anyGate) return null;
 
@@ -143,6 +188,26 @@ export function OwnerApprovalsPanel() {
           </QueueSection>
         )}
 
+        {canApproveRefunds && (
+          <QueueSection
+            title={t('owner.landing.refundApprovals', 'Refund approvals')}
+            count={refundRows.length}
+            isLoading={refunds.isLoading}
+            emptyLabel={t('owner.landing.noRefunds', 'No refunds waiting on a decision.')}
+            actionLabel={t('owner.landing.review', 'Review')}
+            actionTo={APP_ROUTES.BILLING_REFUND_APPROVALS}
+          >
+            {refundRows.slice(0, 5).map((r) => (
+              <Row
+                key={r.id}
+                primary={`${r.invoiceNumber || r.invoiceId} · ${r.patientName || '—'}`}
+                secondary={r.reason || '—'}
+                trailing={formatMoney(r.amount)}
+              />
+            ))}
+          </QueueSection>
+        )}
+
         {canApproveLoyalty && (
           <QueueSection
             title={t('owner.landing.loyaltyAdjustments', 'Loyalty manual adjustments')}
@@ -185,6 +250,51 @@ export function OwnerApprovalsPanel() {
                   value: formatMoney(c.variance),
                 })}
                 trailing={formatMoney(c.countedCash)}
+              />
+            ))}
+          </QueueSection>
+        )}
+
+        {canReviewBreakGlass && (
+          <QueueSection
+            title={t('owner.landing.breakGlassAccess', 'Active break-glass access')}
+            count={activeBreakGlassRows.length}
+            isLoading={breakGlass.isLoading}
+            emptyLabel={t('owner.landing.noBreakGlass', 'No active break-glass grants right now.')}
+            actionLabel={t('owner.landing.review', 'Review')}
+            actionTo={APP_ROUTES.SETTINGS_PRIVACY}
+          >
+            {activeBreakGlassRows.slice(0, 5).map((g) => (
+              <Row
+                key={g.id || g._id}
+                primary={`${g.resourceType || 'Patient record'} · ${g.patientId || '—'}`}
+                secondary={g.reason || '—'}
+                trailing={g.expiresAt ? new Date(g.expiresAt).toLocaleTimeString() : '—'}
+              />
+            ))}
+          </QueueSection>
+        )}
+
+        {canReviewRosterOverrides && (
+          <QueueSection
+            title={t('owner.landing.rosterOverrides', 'Roster override conflicts')}
+            count={rosterOverrideRows.length}
+            isLoading={rosterOverrides.isLoading}
+            emptyLabel={t(
+              'owner.landing.noRosterOverrides',
+              'No roster overrides recorded recently.'
+            )}
+            actionLabel={t('owner.landing.review', 'Review')}
+            actionTo={APP_ROUTES.DOCTORS}
+          >
+            {rosterOverrideRows.slice(0, 5).map((entry) => (
+              <Row
+                key={entry.id}
+                primary={t('owner.landing.rosterOverrideBy', 'Overridden by {{actor}}', {
+                  actor: entry.actorId || '—',
+                })}
+                secondary={`${entry.metadata?.context || '—'} · ${entry.metadata?.reason || '—'}`}
+                trailing={entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}
               />
             ))}
           </QueueSection>

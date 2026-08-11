@@ -19,6 +19,12 @@ const RATE_TABLE_USD_PER_MTOK = Object.freeze({
   'claude-opus': { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
   'claude-sonnet': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-haiku': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
+  // Gemini fallback provider (AiProviderAdapter#effectiveProvider) — same hand-transcribed,
+  // will-drift caveat as the Claude rows above. Gemini has no distinct cache-write tier priced
+  // here; cacheWrite is set equal to input (i.e. no assumed discount) so an unexpectedly large
+  // cached prompt never *under*-estimates spend against the monthly budget gate.
+  'gemini-pro': { input: 1.25, output: 5, cacheWrite: 1.25, cacheRead: 0.31 },
+  'gemini-flash': { input: 0.075, output: 0.3, cacheWrite: 0.075, cacheRead: 0.01875 },
 });
 
 /** Unknown/self-hosted models: assume the mid-tier rate rather than silently pricing at zero. */

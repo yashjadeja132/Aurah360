@@ -150,6 +150,17 @@ const treatmentPlanSchema = new mongoose.Schema(
     acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     rejectedAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },
+    // Approve-queue "Hold" action (§3.5 approval queue): keeps the plan in DRAFT/RECOMMENDED so it
+    // stays visible in the queue, but flags it as parked with a note for the approver to act on.
+    onHold: { type: Boolean, default: false, index: true },
+    holdNote: { type: String, default: null },
+    heldAt: { type: Date, default: null },
+    heldBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Approve-queue "Escalate" action — flags for senior/owner review, mirrors the
+    // PatientFeedback complaint-escalation pattern (escalatedTo/escalatedAt).
+    escalatedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    escalatedAt: { type: Date, default: null },
+    escalationReason: { type: String, default: null },
     cancelledAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
     printedAt: { type: Date, default: null },
@@ -238,6 +249,13 @@ treatmentPlanSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     acceptedBy: this.acceptedBy ? this.acceptedBy.toString() : null,
     rejectedAt: this.rejectedAt,
     rejectionReason: this.rejectionReason,
+    onHold: this.onHold,
+    holdNote: this.holdNote,
+    heldAt: this.heldAt,
+    heldBy: this.heldBy ? this.heldBy.toString() : null,
+    escalatedTo: this.escalatedTo ? this.escalatedTo.toString() : null,
+    escalatedAt: this.escalatedAt,
+    escalationReason: this.escalationReason,
     cancelledAt: this.cancelledAt,
     completedAt: this.completedAt,
     printedAt: this.printedAt,

@@ -40,6 +40,14 @@ const ruleVersionSchema = new mongoose.Schema(
     minimumVisits: { type: Number, default: null, min: 0 }, // used when eligibility = MINIMUM_VISITS
     requiresMarketingConsent: { type: Boolean, default: false }, // E9/E11-style rules
 
+    /** ON_TIME_FOLLOW_UP (E6) only — how many days past a recall's dueDate the fulfilling
+     *  appointment may still complete and count as "on time". null = use the engine default. */
+    graceWindowDays: { type: Number, default: null, min: 0 },
+    /** PROFILE_COMPLETION (E10) only — admin-configured list of Patient fields that must all be
+     *  non-empty for the one-time bonus to fire. Dot-paths into the patient doc (e.g. 'email',
+     *  'address.city'). null/[] = the engine's built-in default field list. */
+    profileCompletionFields: { type: [String], default: undefined },
+
     effectiveFrom: { type: Date, required: true, default: Date.now },
     effectiveTo: { type: Date, default: null }, // null = open-ended; set when superseded
 
@@ -102,6 +110,8 @@ loyaltyEarningRuleSchema.methods.toSafeObject = function toSafeObject(extra = {}
       eligibility: v.eligibility,
       minimumVisits: v.minimumVisits,
       requiresMarketingConsent: v.requiresMarketingConsent,
+      graceWindowDays: v.graceWindowDays,
+      profileCompletionFields: v.profileCompletionFields || [],
       effectiveFrom: v.effectiveFrom,
       effectiveTo: v.effectiveTo,
       approvedBy: v.approvedBy?.toString?.() || null,

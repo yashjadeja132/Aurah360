@@ -77,6 +77,11 @@ class ReportController {
   });
 
   queueExport = asyncHandler(async (req, res) => {
+    // Loyalty report types carry program liability/financial detail (see ReportService's
+    // #assertLoyaltyReportPermission doc) — the route's generic REPORTS_EXPORT permission alone
+    // isn't sufficient for those types, and the background worker that actually runs the job has
+    // no request to check against. Enforce it here, once, before the job is ever queued.
+    this.service.assertLoyaltyExportPermission(req.params.type, req);
     const data = await this.service.queueHeavyReport(
       req.params.type,
       req.body?.format || req.query.format || 'csv',

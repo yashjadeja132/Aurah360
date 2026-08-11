@@ -132,6 +132,20 @@ export const REFUND_REASON = Object.freeze({
 export const REFUND_REASON_LIST = Object.freeze(Object.values(REFUND_REASON));
 
 /**
+ * A.8 — lifecycle of a refund request that exceeds config.billing.refundApprovalThresholdAmount.
+ * Mirrors DISCOUNT_APPROVAL_STATUS / LOYALTY_ADJUSTMENT_STATUS: the requesting staff member
+ * creates a RefundRequest PENDING_APPROVAL, and only an approver (BILLING_REFUND_APPROVE) can
+ * move it to APPROVED (which then actually calls BillingService#refund) or REJECTED.
+ */
+export const REFUND_APPROVAL_STATUS = Object.freeze({
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+});
+
+export const REFUND_APPROVAL_STATUS_LIST = Object.freeze(Object.values(REFUND_APPROVAL_STATUS));
+
+/**
  * MON-002 — why a FINALIZED invoice was cancelled. A finalized invoice is a issued document, so
  * annulling one is a control event: the vocabulary exists so "how often do we issue wrong
  * invoices?" is answerable without parsing free text. Free-form detail goes in `note`.
@@ -211,12 +225,20 @@ export const CREDIT_NOTE_REDEEMABLE_STATUSES = Object.freeze([
   CREDIT_NOTE_STATUS.PARTIALLY_USED,
 ]);
 
-/** Cash close (BIL-003) */
+/**
+ * Cash close (BIL-003). `PENDING_OWNER_APPROVAL` — the spec's "may need Owner approver depending
+ * on threshold": a variance whose absolute value exceeds
+ * config.billing.cashCloseVarianceEscalationThresholdAmount cannot be approved by a
+ * BRANCH_MANAGER (who normally holds BILLING_CASH_CLOSE_APPROVE) — only OWNER may clear it. A
+ * variance within the threshold still requires a reason (DISPUTED→SUBMITTED path, unchanged) but
+ * stays approvable at the branch level.
+ */
 export const CASH_CLOSE_STATUS = Object.freeze({
   DRAFT: 'DRAFT',
   SUBMITTED: 'SUBMITTED',
   APPROVED: 'APPROVED',
   DISPUTED: 'DISPUTED',
+  PENDING_OWNER_APPROVAL: 'PENDING_OWNER_APPROVAL',
 });
 
 export const CASH_CLOSE_STATUS_LIST = Object.freeze(Object.values(CASH_CLOSE_STATUS));

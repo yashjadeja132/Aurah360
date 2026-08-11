@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -88,14 +89,15 @@ export default function ScheduleViewerPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select value={activeDoctor} onChange={(e) => setDoctorId(e.target.value)}>
-          <option value="">{t('scheduling.selectDoctor')}</option>
-          {doctors.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.user?.fullName || d.doctorCode}
-            </option>
-          ))}
-        </Select>
+        <SearchableCombobox
+          value={activeDoctor}
+          onChange={setDoctorId}
+          options={doctors}
+          filterKeys={['doctorCode']}
+          renderLabel={(d) => d.user?.fullName || d.doctorCode}
+          placeholder={t('scheduling.selectDoctor')}
+          emptyText={t('scheduling.viewer.noDoctorMatch', 'No doctor matches')}
+        />
         <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
           <option value="">{t('scheduling.viewer.anyBranch')}</option>
           {branches.map((b) => (

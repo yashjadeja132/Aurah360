@@ -143,6 +143,45 @@ export const NOTIFICATION_PROVIDER = Object.freeze({
 export const NOTIFICATION_PROVIDER_LIST = Object.freeze(Object.values(NOTIFICATION_PROVIDER));
 
 /**
+ * Cross-channel delivery fallback order (spec: "Fallback order (WhatsApp→SMS→voice)").
+ * When a send on one of these channels fails, NotificationService escalates to the next
+ * channel in this list (rather than only retrying the same dead channel). Channels not in
+ * this list (EMAIL, IN_APP, PUSH) keep the existing same-channel retry behaviour — they have
+ * no fallback hop defined for them.
+ *
+ * This is a deliberately hardcoded, org-wide default order (not currently editable per-org
+ * from the admin UI); see NotificationTemplatesPanel/NotificationDeliveryLogPanel — there is
+ * no settings panel yet to expose per-org reordering, so this is scoped as a fixed default.
+ */
+export const FALLBACK_CHANNEL_ORDER = Object.freeze([
+  NOTIFICATION_CHANNEL.WHATSAPP,
+  NOTIFICATION_CHANNEL.SMS,
+  NOTIFICATION_CHANNEL.VOICE,
+]);
+
+/**
+ * Returns the next channel to attempt after `channel` fails, following the
+ * WhatsApp→SMS→voice fallback order, or `null` if `channel` isn't part of the chain
+ * (e.g. EMAIL/IN_APP/PUSH) or is already the last hop (VOICE).
+ */
+export function getNextFallbackChannel(channel) {
+  const idx = FALLBACK_CHANNEL_ORDER.indexOf(channel);
+  if (idx === -1 || idx === FALLBACK_CHANNEL_ORDER.length - 1) return null;
+  return FALLBACK_CHANNEL_ORDER[idx + 1];
+}
+
+/** WhatsApp Business template approval lifecycle (Meta/DLT approval workflow). */
+export const WHATSAPP_APPROVAL_STATUS = Object.freeze({
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+});
+
+export const WHATSAPP_APPROVAL_STATUS_LIST = Object.freeze(
+  Object.values(WHATSAPP_APPROVAL_STATUS)
+);
+
+/**
  * PHI / clinical-content guard (PRD high-risk rule): diagnosis, treatment, lab-value,
  * or clinical-photo content must never appear in WhatsApp/SMS/push/email template text.
  * Kept as a maintainable exported constant so ops can extend it without code changes
@@ -224,4 +263,8 @@ export default {
   NOTIFICATION_PROVIDER,
   PHI_BLOCKED_KEYWORDS,
   PHI_BLOCKED_MERGE_FIELDS,
+  FALLBACK_CHANNEL_ORDER,
+  getNextFallbackChannel,
+  WHATSAPP_APPROVAL_STATUS,
+  WHATSAPP_APPROVAL_STATUS_LIST,
 };

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import ApiError from '../libs/ApiError.js';
 import {
   TreatmentSessionRepository,
@@ -38,11 +39,12 @@ import { hasAnyPermission } from '../helpers/permission.helper.js';
 /**
  * Treatment Execution — creates sessions from accepted plans.
  * Does NOT modify Billing invoices — that remains strictly out of scope here.
- * On completion, does decrement the parent plan's packageSnapshot.unusedSessions
- * (package-booked plans only) and deduct real inventory stock for consumables used.
- * Both are best-effort/compensating side effects (this codebase does not use Mongo
- * transactions anywhere — see BillingService.refund() for the same sequential pattern);
- * failures are logged loudly rather than rolling back the already-completed session.
+ * On completion, decrements the parent plan's packageSnapshot.unusedSessions
+ * (package-booked plans only) and deducts real inventory stock for consumables used.
+ * The status flip, the package-balance decrement and the inventory consumption commit
+ * together in a single Mongo transaction (see complete()) — a stock or package failure rolls
+ * the whole completion back rather than leaving a COMPLETED session with inconsistent side
+ * effects.
  */
 class TreatmentSessionService {
   constructor() {
@@ -142,6 +144,36 @@ class TreatmentSessionService {
       }));
     if (!answers.length) return null;
     return { screenedAt: new Date(), screenedBy: actorId || null, answers };
+  }
+
+  /**
+   * Device parameters vary by protocol/device type, so this stays flexible rather than a rigid
+   * hard-coded form: known commonly-used fields (wavelength, fluence, pulseWidth, spotSize,
+   * coolingSetting, passes) get typed structure for reporting/validation, and everything else
+   * supplied — including whatever a protocol's configured `parameters` map happens to carry —
+   * lands in `customParameters` so no configurability is lost.
+   */
+  #normalizeDeviceSettings(input, existing = {}) {
+    const KNOWN_FIELDS = ['wavelength', 'fluence', 'pulseWidth', 'spotSize', 'coolingSetting', 'passes'];
+    const hasInput = input && typeof input === 'object' && Object.keys(input).length > 0;
+    const src = hasInput ? input : {};
+    const base = existing && typeof existing === 'object' ? existing : {};
+
+    const result = {};
+    for (const key of KNOWN_FIELDS) {
+      result[key] = (hasInput && src[key] !== undefined ? src[key] : base[key]) ?? null;
+    }
+
+    const customParameters = { ...(base.customParameters || {}) };
+    if (src.customParameters && typeof src.customParameters === 'object') {
+      Object.assign(customParameters, src.customParameters);
+    }
+    for (const [key, value] of Object.entries(src)) {
+      if (KNOWN_FIELDS.includes(key) || key === 'customParameters') continue;
+      customParameters[key] = value;
+    }
+    result.customParameters = customParameters;
+    return result;
   }
 
   /**
@@ -1083,7 +1115,7 @@ class TreatmentSessionService {
         device: payload.deviceUsage.device ?? session.deviceUsage?.device ?? null,
         machine: payload.deviceUsage.machine ?? session.deviceUsage?.machine ?? null,
         laserHead: payload.deviceUsage.laserHead ?? session.deviceUsage?.laserHead ?? null,
-        settings: payload.deviceUsage.settings ?? session.deviceUsage?.settings ?? {},
+        settings: this.#normalizeDeviceSettings(payload.deviceUsage.settings, session.deviceUsage?.settings),
       };
     }
     if (payload.followUp) {
@@ -1242,12 +1274,14 @@ class TreatmentSessionService {
         device: payload.deviceUsage?.device ?? session.deviceUsage?.device ?? null,
         machine: payload.deviceUsage?.machine ?? session.deviceUsage?.machine ?? null,
         laserHead: payload.deviceUsage?.laserHead ?? session.deviceUsage?.laserHead ?? null,
-        settings:
+        settings: this.#normalizeDeviceSettings(
           payload.deviceUsage?.settings && Object.keys(payload.deviceUsage.settings).length
             ? payload.deviceUsage.settings
             : session.deviceUsage?.settings && Object.keys(session.deviceUsage.settings).length
               ? session.deviceUsage.settings
               : protocolParameters?.merged || {},
+          session.deviceUsage?.settings
+        ),
       },
       updatedBy: actorId,
     });
@@ -1293,34 +1327,30 @@ class TreatmentSessionService {
    * The $gt: 0 guard makes this idempotent against double-decrement (defense in depth on top
    * of the IN_PROGRESS status check in complete() that already blocks re-completion) and
    * prevents the counter from ever going negative.
+   *
+   * Runs INSIDE complete()'s Mongo transaction (mongoSession) — a genuine query/write failure here
+   * must propagate so the whole commit (status + package balance) rolls back together. An
+   * already-at-zero balance is a legitimate idempotent no-op, not a failure, so it only warns.
    */
-  async #decrementPackageBalance(session, actorId) {
-    try {
-      const plan = await this.planRepository.findByIdNotDeleted(session.treatmentPlanId);
-      if (!plan?.packageSnapshot || typeof plan.packageSnapshot.unusedSessions !== 'number') {
-        return;
-      }
-      const updated = await this.planRepository.model
-        .findOneAndUpdate(
-          { _id: plan._id, 'packageSnapshot.unusedSessions': { $gt: 0 } },
-          { $inc: { 'packageSnapshot.unusedSessions': -1 }, $set: { updatedBy: actorId } },
-          { new: true }
-        )
-        .exec();
-      if (!updated) {
-        logger.warn(
-          'TreatmentSessionService.complete: packageSnapshot.unusedSessions already 0 — skipped decrement',
-          { treatmentPlanId: plan._id.toString(), sessionId: session._id.toString() }
-        );
-      }
-    } catch (err) {
-      logger.error(
-        'TreatmentSessionService.complete: failed to decrement packageSnapshot.unusedSessions',
-        {
-          sessionId: session._id.toString(),
-          treatmentPlanId: session.treatmentPlanId?.toString?.(),
-          error: err.message,
-        }
+  async #decrementPackageBalance(session, actorId, mongoSession) {
+    const plan = await this.planRepository.model
+      .findOne({ _id: session.treatmentPlanId, deletedAt: null })
+      .session(mongoSession)
+      .exec();
+    if (!plan?.packageSnapshot || typeof plan.packageSnapshot.unusedSessions !== 'number') {
+      return;
+    }
+    const updated = await this.planRepository.model
+      .findOneAndUpdate(
+        { _id: plan._id, 'packageSnapshot.unusedSessions': { $gt: 0 } },
+        { $inc: { 'packageSnapshot.unusedSessions': -1 }, $set: { updatedBy: actorId } },
+        { new: true, session: mongoSession }
+      )
+      .exec();
+    if (!updated) {
+      logger.warn(
+        'TreatmentSessionService.complete: packageSnapshot.unusedSessions already 0 — skipped decrement',
+        { treatmentPlanId: plan._id.toString(), sessionId: session._id.toString() }
       );
     }
   }
@@ -1328,25 +1358,59 @@ class TreatmentSessionService {
   /**
    * Deduct real inventory stock for consumables actually used on this session, via
    * InventoryService.consumeForTreatment (the existing, only sanctioned entry point for
-   * stock mutation). Falls back to the protocol's default consumables list when neither the
-   * completion payload nor the session recorded any actual-usage override. Consumables are
-   * free-text names (no inventoryItemId on the session/protocol schemas) so each name is
-   * resolved to an InventoryItem by exact case-insensitive match within the session's branch;
-   * unmatched names are logged and skipped rather than blocking session completion.
+   * stock mutation).
+   *
+   * Batch-linked usage (`consumablesUsed`, gap #3) is preferred when supplied — it decrements
+   * stock against the exact batch selected for this session (not a generic name match). When
+   * none is supplied this falls back to the legacy free-text `consumables` names (resolved to an
+   * InventoryItem by exact case-insensitive match within the session's branch, then the
+   * protocol's default consumables list), for backward compatibility with existing callers/data.
+   *
+   * A name that resolves to no inventory item is a data/config gap, not a stock failure — it is
+   * logged and skipped rather than blocking completion. A genuine stock-movement failure (e.g.
+   * insufficient/expired batch stock) is NOT swallowed: it propagates so complete()'s Mongo
+   * transaction — which runs this alongside the status update and package-balance decrement —
+   * aborts and rolls back all three together (the atomic-commit requirement).
    */
-  async #consumeSessionInventory(session, consumables, actorId, req) {
+  async #consumeSessionInventory(session, { consumables, consumablesUsed } = {}, actorId, req) {
+    const batchLinked = Array.isArray(consumablesUsed)
+      ? consumablesUsed.filter((c) => c && (c.inventoryItemId || c.productName))
+      : [];
+
+    if (batchLinked.length) {
+      for (const c of batchLinked) {
+        const quantity = Number(c.quantity) > 0 ? Number(c.quantity) : 1;
+        let inventoryItemId = c.inventoryItemId || null;
+        if (!inventoryItemId && c.productName) {
+          const item = await this.inventoryService.findItemByName(c.productName, session.branchId);
+          if (!item) {
+            logger.warn(
+              'TreatmentSessionService.complete: no matching inventory item for batch-linked consumable — stock not deducted',
+              { sessionId: session._id.toString(), branchId: session.branchId.toString(), consumable: c.productName }
+            );
+            continue;
+          }
+          inventoryItemId = item._id;
+        }
+        if (!inventoryItemId) continue;
+
+        await this.inventoryService.consumeForTreatment({
+          inventoryItemId: inventoryItemId.toString(),
+          quantity,
+          batchNumber: c.batchNumber || null,
+          treatmentSessionId: session._id.toString(),
+          actorId,
+          req,
+        });
+      }
+      return;
+    }
+
     let names = Array.isArray(consumables) ? consumables.filter(Boolean) : [];
 
     if (!names.length && session.protocolId) {
-      try {
-        const protocol = await TreatmentProtocol.findById(session.protocolId).exec();
-        names = (protocol?.items || []).flatMap((i) => i.consumables || []);
-      } catch (err) {
-        logger.error(
-          'TreatmentSessionService.complete: failed to load protocol default consumables',
-          { sessionId: session._id.toString(), error: err.message }
-        );
-      }
+      const protocol = await TreatmentProtocol.findById(session.protocolId).exec();
+      names = (protocol?.items || []).flatMap((i) => i.consumables || []);
     }
     if (!names.length) return;
 
@@ -1358,71 +1422,116 @@ class TreatmentSessionService {
     }
 
     for (const [name, quantity] of quantityByName.entries()) {
-      try {
-        const item = await this.inventoryService.findItemByName(name, session.branchId);
-        if (!item) {
-          logger.warn(
-            'TreatmentSessionService.complete: no matching inventory item for consumable — stock not deducted',
-            { sessionId: session._id.toString(), branchId: session.branchId.toString(), consumable: name }
-          );
-          continue;
-        }
-        await this.inventoryService.consumeForTreatment({
-          inventoryItemId: item._id.toString(),
-          quantity,
-          treatmentSessionId: session._id.toString(),
-          actorId,
-          req,
-        });
-      } catch (err) {
-        logger.error('TreatmentSessionService.complete: failed to deduct inventory for consumable', {
-          sessionId: session._id.toString(),
-          consumable: name,
-          error: err.message,
-        });
+      const item = await this.inventoryService.findItemByName(name, session.branchId);
+      if (!item) {
+        logger.warn(
+          'TreatmentSessionService.complete: no matching inventory item for consumable — stock not deducted',
+          { sessionId: session._id.toString(), branchId: session.branchId.toString(), consumable: name }
+        );
+        continue;
       }
+      await this.inventoryService.consumeForTreatment({
+        inventoryItemId: item._id.toString(),
+        quantity,
+        treatmentSessionId: session._id.toString(),
+        actorId,
+        req,
+      });
     }
   }
 
+  /**
+   * Session close is now atomic: the status update, the package-balance decrement and the
+   * inventory consumption run inside a single Mongo transaction
+   * (`mongoose.startSession()` / `withTransaction()`, same pattern as
+   * BillingService.recordPayment()) so all three either all commit or all roll back together —
+   * a stock or package failure can never leave the session COMPLETED with an inconsistent
+   * package balance or stock ledger.
+   *
+   * Billing invoice creation deliberately stays OUTSIDE this transaction, as a best-effort step
+   * run only after it commits: billing is an explicit downstream "awaiting billing" handoff, not
+   * part of the timeline+package+stock consistency unit this fix closes (this service does not
+   * create invoices at all today — noted here so the boundary is explicit for future work).
+   */
   async complete(id, payload = {}, actorId, req = null) {
-    const session = await this.sessionRepository.findByIdNotDeleted(id);
-    if (!session) throw ApiError.notFound('Treatment session not found');
-    if (session.status !== TREATMENT_SESSION_STATUS.IN_PROGRESS) {
+    const preCheck = await this.sessionRepository.findByIdNotDeleted(id);
+    if (!preCheck) throw ApiError.notFound('Treatment session not found');
+    if (preCheck.status !== TREATMENT_SESSION_STATUS.IN_PROGRESS) {
       throw ApiError.badRequest('Only in-progress sessions can be completed');
     }
 
     const completedAt = new Date();
-    const duration = session.startedAt
-      ? Math.round((completedAt - new Date(session.startedAt)) / 60000)
+    const duration = preCheck.startedAt
+      ? Math.round((completedAt - new Date(preCheck.startedAt)) / 60000)
       : payload.duration || null;
 
-    const finalConsumables = payload.consumables || session.consumables;
+    const finalConsumables = payload.consumables || preCheck.consumables;
+    const finalConsumablesUsed = payload.consumablesUsed || preCheck.consumablesUsed || [];
 
-    await this.sessionRepository.updateById(id, {
-      status: TREATMENT_SESSION_STATUS.COMPLETED,
-      completedAt,
-      duration,
-      complications: payload.complications ?? session.complications,
-      outcome: payload.outcome ?? session.outcome,
-      consumables: finalConsumables,
-      notes: payload.notes ?? session.notes,
-      followUp: payload.followUp
-        ? {
-            nextSessionDate: payload.followUp.nextSessionDate || null,
-            reviewDate: payload.followUp.reviewDate || null,
-            notes: payload.followUp.notes || null,
-          }
-        : session.followUp,
-      deviceUsage: payload.deviceUsage
-        ? {
-            device: payload.deviceUsage.device || null,
-            machine: payload.deviceUsage.machine || null,
-            laserHead: payload.deviceUsage.laserHead || null,
-            settings: payload.deviceUsage.settings || {},
-          }
-        : session.deviceUsage,
-      updatedBy: actorId,
-    });
+    let session = preCheck;
+    const mongoSession = await mongoose.startSession();
+    try {
+      await mongoSession.withTransaction(async () => {
+        // Re-read inside the transaction so the IN_PROGRESS check and the write are consistent
+        // against the same snapshot the transaction commits.
+        session = await this.sessionRepository.model
+          .findOne({ _id: id, deletedAt: null })
+          .session(mongoSession)
+          .exec();
+        if (!session) throw ApiError.notFound('Treatment session not found');
+        if (session.status !== TREATMENT_SESSION_STATUS.IN_PROGRESS) {
+          throw ApiError.badRequest('Only in-progress sessions can be completed');
+        }
+
+        await this.sessionRepository.model
+          .findByIdAndUpdate(
+            id,
+            {
+              status: TREATMENT_SESSION_STATUS.COMPLETED,
+              completedAt,
+              duration,
+              complications: payload.complications ?? session.complications,
+              outcome: payload.outcome ?? session.outcome,
+              consumables: finalConsumables,
+              consumablesUsed: finalConsumablesUsed,
+              notes: payload.notes ?? session.notes,
+              followUp: payload.followUp
+                ? {
+                    nextSessionDate: payload.followUp.nextSessionDate || null,
+                    reviewDate: payload.followUp.reviewDate || null,
+                    notes: payload.followUp.notes || null,
+                  }
+                : session.followUp,
+              deviceUsage: payload.deviceUsage
+                ? {
+                    device: payload.deviceUsage.device || null,
+                    machine: payload.deviceUsage.machine || null,
+                    laserHead: payload.deviceUsage.laserHead || null,
+                    settings: this.#normalizeDeviceSettings(
+                      payload.deviceUsage.settings,
+                      session.deviceUsage?.settings
+                    ),
+                  }
+                : session.deviceUsage,
+              updatedBy: actorId,
+            },
+            { new: true, session: mongoSession }
+          )
+          .exec();
+
+        // Package balance + inventory stock — the transactional unit (gap #2). A failure in
+        // either aborts the whole transaction, so the status flip above rolls back too.
+        await this.#decrementPackageBalance(session, actorId, mongoSession);
+        await this.#consumeSessionInventory(
+          session,
+          { consumables: finalConsumables, consumablesUsed: finalConsumablesUsed },
+          actorId,
+          req
+        );
+      });
+    } finally {
+      await mongoSession.endSession();
+    }
 
     await this.logRepository.create({
       treatmentSessionId: session._id,
@@ -1458,11 +1567,6 @@ class TreatmentSessionService {
     eventBus.emitDomain(TREATMENT_SESSION_EVENTS.COMPLETED, eventPayload);
     emitQueueEvent(SOCKET_EVENTS.TREATMENT_SESSION_COMPLETED, eventPayload);
 
-    // Package balance + inventory stock — best-effort side effects, run after the session is
-    // already durably marked COMPLETED above. Billing/invoices remain untouched (out of scope).
-    await this.#decrementPackageBalance(session, actorId);
-    await this.#consumeSessionInventory(session, finalConsumables, actorId, req);
-
     // Progress only — do NOT mutate treatment plan document further
     const progress = await this.getProgress(session.treatmentPlanId);
     if (progress.completedSessions >= progress.totalSessions && progress.totalSessions > 0) {
@@ -1473,6 +1577,80 @@ class TreatmentSessionService {
         patientId: session.patientId.toString(),
       });
     }
+
+    return this.getById(id);
+  }
+
+  /**
+   * Technician flow — pause an IN_PROGRESS session. Requires a mandatory reason (validated by
+   * pauseSessionSchema, same reason.min(3) convention as queue.validator.js), which is recorded
+   * on a new `pauseHistory` entry together with the actor and timestamp for the audit trail.
+   */
+  async pause(id, { reason } = {}, actorId, req = null) {
+    if (!reason || !String(reason).trim()) {
+      throw ApiError.badRequest('A reason is required to pause a session');
+    }
+    const session = await this.sessionRepository.findByIdNotDeleted(id);
+    if (!session) throw ApiError.notFound('Treatment session not found');
+    if (session.status !== TREATMENT_SESSION_STATUS.IN_PROGRESS) {
+      throw ApiError.badRequest('Only in-progress sessions can be paused');
+    }
+
+    const pausedAt = new Date();
+    await this.sessionRepository.updateById(id, {
+      status: TREATMENT_SESSION_STATUS.PAUSED,
+      $push: { pauseHistory: { pausedAt, resumedAt: null, reason, actorId } },
+      updatedBy: actorId,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.TREATMENT_SESSION_PAUSED, {
+      actorId,
+      metadata: { sessionId: id, sessionNumber: session.sessionNumber, reason },
+      branchId: session.branchId,
+      resourceType: 'TreatmentSession',
+      resourceId: id,
+      req,
+    });
+
+    return this.getById(id);
+  }
+
+  /**
+   * Technician flow — resume a PAUSED session back to IN_PROGRESS. Fills `resumedAt` on the
+   * most recent open pauseHistory entry (the one this resume closes out).
+   */
+  async resume(id, actorId, req = null) {
+    const session = await this.sessionRepository.findByIdNotDeleted(id);
+    if (!session) throw ApiError.notFound('Treatment session not found');
+    if (session.status !== TREATMENT_SESSION_STATUS.PAUSED) {
+      throw ApiError.badRequest('Only paused sessions can be resumed');
+    }
+
+    const resumedAt = new Date();
+    const history = [...(session.pauseHistory || [])];
+    const openIndex = history
+      .map((h, i) => ({ h, i }))
+      .filter(({ h }) => !h.resumedAt)
+      .map(({ i }) => i)
+      .pop();
+    if (openIndex !== undefined) {
+      history[openIndex] = { ...(history[openIndex].toObject?.() || history[openIndex]), resumedAt };
+    }
+
+    await this.sessionRepository.updateById(id, {
+      status: TREATMENT_SESSION_STATUS.IN_PROGRESS,
+      pauseHistory: history,
+      updatedBy: actorId,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.TREATMENT_SESSION_RESUMED, {
+      actorId,
+      metadata: { sessionId: id, sessionNumber: session.sessionNumber },
+      branchId: session.branchId,
+      resourceType: 'TreatmentSession',
+      resourceId: id,
+      req,
+    });
 
     return this.getById(id);
   }

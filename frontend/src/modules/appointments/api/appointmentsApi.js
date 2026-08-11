@@ -28,8 +28,8 @@ export const appointmentsApi = {
   cancel(id, payload = {}) {
     return api.post(`/appointments/${id}/cancel`, payload).then((res) => res.data);
   },
-  noShow(id) {
-    return api.post(`/appointments/${id}/no-show`).then((res) => res.data);
+  noShow(id, payload = {}) {
+    return api.post(`/appointments/${id}/no-show`, payload).then((res) => res.data);
   },
   complete(id) {
     return api.post(`/appointments/${id}/complete`).then((res) => res.data);
@@ -39,6 +39,12 @@ export const appointmentsApi = {
   },
   followUp(id, payload) {
     return api.post(`/appointments/${id}/follow-up`, payload).then((res) => res.data);
+  },
+  decideApproval(id, payload) {
+    return api.post(`/appointments/${id}/approval`, payload).then((res) => res.data);
+  },
+  acceptAlternative(id) {
+    return api.post(`/appointments/${id}/accept-alternative`).then((res) => res.data);
   },
   remove(id) {
     return api.delete(`/appointments/${id}`).then((res) => res.data);

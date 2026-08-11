@@ -23,4 +23,21 @@ export const requireStepUp = () => (req, _res, next) => {
   }
 };
 
+/**
+ * Non-throwing companion to requireStepUp() — for routes where step-up is only conditionally
+ * required (e.g. a loyalty rule edit that turns out, once the payload is inspected, to exceed
+ * the approval threshold). The route itself stays open to everyone with the base permission;
+ * the calling service decides, after reading the payload, whether to demand a verified token.
+ */
+export const isStepUpVerified = (req) => {
+  try {
+    const token = req?.headers?.['x-step-up-token'];
+    if (!token) return false;
+    const payload = tokenService.verifyStepUpToken(token);
+    return payload.sub === req.auth?.userId;
+  } catch {
+    return false;
+  }
+};
+
 export default requireStepUp;

@@ -12,10 +12,17 @@ import { usePatientList } from '@/modules/patients/hooks/usePatients';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useMasterActive } from '@/modules/masters/hooks/useMasters';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS, GENDER_OPTIONS } from '@/constants/rbac';
+import { PERMISSIONS, GENDER_OPTIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. A branch-scoped role only
+// ever sees their own branch's patients, so the "all branches" filter is Owner/Admin-only.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 export default function PatientListPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const [filters, setFilters] = useState({
     page: 1,
     limit: 20,
@@ -69,15 +76,17 @@ export default function PatientListPage() {
           value={filters.search}
           onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value, page: 1 }))}
         />
-        <Select
-          value={filters.branchId}
-          onChange={(e) => setFilters((p) => ({ ...p, branchId: e.target.value, page: 1 }))}
-        >
-          <option value="">{t('patients.list.allBranches', 'All branches')}</option>
-          {(branchesData?.items || []).map((b) => (
-            <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
-          ))}
-        </Select>
+        {isGlobalScope && (
+          <Select
+            value={filters.branchId}
+            onChange={(e) => setFilters((p) => ({ ...p, branchId: e.target.value, page: 1 }))}
+          >
+            <option value="">{t('patients.list.allBranches', 'All branches')}</option>
+            {(branchesData?.items || []).map((b) => (
+              <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
+            ))}
+          </Select>
+        )}
         <Select
           value={filters.gender}
           onChange={(e) => setFilters((p) => ({ ...p, gender: e.target.value, page: 1 }))}

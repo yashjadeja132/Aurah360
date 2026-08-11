@@ -15,6 +15,9 @@ import {
   applyProtocolSchema,
   applyPackageSchema,
   rejectPlanSchema,
+  pendingApprovalQuerySchema,
+  holdPlanSchema,
+  escalatePlanSchema,
   acceptConsentSchema,
   protocolListQuerySchema,
   createProtocolSchema,
@@ -100,6 +103,14 @@ router.get(
   validate({ query: doctorQuerySchema }),
   controller.listByDoctor
 );
+// Must stay above '/:id' so 'pending-approval' is not read as a treatment plan id — same rule as
+// consultations.routes.js's 'lab-orders/review-queue'.
+router.get(
+  '/pending-approval',
+  requirePermission(...approve, ...view),
+  validate({ query: pendingApprovalQuerySchema }),
+  controller.pendingApproval
+);
 router.get(
   '/consultation/:consultationId',
   requirePermission(...view),
@@ -181,6 +192,24 @@ router.post(
   requirePermission(...approve, ...accept),
   validate({ params: treatmentPlanIdParamSchema, body: rejectPlanSchema }),
   controller.reject
+);
+router.post(
+  '/:id/hold',
+  requirePermission(...approve),
+  validate({ params: treatmentPlanIdParamSchema, body: holdPlanSchema }),
+  controller.hold
+);
+router.post(
+  '/:id/unhold',
+  requirePermission(...approve),
+  validate({ params: treatmentPlanIdParamSchema }),
+  controller.unhold
+);
+router.post(
+  '/:id/escalate',
+  requirePermission(...approve),
+  validate({ params: treatmentPlanIdParamSchema, body: escalatePlanSchema }),
+  controller.escalate
 );
 router.post(
   '/:id/cancel',

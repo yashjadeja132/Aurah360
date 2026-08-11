@@ -25,7 +25,10 @@ export function useDoctorPrescriptions(doctorId, params = {}) {
       const res = await prescriptionsApi.listByDoctor({ doctorId, ...params });
       return res.data || [];
     },
-    enabled: Boolean(doctorId),
+    // doctorId === undefined means "omit it — let the backend pin it to the caller's own
+    // doctor profile" (DOCTOR role, see scope.helper.js#resolveDoctorScope); only an explicit
+    // empty string (no doctor picked yet in a non-doctor staff view) disables the query.
+    enabled: doctorId !== '',
   });
 }
 
@@ -81,7 +84,9 @@ export function usePrescriptionTemplates(doctorId) {
       const res = await prescriptionsApi.listTemplates(doctorId);
       return res.data || [];
     },
-    enabled: Boolean(doctorId),
+    // See useDoctorPrescriptions above — undefined means "let the backend infer the caller's
+    // own doctor profile", only '' (nothing picked yet) disables the query.
+    enabled: doctorId !== '',
   });
 }
 

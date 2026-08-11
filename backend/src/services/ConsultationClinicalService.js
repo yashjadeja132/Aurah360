@@ -12,7 +12,7 @@ import PatientTimelineService from './PatientTimelineService.js';
 import AuditService from './AuditService.js';
 import ClinicalPhotoPolicyService from './ClinicalPhotoPolicyService.js';
 import StorageFactory from '../storage/StorageFactory.js';
-import { CONSULTATION_STATUS, EDITABLE_CONSULTATION_STATUSES } from '../enums/consultation.js';
+import { CONSULTATION_STATUS, EDITABLE_CONSULTATION_STATUSES, TEMPLATE_STATUS } from '../enums/consultation.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { TIMELINE_EVENT, PATIENT_VISIBILITY } from '../enums/patient.js';
 
@@ -372,6 +372,57 @@ class ConsultationClinicalService {
       updatedBy: actorId,
     });
     return { id };
+  }
+
+  /** Settings → Masters admin listing — unscoped, paginated/searchable (see repository docblock). */
+  async listAllTemplates(query = {}) {
+    const result = await this.templateRepository.searchAll(query);
+    return {
+      items: result.items.map((r) => r.toSafeObject()),
+      meta: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+      },
+    };
+  }
+
+  /**
+   * Editing an already-APPROVED template bumps the version and resets it to DRAFT — mirrors
+   * TreatmentProtocol's versioning convention (§10.2): a template a consultation has already
+   * used stays exactly as it was signed against; a new edit is a new, unapproved version that
+   * must be re-approved before it is trusted again.
+   */
+  async updateTemplate(id, payload, actorId) {
+    const row = await this.templateRepository.findByIdNotDeleted(id);
+    if (!row) throw ApiError.notFound('Template not found');
+
+    const update = { ...payload, updatedBy: actorId };
+    if (row.status === TEMPLATE_STATUS.APPROVED) {
+      update.version = (row.version || 1) + 1;
+      update.status = TEMPLATE_STATUS.DRAFT;
+      update.approvedBy = null;
+      update.approvedAt = null;
+      update.previousVersionId = row._id;
+    }
+
+    const updated = await this.templateRepository.updateById(id, update);
+    return updated.toSafeObject();
+  }
+
+  /** Medical-lead approval gate (CONSULTATION_TEMPLATE_MANAGE) — see permissions.js docblock. */
+  async approveTemplate(id, actorId) {
+    const row = await this.templateRepository.findByIdNotDeleted(id);
+    if (!row) throw ApiError.notFound('Template not found');
+
+    const updated = await this.templateRepository.updateById(id, {
+      status: TEMPLATE_STATUS.APPROVED,
+      approvedBy: actorId,
+      approvedAt: new Date(),
+      updatedBy: actorId,
+    });
+    return updated.toSafeObject();
   }
 }
 

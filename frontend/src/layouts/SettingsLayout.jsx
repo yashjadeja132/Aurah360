@@ -17,11 +17,37 @@ export function SettingsLayout() {
     PERMISSIONS.MASTERS_VIEW,
     PERMISSIONS.MASTERS_ALL,
   ]);
+  const canTreatmentPlans = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.TREATMENT_PLAN_VIEW,
+    PERMISSIONS.TREATMENT_PLAN_ALL,
+  ]);
+  const canInventory = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.INVENTORY_VIEW,
+    PERMISSIONS.INVENTORY_ALL,
+  ]);
+  const canConsultationTemplates = hasAnyPermission(user?.permissions, [
+    PERMISSIONS.CONSULTATION_TEMPLATE_MANAGE,
+  ]);
 
   const links = [
     ...(canBranches ? [{ to: APP_ROUTES.BRANCHES, label: 'Branches' }] : []),
     ...(canMasters
       ? MASTER_NAV.map((m) => ({ to: `/settings/${m.slug}`, label: m.title }))
+      : []),
+    // Treatment protocols and product/vendor (supplier) masters live in their own
+    // org-wide modules (see BranchDetailPage docblock for why they aren't part of
+    // the generic /settings/:masterSlug catalogue), but the Masters section spec
+    // requires them to be reachable from here, so link out to their real pages.
+    ...(canTreatmentPlans
+      ? [{ to: APP_ROUTES.TREATMENT_PROTOCOLS, label: 'Treatment Protocols' }]
+      : []),
+    ...(canInventory ? [{ to: APP_ROUTES.SUPPLIERS, label: 'Vendors / Suppliers' }] : []),
+    // Consultation templates are a master-data category per spec ("versioned, medical-lead
+    // approved") but live on the consultation model, not the generic Master collection — same
+    // reasoning as Treatment Protocols/Suppliers above, so link out rather than route through
+    // the generic /settings/:masterSlug catalogue.
+    ...(canConsultationTemplates
+      ? [{ to: APP_ROUTES.SETTINGS_CONSULTATION_TEMPLATES, label: 'Consultation Templates' }]
       : []),
   ];
 

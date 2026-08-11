@@ -4,7 +4,9 @@ import { Plus, Stethoscope } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { useAuth } from '@/contexts/AuthContext';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useAppointmentList } from '@/modules/appointments/hooks/useAppointments';
 import {
@@ -13,7 +15,7 @@ import {
 } from '@/modules/consultations/hooks/useConsultations';
 import { ConsultationStatusBadge } from '@/modules/consultations/components/StatusBadges';
 import { consultationWorkspacePath } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
 // and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
 import { todayKey } from '@/utils/date';
@@ -21,10 +23,18 @@ import { todayKey } from '@/utils/date';
 export default function ConsultationListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // A DOCTOR must never be offered a picker over every other doctor in the org — the backend
+  // (scope.helper.js#resolveDoctorScope) already 403s a DOCTOR who requests someone else's
+  // doctorId, so showing the picker only produced a confusing empty/broken list, not a real
+  // leak. For DOCTOR we omit doctorId entirely and let the backend auto-pin it to their own
+  // profile (same pattern as DoctorMyDayPage). Only non-doctor staff (admin/manager/reception
+  // reviewing a specific doctor's queue) get the picker.
+  const isDoctorRole = user?.role === ROLES.DOCTOR;
   const { data: doctorsData } = useDoctorList({ limit: 50 });
-  const doctors = doctorsData?.items || [];
+  const doctors = isDoctorRole ? [] : doctorsData?.items || [];
   const [doctorId, setDoctorId] = useState('');
-  const effectiveDoctorId = doctorId || doctors[0]?.id || '';
+  const effectiveDoctorId = isDoctorRole ? undefined : doctorId || doctors[0]?.id || '';
 
   const today = todayKey();
   const { data: apptData } = useAppointmentList({
@@ -65,16 +75,20 @@ export default function ConsultationListPage() {
         </div>
       </div>
 
-      <div className="max-w-sm">
-        <Select value={effectiveDoctorId} onChange={(e) => setDoctorId(e.target.value)}>
-          <option value="">{t('consultations.list.selectDoctor', 'Select doctor')}</option>
-          {doctors.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.doctorCode} — {d.user?.fullName || t('consultations.list.doctorFallback', 'Doctor')}
-            </option>
-          ))}
-        </Select>
-      </div>
+      {!isDoctorRole && (
+        <div className="max-w-sm">
+          <SearchableCombobox
+            value={effectiveDoctorId}
+            onChange={setDoctorId}
+            options={doctors}
+            filterKeys={['doctorCode']}
+            renderLabel={(d) => d.user?.fullName || t('consultations.list.doctorFallback', 'Doctor')}
+            renderSublabel={(d) => `(${d.doctorCode})`}
+            placeholder={t('consultations.list.selectDoctor', 'Select doctor')}
+            emptyText={t('consultations.list.noDoctorMatch', 'No doctor matches')}
+          />
+        </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="space-y-3">

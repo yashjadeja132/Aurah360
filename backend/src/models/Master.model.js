@@ -55,6 +55,15 @@ const masterSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    /** Optional effective-dating window. Both nullable — omitted means "always effective". */
+    effectiveFrom: {
+      type: Date,
+      default: null,
+    },
+    effectiveTo: {
+      type: Date,
+      default: null,
+    },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
@@ -130,6 +139,8 @@ masterSchema.methods.toSafeObject = function toSafeObject() {
     durationMinutes: this.durationMinutes,
     price: this.price,
     color: this.color,
+    effectiveFrom: this.effectiveFrom,
+    effectiveTo: this.effectiveTo,
     metadata: this.metadata,
     status: this.status,
     isActive: this.isActive,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { objectId } from './common.js';
-import { AUDIT_ACTION_LIST } from '../enums/auditAction.js';
+import { AUDIT_ACTION_LIST, AUDIT_FAMILY_LIST } from '../enums/auditAction.js';
 
 /**
  * NFR-018 — audit search query.
@@ -20,6 +20,10 @@ import { AUDIT_ACTION_LIST } from '../enums/auditAction.js';
  */
 export const searchAuditLogQuerySchema = z.object({
   action: z.enum(AUDIT_ACTION_LIST).optional(),
+  /** Family/category grouping (Sidebar → Audit spec) — see enums/auditAction.js. OR'd with
+   * `action` when both are supplied (service applies `action` first, `family` narrows/replaces
+   * it via an `$in` of that family's actions). */
+  family: z.enum(AUDIT_FAMILY_LIST).optional(),
   actorId: objectId.optional(),
   targetUserId: objectId.optional(),
   patientId: objectId.optional(),

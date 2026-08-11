@@ -13,6 +13,7 @@ import { Pagination } from '@/components/common/Pagination';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useBranchList, useBranchMutations } from '@/modules/branches/hooks/useBranches';
+import { BranchLifecycleDialog } from '@/modules/branches/components/BranchLifecycleDialog';
 import { APP_ROUTES, branchDetailPath, branchEditPath } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 
@@ -36,6 +37,7 @@ export default function BranchListPage() {
 
   const { data, isLoading, isError, error } = useBranchList(params);
   const mutations = useBranchMutations();
+  const [lifecycle, setLifecycle] = useState(null); // { branch, mode: 'deactivate' | 'transfer' }
 
   return (
     <section className="space-y-6">
@@ -129,17 +131,24 @@ export default function BranchListPage() {
                           <Link to={branchEditPath(branch.id)}>{t('settings.branches.list.editAction', 'Edit')}</Link>
                         </Button>
                         {branch.isActive ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              mutations.deactivate.mutateAsync(branch.id)
-                                .then(() => toast.success(t('settings.branches.list.deactivatedToast', 'Deactivated')))
-                                .catch((e) => toast.error(e.response?.data?.message || t('settings.branches.list.failedToast', 'Failed')))
-                            }
-                          >
-                            {t('settings.branches.list.deactivateAction', 'Deactivate')}
-                          </Button>
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setLifecycle({ branch, mode: 'deactivate' })}
+                            >
+                              {t('settings.branches.list.deactivateAction', 'Deactivate')}
+                            </Button>
+                            <PermissionGuard permissions={[PERMISSIONS.BRANCHES_MANAGE, PERMISSIONS.BRANCHES_ALL]}>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setLifecycle({ branch, mode: 'transfer' })}
+                              >
+                                {t('settings.branches.list.transferAction', 'Transfer')}
+                              </Button>
+                            </PermissionGuard>
+                          </>
                         ) : (
                           <Button
                             variant="ghost"
@@ -164,6 +173,15 @@ export default function BranchListPage() {
       )}
 
       <Pagination meta={data?.meta} onPageChange={(page) => setFilters((p) => ({ ...p, page }))} />
+
+      {lifecycle && (
+        <BranchLifecycleDialog
+          branch={lifecycle.branch}
+          mode={lifecycle.mode}
+          open={Boolean(lifecycle)}
+          onOpenChange={(v) => { if (!v) setLifecycle(null); }}
+        />
+      )}
     </section>
   );
 }

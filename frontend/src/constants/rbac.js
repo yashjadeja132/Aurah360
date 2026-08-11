@@ -62,6 +62,8 @@ export const PERMISSIONS = Object.freeze({
   CONSULTATION_SIGN: 'consultation.sign',
   CONSULTATION_LOCK: 'consultation.lock',
   CONSULTATION_ALL: 'consultation.*',
+  /** Settings → Masters — manage/approve the shared consultation template library. */
+  CONSULTATION_TEMPLATE_MANAGE: 'consultation_template.manage',
   /** Gates sign-grade clinical decisions such as releasing a document or photo to the patient. */
   CLINICAL_SIGN: 'clinical.sign',
   PRESCRIPTION_VIEW: 'prescription.view',
@@ -86,6 +88,7 @@ export const PERMISSIONS = Object.freeze({
   BILLING_FINALIZE: 'billing.finalize',
   BILLING_PAYMENT: 'billing.payment',
   BILLING_REFUND: 'billing.refund',
+  BILLING_REFUND_APPROVE: 'billing.refund_approve',
   BILLING_PRINT: 'billing.print',
   BILLING_ALL: 'billing.*',
   TREATMENT_SESSION_VIEW: 'treatment_session.view',
@@ -102,6 +105,12 @@ export const PERMISSIONS = Object.freeze({
   PHARMACY_VIEW: 'pharmacy.view',
   PHARMACY_DISPENSE: 'pharmacy.dispense',
   PHARMACY_ALL: 'pharmacy.*',
+  /**
+   * PHARM-SUBST — mirrors `backend/src/constants/permissions.js`: deliberately namespaced
+   * OUTSIDE `pharmacy.*` so `PHARMACY_ALL` does NOT silently confer it. Must be checked on
+   * its own, never OR'd with PHARMACY_ALL.
+   */
+  PHARMACY_SUBSTITUTE: 'pharmacy_substitution.authorize',
   PURCHASE_VIEW: 'purchase.view',
   PURCHASE_CREATE: 'purchase.create',
   PURCHASE_ALL: 'purchase.*',
@@ -167,6 +176,7 @@ export const PERMISSIONS = Object.freeze({
   LOYALTY_ADJUST: 'loyalty.adjust',
   LOYALTY_ADJUST_APPROVE: 'loyalty.adjust_approve',
   LOYALTY_REPORTS_VIEW: 'loyalty.reports_view',
+  LOYALTY_REPORTS_EXPORT: 'loyalty.reports_export',
   LOYALTY_CAMPAIGNS_MANAGE: 'loyalty.campaigns_manage',
   LOYALTY_ALL: 'loyalty.*',
 });

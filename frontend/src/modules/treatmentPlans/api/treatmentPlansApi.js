@@ -46,6 +46,19 @@ export const treatmentPlansApi = {
   cancel(id) {
     return api.post(`/treatment-plans/${id}/cancel`).then((res) => res.data);
   },
+  /** Cross-patient "awaiting approval" worklist — mirrors consultationsApi.labOrderReviewQueue. */
+  pendingApprovalQueue(params) {
+    return api.get('/treatment-plans/pending-approval', { params }).then((res) => res.data);
+  },
+  hold(id, note) {
+    return api.post(`/treatment-plans/${id}/hold`, { note }).then((res) => res.data);
+  },
+  unhold(id) {
+    return api.post(`/treatment-plans/${id}/unhold`).then((res) => res.data);
+  },
+  escalate(id, payload) {
+    return api.post(`/treatment-plans/${id}/escalate`, payload).then((res) => res.data);
+  },
   acceptConsent(planId, consentId, payload) {
     return api
       .post(`/treatment-plans/${planId}/consents/${consentId}/accept`, payload)

@@ -25,6 +25,9 @@ export const mastersApi = {
   remove(slug, id) {
     return api.delete(`/masters/${slug}/${id}`).then((res) => res.data);
   },
+  checkDependencies(slug, id) {
+    return api.get(`/masters/${slug}/${id}/dependencies`).then((res) => res.data);
+  },
 };
 
 export default mastersApi;

@@ -16,7 +16,13 @@ import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useDuePayments, useRecordPayment } from '@/modules/billing/hooks/useBilling';
 import { AGING_BUCKET_OPTIONS, formatMoney } from '@/modules/billing/constants';
 import { invoiceDetailPath } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. A branch-scoped cashier only
+// ever has due invoices from their own branch to collect against, so the cross-branch filter is
+// Owner/Admin-only.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 /** Older money is riskier money — colour the bucket badge accordingly. */
 export const BUCKET_VARIANT = {
@@ -38,6 +44,8 @@ export const BUCKET_VARIANT = {
  */
 export function DuePaymentsPanel({ initialCheckedInToday = false, showBuckets = true }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
 
@@ -113,14 +121,16 @@ export function DuePaymentsPanel({ initialCheckedInToday = false, showBuckets = 
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('billing.duePayments.searchPlaceholder', 'Invoice number')}
             />
-            <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-44">
-              <option value="">{t('billing.duePayments.allBranches', 'All branches')}</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.displayName || b.name}
-                </option>
-              ))}
-            </Select>
+            {isGlobalScope && (
+              <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-44">
+                <option value="">{t('billing.duePayments.allBranches', 'All branches')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.displayName || b.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Select value={bucket} onChange={(e) => setBucket(e.target.value)} className="w-44">
               <option value="">{t('billing.duePayments.allAges', 'All ages')}</option>
               {AGING_BUCKET_OPTIONS.map((b) => (

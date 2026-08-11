@@ -13,6 +13,9 @@ export const inventoryApi = {
   createItem(payload) {
     return api.post('/inventory/items', payload).then((r) => r.data);
   },
+  updateItem(id, payload) {
+    return api.patch(`/inventory/items/${id}`, payload).then((r) => r.data);
+  },
   adjust(payload) {
     return api.post('/inventory/adjust', payload).then((r) => r.data);
   },
@@ -89,6 +92,14 @@ export const pharmacyApi = {
   },
   dispenseItems(id, payload) {
     return api.post(`/pharmacy/dispenses/${id}/dispense`, payload).then((r) => r.data);
+  },
+
+  // --- Direct / retail sale (PHARM-DIRECT) ---
+  listSales(params) {
+    return api.get('/pharmacy/sales', { params }).then((r) => r.data);
+  },
+  createSale(payload) {
+    return api.post('/pharmacy/sales', payload).then((r) => r.data);
   },
 };
 

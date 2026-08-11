@@ -3,6 +3,7 @@ import ReportController from '../../controllers/ReportController.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import { requirePermission } from '../../middlewares/permission.middleware.js';
+import { requireStepUp } from '../../middlewares/stepUp.middleware.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import {
   idParamSchema,
@@ -60,9 +61,12 @@ router.get(
   controller.generate
 );
 
+// SEC-002 — report exports can carry PHI/financial detail (revenue, dues, patient volumes);
+// step-up is required unconditionally, matching the loyalty settings pattern above.
 router.get(
   '/export/:type',
   requirePermission(...exportPerm),
+  requireStepUp(),
   validate({ params: reportTypeParamSchema, query: filterQuerySchema }),
   controller.exportReport
 );
@@ -70,6 +74,7 @@ router.get(
 router.post(
   '/export/:type/queue',
   requirePermission(...exportPerm),
+  requireStepUp(),
   validate({ params: reportTypeParamSchema, body: queueExportSchema }),
   controller.queueExport
 );

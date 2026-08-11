@@ -12,6 +12,7 @@ import {
   completeSessionSchema,
   rescheduleSchema,
   reverseCompletionSchema,
+  pauseSessionSchema,
   sessionPhotoMetaSchema,
   sessionIdParamSchema,
   planIdParamSchema,
@@ -91,6 +92,20 @@ router.post(
   requirePermission(...edit, ...complete),
   validate({ params: sessionIdParamSchema, body: startSessionSchema }),
   controller.start
+);
+
+router.post(
+  '/:id/pause',
+  requirePermission(...edit),
+  validate({ params: sessionIdParamSchema, body: pauseSessionSchema }),
+  controller.pause
+);
+
+router.post(
+  '/:id/resume',
+  requirePermission(...edit),
+  validate({ params: sessionIdParamSchema }),
+  controller.resume
 );
 
 router.post(

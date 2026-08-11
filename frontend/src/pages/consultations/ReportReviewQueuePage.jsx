@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { FlaskConical } from 'lucide-react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
@@ -11,7 +12,10 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/common/EmptyState';
 import { consultationWorkspacePath } from '@/constants/routes';
 import { LAB_ORDER_STATUS_LABELS } from '@/modules/consultations/constants';
-import { useLabOrderReviewQueue } from '@/modules/consultations/hooks/useConsultations';
+import {
+  useLabOrderReviewQueue,
+  useUpdateLabOrderFromQueue,
+} from '@/modules/consultations/hooks/useConsultations';
 
 const STATUS_FILTERS = ['RESULT_RECEIVED', 'ORDERED', 'REVIEWED', 'CANCELLED'];
 
@@ -42,11 +46,29 @@ export default function ReportReviewQueuePage() {
   const { data, isLoading } = useLabOrderReviewQueue({ status, page, limit: 25 });
   const rows = data?.items || [];
   const meta = data?.meta;
+  const updateLabOrder = useUpdateLabOrderFromQueue();
 
   const changeStatus = (value) => {
     setStatus(value);
     setPage(1);
   };
+
+  const markReviewed = (order) => {
+    if (!order.consultationId) return;
+    updateLabOrder.mutate({
+      consultationId: order.consultationId,
+      labOrderId: order.id,
+      status: 'REVIEWED',
+    });
+  };
+
+  const releaseHintToast = () =>
+    toast.info(
+      t(
+        'consultations.reportReview.releaseHint',
+        'Release to patient happens at the note level — pick which sections to release.'
+      )
+    );
 
   const statusLabel = (value) =>
     t(`consultations.labs.statusLabels.${value}`, LAB_ORDER_STATUS_LABELS[value] || value);
@@ -144,11 +166,30 @@ export default function ReportReviewQueuePage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {order.consultationId ? (
-                        <Button asChild size="sm" variant="outline">
-                          <Link to={consultationWorkspacePath(order.consultationId)}>
-                            {t('consultations.reportReview.open', 'Open consultation')}
-                          </Link>
-                        </Button>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {order.status === 'RESULT_RECEIVED' && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              disabled={updateLabOrder.isPending}
+                              onClick={() => markReviewed(order)}
+                            >
+                              {t('consultations.reportReview.markReviewed', 'Mark reviewed')}
+                            </Button>
+                          )}
+                          <Button asChild size="sm" variant="outline" onClick={releaseHintToast}>
+                            <Link
+                              to={`${consultationWorkspacePath(order.consultationId)}?section=release`}
+                            >
+                              {t('consultations.reportReview.release', 'Release to patient')}
+                            </Link>
+                          </Button>
+                          <Button asChild size="sm" variant="ghost">
+                            <Link to={consultationWorkspacePath(order.consultationId)}>
+                              {t('consultations.reportReview.open', 'Open consultation')}
+                            </Link>
+                          </Button>
+                        </div>
                       ) : (
                         <span className="text-sm text-muted-foreground">—</span>
                       )}

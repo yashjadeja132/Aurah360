@@ -4,25 +4,33 @@ import {
   InventoryItemRepository,
 } from '../repositories/InventoryRepository.js';
 import PrescriptionRepository from '../repositories/PrescriptionRepository.js';
+import MedicineRepository from '../repositories/MedicineRepository.js';
 import InventoryService from './InventoryService.js';
 import AuditService from './AuditService.js';
 import { eventBus } from '../events/eventBus.js';
 import { emitQueueEvent, SOCKET_EVENTS } from '../socket/index.js';
-import { generateDispenseNumber } from '../helpers/inventoryNumber.helper.js';
+import {
+  generateDispenseNumber,
+  generateDirectSaleNumber,
+} from '../helpers/inventoryNumber.helper.js';
 import {
   DISPENSE_ITEM_STATUS,
   DISPENSE_STATUS,
   INVENTORY_EVENTS,
+  SALE_TYPE,
   STOCK_TX_TYPE,
 } from '../enums/inventory.js';
 import { PRESCRIPTION_STATUS } from '../enums/prescription.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { hasAnyPermission } from '../helpers/permission.helper.js';
 
 class PharmacyService {
   constructor() {
     this.dispenseRepo = new DispenseRepository();
     this.itemRepo = new InventoryItemRepository();
     this.prescriptionRepo = new PrescriptionRepository();
+    this.medicineRepo = new MedicineRepository();
     this.inventoryService = new InventoryService();
     this.auditService = new AuditService();
   }
@@ -149,6 +157,7 @@ class PharmacyService {
       branchId: query.branchId || null,
       status: query.status || null,
       patientId: query.patientId || null,
+      saleType: query.saleType || null,
       limit,
       skip: (page - 1) * limit,
     });
@@ -228,6 +237,7 @@ class PharmacyService {
     if (!lines.length) throw ApiError.badRequest('items are required');
 
     const updatedItems = [...(dispense.items || []).map((i) => i.toObject?.() || { ...i })];
+    const substitutionsRecorded = [];
 
     for (const line of lines) {
       const idx =
@@ -247,7 +257,58 @@ class PharmacyService {
         );
       }
 
-      let inventoryItemId = line.inventoryItemId || target.inventoryItemId;
+      /**
+       * PHARM-SUBST — substitution swaps WHICH inventory item/medicine backs this line, without
+       * ever touching the signed Prescription document. Gated on PHARMACY_SUBSTITUTE (deliberately
+       * outside the PHARMACY_ALL wildcard — see permissions.js) plus a mandatory reason, mirroring
+       * PrescriptionSafetyService's override pattern.
+       */
+      const sub = line.substitution;
+      let effectiveInventoryItemId = line.inventoryItemId || target.inventoryItemId;
+      let substitutionRecord = null;
+      if (sub?.isSubstituted) {
+        if (!hasAnyPermission(req?.auth?.permissions || [], [PERMISSIONS.PHARMACY_SUBSTITUTE])) {
+          throw ApiError.forbidden(
+            'Substituting a different product requires PHARMACY_SUBSTITUTE authorization',
+            'PHARMACY_SUBSTITUTION_NOT_AUTHORIZED'
+          );
+        }
+        if (!sub.reason || !String(sub.reason).trim()) {
+          throw ApiError.badRequest('A reason is required to record a substitution');
+        }
+        if (!sub.substitutedMedicineId) {
+          throw ApiError.badRequest('substitutedMedicineId is required for a substitution');
+        }
+        const substituteMedicine = await this.medicineRepo.findByIdNotDeleted(
+          sub.substitutedMedicineId
+        );
+        if (!substituteMedicine) throw ApiError.notFound('Substitute medicine not found');
+
+        // The substitute product's OWN inventory item backs this line from here on — never the
+        // originally-prescribed medicine's stock.
+        const substituteItem = line.inventoryItemId
+          ? await this.itemRepo.findByIdNotDeleted(line.inventoryItemId)
+          : await this.itemRepo.findByMedicine(sub.substitutedMedicineId, dispense.branchId);
+        if (!substituteItem) {
+          throw ApiError.badRequest(
+            `No inventory item for substitute medicine ${substituteMedicine.name} — select inventoryItemId`
+          );
+        }
+        effectiveInventoryItemId = substituteItem._id;
+
+        substitutionRecord = {
+          isSubstituted: true,
+          originalMedicineId: target.medicineId || null,
+          originalMedicineName: target.medicineName,
+          substitutedMedicineId: substituteMedicine._id,
+          substitutedMedicineName: substituteMedicine.name,
+          reason: String(sub.reason).trim(),
+          authorizedBy: actorId,
+          authorizedAt: new Date(),
+        };
+      }
+
+      let inventoryItemId = effectiveInventoryItemId;
       if (!inventoryItemId && target.medicineId) {
         const linked = await this.itemRepo.findByMedicine(
           target.medicineId,
@@ -288,6 +349,18 @@ class PharmacyService {
       target.batchNumber = batchNumber;
       target.quantityDispensed = (target.quantityDispensed || 0) + qty;
       target.sellingPrice = item.sellingPrice || item.mrp || 0;
+      if (substitutionRecord) {
+        target.substitution = substitutionRecord;
+        substitutionsRecorded.push({
+          itemIndex: idx,
+          ...substitutionRecord,
+          originalMedicineId: substitutionRecord.originalMedicineId
+            ? substitutionRecord.originalMedicineId.toString()
+            : null,
+          substitutedMedicineId: substitutionRecord.substitutedMedicineId.toString(),
+          authorizedBy: actorId,
+        });
+      }
       if (target.quantityDispensed >= target.quantityRequested) {
         target.status = DISPENSE_ITEM_STATUS.DISPENSED;
       } else if (target.quantityDispensed > 0) {
@@ -325,6 +398,23 @@ class PharmacyService {
       req,
     });
 
+    for (const sub of substitutionsRecorded) {
+      await this.auditService.record(AUDIT_ACTIONS.MEDICINE_SUBSTITUTED, {
+        actorId,
+        metadata: {
+          dispenseId: id,
+          dispenseNumber: dispense.dispenseNumber,
+          itemIndex: sub.itemIndex,
+          originalMedicineId: sub.originalMedicineId,
+          originalMedicineName: sub.originalMedicineName,
+          substitutedMedicineId: sub.substitutedMedicineId,
+          substitutedMedicineName: sub.substitutedMedicineName,
+          reason: sub.reason,
+        },
+        req,
+      });
+    }
+
     const eventPayload = {
       dispenseId: id,
       dispenseNumber: dispense.dispenseNumber,
@@ -358,6 +448,142 @@ class PharmacyService {
 
   async dispenseReport(query = {}) {
     return this.listDispenses({ ...query, status: query.status || DISPENSE_STATUS.COMPLETED });
+  }
+
+  // --- Direct / retail sale (PHARM-DIRECT) -----------------------------------------------------
+  // A counter sale with no prescription behind it. Reuses the Dispense model (saleType: DIRECT)
+  // and — critically — the SAME InventoryService.deductStock()/FEFO/expiry-hard-stop path that
+  // prescription dispensing uses, so neither path can drift out of sync with the other.
+
+  /**
+   * A product flagged `requiresPrescription: true` on its InventoryItem master can never leave
+   * through the direct-sale counter — only through a signed, finalized prescription.
+   */
+  async createDirectSale(payload, actorId, req = null, { branchId = null } = {}) {
+    const lines = Array.isArray(payload.items) ? payload.items : [];
+    if (!lines.length) throw ApiError.badRequest('items are required');
+
+    const targetBranch = payload.branchId || branchId;
+    if (!targetBranch) throw ApiError.badRequest('branchId is required');
+    if (branchId && String(targetBranch) !== String(branchId)) {
+      throw ApiError.forbidden('branchId is outside your branch scope', 'BRANCH_SCOPE_VIOLATION');
+    }
+
+    const items = [];
+    for (const [index, line] of lines.entries()) {
+      const qty = Number(line.quantity);
+      if (!qty || qty <= 0) throw ApiError.badRequest('quantity must be positive');
+      if (!line.inventoryItemId) throw ApiError.badRequest('inventoryItemId is required');
+
+      const item = await this.itemRepo.findByIdNotDeleted(line.inventoryItemId);
+      if (!item) throw ApiError.notFound('Inventory item not found');
+      this.#assertItemInScopeForSale(item, targetBranch);
+
+      if (item.requiresPrescription) {
+        throw ApiError.forbidden(
+          `${item.name} requires a prescription and cannot be sold as a direct/retail sale`,
+          'PRESCRIPTION_REQUIRED'
+        );
+      }
+
+      // Same FEFO selection used by prescription dispensing — never duplicated here.
+      const batchNumber =
+        line.batchNumber || this.inventoryService.selectBatch(item)?.batchNumber || null;
+      if (!batchNumber) {
+        throw ApiError.forbidden(`No usable (non-expired) batch for ${item.name}`);
+      }
+
+      items.push({
+        prescriptionItemIndex: index,
+        medicineId: item.medicineId || null,
+        medicineName: item.name,
+        inventoryItemId: item._id,
+        batchNumber,
+        quantityRequested: qty,
+        quantityDispensed: 0,
+        status: DISPENSE_ITEM_STATUS.PENDING,
+        sellingPrice: item.sellingPrice || item.mrp || 0,
+      });
+    }
+
+    const doc = await this.dispenseRepo.create({
+      dispenseNumber: await generateDirectSaleNumber(),
+      saleType: SALE_TYPE.DIRECT,
+      prescriptionId: null,
+      patientId: payload.patientId || null,
+      pharmacistId: actorId,
+      branchId: targetBranch,
+      items,
+      status: DISPENSE_STATUS.PENDING,
+      notes: payload.notes || null,
+      createdBy: actorId,
+      updatedBy: actorId,
+    });
+
+    // Same deductStock()/FEFO/expiry-hard-stop engine prescription dispensing uses — walked here
+    // instead of via dispenseItems() because a direct sale is fulfilled in one shot at creation.
+    const updatedItems = doc.items.map((i) => i.toObject());
+    for (const target of updatedItems) {
+      await this.inventoryService.deductStock({
+        inventoryItemId: target.inventoryItemId,
+        quantity: target.quantityRequested,
+        batchNumber: target.batchNumber,
+        type: STOCK_TX_TYPE.DISPENSE,
+        referenceType: 'Dispense',
+        referenceId: doc._id,
+        reason: `Direct sale ${doc.dispenseNumber}`,
+        actorId,
+        req,
+      });
+      target.quantityDispensed = target.quantityRequested;
+      target.status = DISPENSE_ITEM_STATUS.DISPENSED;
+    }
+
+    await this.dispenseRepo.updateById(doc._id, {
+      items: updatedItems,
+      status: DISPENSE_STATUS.COMPLETED,
+      dispensedAt: new Date(),
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.DIRECT_SALE_CREATED, {
+      actorId,
+      metadata: {
+        dispenseId: doc._id.toString(),
+        dispenseNumber: doc.dispenseNumber,
+        branchId: targetBranch.toString(),
+        lines: items.length,
+      },
+      req,
+    });
+
+    // Same domain-event hook MEDICINE_DISPENSED gives billing today — a direct sale flows into
+    // billing the same way, by emitting the equivalent event on the same bus.
+    const eventPayload = {
+      dispenseId: doc._id.toString(),
+      dispenseNumber: doc.dispenseNumber,
+      saleType: SALE_TYPE.DIRECT,
+      patientId: doc.patientId ? doc.patientId.toString() : null,
+      status: DISPENSE_STATUS.COMPLETED,
+      branchId: doc.branchId.toString(),
+    };
+    eventBus.emitDomain(INVENTORY_EVENTS.DIRECT_SALE_CREATED, eventPayload);
+    emitQueueEvent(SOCKET_EVENTS.MEDICINE_DISPENSED, eventPayload);
+
+    return this.getDispense(doc._id.toString());
+  }
+
+  /** Same branch-scope-as-404 story as `#assertDispenseInScope` — reused for the item lookup a
+   * direct sale does before it ever creates a Dispense row. */
+  #assertItemInScopeForSale(item, branchId) {
+    if (!branchId) return item;
+    if (String(item.branchId) !== String(branchId)) {
+      throw ApiError.notFound('Inventory item not found');
+    }
+    return item;
+  }
+
+  async listDirectSales(query = {}) {
+    return this.listDispenses({ ...query, saleType: SALE_TYPE.DIRECT });
   }
 }
 

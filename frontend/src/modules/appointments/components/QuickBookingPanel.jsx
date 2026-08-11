@@ -5,7 +5,11 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
+import { useAuth } from '@/contexts/AuthContext';
+import { ROLES } from '@/constants/rbac';
 import { usePatientDetail } from '@/modules/patients/hooks/usePatients';
+import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
+import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { usePatientAppointmentHistory } from '../hooks/useAppointments';
 import { useBookingSubmit } from '../hooks/useBookingSubmit';
 import { BookingWizard } from './BookingWizard';
@@ -44,7 +48,11 @@ function pickTemplate(history) {
   )[0];
 }
 
-function SummaryRow({ label, value, changeLabel, isEditing, onChange, children }) {
+// `locked` removes the "Change" affordance entirely (not just defaults to collapsed) — for a
+// branch-scoped staff member's own branch, there is genuinely nothing to change here: the
+// backend will 403 any other branch on submit regardless, so offering an edit control that
+// only ever leads to a rejected booking is worse than not offering it at all.
+function SummaryRow({ label, value, changeLabel, isEditing, onChange, children, locked = false }) {
   return (
     <div className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
@@ -53,22 +61,32 @@ function SummaryRow({ label, value, changeLabel, isEditing, onChange, children }
       </div>
       {isEditing ? (
         <div className="w-full sm:max-w-xs">{children}</div>
-      ) : (
+      ) : !locked ? (
         <Button type="button" variant="ghost" size="sm" onClick={onChange}>
           {changeLabel}
         </Button>
-      )}
+      ) : null}
     </div>
   );
 }
 
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
+
 export function QuickBookingPanel({ onCreated, initialPatientId = '' }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  // A branch-scoped staff member can only ever book at their own branch (the backend enforces
+  // this on submit regardless), so their branch is never editable here even if the patient's
+  // last-visit template points elsewhere — same reasoning as BookingWizard's branch skip.
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
+  const ownBranchId = !isGlobalScope ? user?.branch || '' : '';
+
   const [patientId, setPatientId] = useState(initialPatientId);
   const [patientSearch, setPatientSearch] = useState('');
   const [changingPatient, setChangingPatient] = useState(false);
 
-  const [branchId, setBranchId] = useState('');
+  const [branchId, setBranchId] = useState(ownBranchId);
   const [doctorId, setDoctorId] = useState('');
   const [serviceId, setServiceId] = useState('');
   const [editing, setEditing] = useState({ branch: false, doctor: false, service: false });
@@ -88,20 +106,58 @@ export function QuickBookingPanel({ onCreated, initialPatientId = '' }) {
   } = usePatientAppointmentHistory(patientId || undefined);
   const { submit, isPending } = useBookingSubmit(onCreated);
 
-  const template = useMemo(() => pickTemplate(history), [history]);
+  const historyTemplate = useMemo(() => pickTemplate(history), [history]);
 
-  // Pre-fill branch / doctor / service from the patient's last real visit.
+  // Same lists BranchPicker/DoctorPicker fetch elsewhere on this page (small, cached — neither
+  // hook supports a conditional `enabled` gate, and these are cheap enough not to need one) —
+  // used both to resolve the locked own-branch's display name and, when there's no visit
+  // history yet, to resolve names for a primary-record fallback template.
+  const needsPrimaryFallback = !historyTemplate && Boolean(patient?.primaryDoctorId || patient?.primaryBranchId);
+  const { data: branchesData } = useBranchList({ limit: 50 });
+  const { data: doctorsData } = useDoctorList({ limit: 50 });
+
+  // A patient can have a known preferred doctor/branch (set at registration —
+  // Patient.primaryDoctorId/primaryBranchId) even with zero appointment history yet — that's
+  // still "we already know this," not "first visit," so it should pre-fill exactly like a real
+  // visit template would. Only fall back to genuinely asking (BookingWizard's firstTime path)
+  // when NEITHER a visit history NOR a primary record exists.
+  const template = useMemo(() => {
+    if (historyTemplate) return historyTemplate;
+    if (!needsPrimaryFallback) return null;
+    const branch = branchesData?.items?.find((b) => b.id === patient.primaryBranchId);
+    const doctor = doctorsData?.items?.find((d) => d.id === patient.primaryDoctorId);
+    return {
+      branchId: patient.primaryBranchId || '',
+      doctorId: patient.primaryDoctorId || '',
+      serviceId: '',
+      branch: branch ? { name: branch.displayName || branch.name } : null,
+      doctor: doctor ? { name: doctor.user?.fullName, doctorCode: doctor.doctorCode } : null,
+      service: null,
+    };
+  }, [historyTemplate, needsPrimaryFallback, branchesData, doctorsData, patient]);
+
+  // Pre-fill branch / doctor / service from the patient's last real visit, or their known
+  // primary doctor/branch when there's no visit history yet.
   useEffect(() => {
     if (!template) return;
-    setBranchId(template.branchId || '');
+    // A branch-scoped staff member's branch is locked to their own regardless of what any
+    // template says (see ownBranchId above) — never let a template overwrite it back to
+    // empty/a different branch.
+    if (!ownBranchId) setBranchId(template.branchId || '');
     setDoctorId(template.doctorId || '');
     setServiceId(template.serviceId || '');
     setLabels({
-      branch: template.branch?.name || '',
+      branch: ownBranchId ? (branchesData?.items?.find((b) => b.id === ownBranchId)?.displayName
+        || branchesData?.items?.find((b) => b.id === ownBranchId)?.name || '') : (template.branch?.name || ''),
       doctor: template.doctor?.name || template.doctor?.doctorCode || '',
       service: template.service?.name || '',
     });
-    setEditing({ branch: false, doctor: false, service: false });
+    // Whenever a field's value genuinely isn't known, show its picker directly instead of a
+    // "Not set" label with a separate Change click to reach the exact same picker — applied the
+    // same way regardless of whether the value came from real visit history or the
+    // primary-record fallback (a service is never known from that fallback; a doctor can be
+    // unknown too if a real history template legitimately had no doctor recorded).
+    setEditing({ branch: false, doctor: !template.doctor, service: !template.service });
   }, [template]);
 
   // Same guard the wizard uses: any context change invalidates the held slot.
@@ -113,7 +169,11 @@ export function QuickBookingPanel({ onCreated, initialPatientId = '' }) {
   const firstTime = Boolean(patientId) && historyLoaded && !template;
   const canSubmit = Boolean(branchId && doctorId && serviceId && patientId && slot);
 
-  const patientLabel = patient ? `${patient.mrn} · ${patient.fullName}` : patientId;
+  // Never fall back to the raw ObjectId while the patient record is still loading —
+  // show a loading placeholder instead of the id string.
+  const patientLabel = patient
+    ? `${patient.mrn} · ${patient.fullName}`
+    : t('common.loading', 'Loading…');
 
   const patientBlock = (
     <div className="rounded-xl border bg-card p-4">
@@ -130,6 +190,7 @@ export function QuickBookingPanel({ onCreated, initialPatientId = '' }) {
             }}
             search={patientSearch}
             onSearchChange={setPatientSearch}
+            branchId={branchId}
           />
         </div>
       ) : (
@@ -197,6 +258,7 @@ export function QuickBookingPanel({ onCreated, initialPatientId = '' }) {
               changeLabel={t('appointments.quick.change', 'Change')}
               isEditing={editing.branch}
               onChange={() => setEditing((e) => ({ ...e, branch: true }))}
+              locked={Boolean(ownBranchId)}
             >
               <BranchPicker
                 value={branchId}

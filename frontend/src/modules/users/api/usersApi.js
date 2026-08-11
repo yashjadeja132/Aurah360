@@ -10,8 +10,9 @@ export const usersApi = {
   create(payload) {
     return api.post('/users', payload).then((res) => res.data);
   },
-  update(id, payload) {
-    return api.patch(`/users/${id}`, payload).then((res) => res.data);
+  update(id, payload, stepUpToken) {
+    const config = stepUpToken ? { headers: { 'x-step-up-token': stepUpToken } } : undefined;
+    return api.patch(`/users/${id}`, payload, config).then((res) => res.data);
   },
   activate(id) {
     return api.post(`/users/${id}/activate`).then((res) => res.data);
@@ -33,6 +34,9 @@ export const rolesApi = {
   },
   permissions() {
     return api.get('/roles/permissions').then((res) => res.data);
+  },
+  templates() {
+    return api.get('/roles/templates').then((res) => res.data);
   },
 };
 

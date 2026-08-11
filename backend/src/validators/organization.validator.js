@@ -12,6 +12,8 @@ export const updateOrganizationSchema = z.object({
   privacyContactEmail: z.string().email().optional().nullable(),
   grievanceContactEmail: z.string().email().optional().nullable(),
   timezone: z.string().max(60).optional(),
+  // Must match frontend/src/i18n/index.js SUPPORTED_LANGUAGES codes.
+  languages: z.array(z.enum(['en', 'gu', 'hi'])).min(1).optional(),
   financialYearStartMonth: z.coerce.number().int().min(1).max(12).optional(),
   // Becomes part of a unique invoice number, so restrict it to number-safe characters.
   invoicePrefix: z

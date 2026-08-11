@@ -1,12 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useMasterActive } from '@/modules/masters/hooks/useMasters';
 import { usePatientList } from '@/modules/patients/hooks/usePatients';
+import { QuickAddPatientDialog } from '@/modules/patients/components/QuickAddPatientDialog';
 import { useAvailableAppointmentSlots } from '../hooks/useAppointments';
 import { cn } from '@/utils/cn';
 
@@ -16,18 +17,25 @@ import { cn } from '@/utils/cn';
  * both the guided BookingWizard (first-time patients) and the one-screen
  * QuickBookingPanel (returning patients) render these, so neither owns a
  * private copy of the option lists or the slot grid.
+ *
+ * Every list picker here is a single search-and-select field (SearchableCombobox), not a
+ * separate search box sitting above a native `<select>` — typing filters AND selects in the
+ * same control, matching the pattern MedicineSearchInput already used successfully.
  */
 
 export function BranchPicker({ value, onChange }) {
   const { t } = useTranslation();
   const { data: branchesData } = useBranchList({ limit: 50 });
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{t('appointments.wizard.selectBranch', 'Select branch')}</option>
-      {(branchesData?.items || []).map((b) => (
-        <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
-      ))}
-    </Select>
+    <SearchableCombobox
+      value={value}
+      onChange={onChange}
+      options={branchesData?.items || []}
+      filterKeys={['displayName', 'name']}
+      renderLabel={(b) => b.displayName || b.name}
+      placeholder={t('appointments.wizard.selectBranch', 'Select branch')}
+      emptyText={t('appointments.wizard.noBranchMatch', 'No branch matches')}
+    />
   );
 }
 
@@ -39,14 +47,16 @@ export function DoctorPicker({ value, onChange, branchId = '' }) {
     ...(branchId ? { branchId } : {}),
   });
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{t('appointments.wizard.selectDoctor', 'Select doctor')}</option>
-      {(doctorsData?.items || []).map((d) => (
-        <option key={d.id} value={d.id}>
-          {d.user?.fullName || d.doctorCode} ({d.doctorCode})
-        </option>
-      ))}
-    </Select>
+    <SearchableCombobox
+      value={value}
+      onChange={onChange}
+      options={doctorsData?.items || []}
+      filterKeys={['doctorCode']}
+      renderLabel={(d) => d.user?.fullName || d.doctorCode}
+      renderSublabel={(d) => `(${d.doctorCode})`}
+      placeholder={t('appointments.wizard.selectDoctor', 'Select doctor')}
+      emptyText={t('appointments.wizard.noDoctorMatch', 'No doctor matches')}
+    />
   );
 }
 
@@ -54,33 +64,52 @@ export function ServicePicker({ value, onChange }) {
   const { t } = useTranslation();
   const { data: services = [] } = useMasterActive('services');
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{t('appointments.wizard.selectService', 'Select service')}</option>
-      {services.map((s) => (
-        <option key={s.id} value={s.id}>{s.name}</option>
-      ))}
-    </Select>
+    <SearchableCombobox
+      value={value}
+      onChange={onChange}
+      options={services}
+      filterKeys={['name']}
+      renderLabel={(s) => s.name}
+      placeholder={t('appointments.wizard.selectService', 'Select service')}
+      emptyText={t('appointments.wizard.noServiceMatch', 'No service matches')}
+    />
   );
 }
 
-export function PatientPicker({ value, onChange, search, onSearchChange }) {
+export function PatientPicker({ value, onChange, search, onSearchChange, branchId = '' }) {
   const { t } = useTranslation();
-  const { data: patientsData } = usePatientList({ search, limit: 10, page: 1 });
+  const { data: patientsData, isFetching } = usePatientList({ search, limit: 10, page: 1 });
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [pendingName, setPendingName] = useState('');
+  const patients = patientsData?.items || [];
+
   return (
-    <div className="space-y-3">
-      <Input
+    <div className="space-y-1">
+      <SearchableCombobox
+        value={value}
+        onChange={onChange}
+        options={patients}
+        search={search}
+        onSearchChange={onSearchChange}
+        isLoading={isFetching}
+        loadingText={t('common.searching', 'Searching…')}
+        renderLabel={(p) => `${p.mrn} · ${p.fullName}`}
+        renderSublabel={(p) => p.mobile}
         placeholder={t('appointments.wizard.searchPatient', 'Search patient MRN / name / phone')}
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
+        emptyText={t('appointments.wizard.noPatientMatch', 'No match')}
+        onAddNew={(typed) => {
+          setPendingName(typed);
+          setQuickAddOpen(true);
+        }}
+        addNewLabel={t('appointments.wizard.addNewPatient', 'Add new patient')}
       />
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{t('appointments.wizard.selectPatient', 'Select patient')}</option>
-        {(patientsData?.items || []).map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.mrn} · {p.fullName} · {p.mobile}
-          </option>
-        ))}
-      </Select>
+      <QuickAddPatientDialog
+        open={quickAddOpen}
+        onOpenChange={setQuickAddOpen}
+        defaultBranchId={branchId}
+        defaultName={pendingName}
+        onCreated={(patient) => onChange(patient.id)}
+      />
     </div>
   );
 }

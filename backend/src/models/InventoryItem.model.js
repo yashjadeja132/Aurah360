@@ -59,6 +59,13 @@ const inventoryItemSchema = new mongoose.Schema(
     reorderLevel: { type: Number, default: 20, min: 0 },
     location: { type: String, default: null, trim: true },
     unit: { type: String, default: 'unit', trim: true },
+    /**
+     * PHARM-DIRECT — a prescription-only product (scheduled/controlled medicine). The direct
+     * (retail, no-prescription) sale path hard-blocks any line carrying `requiresPrescription:
+     * true`; prescription-anchored dispensing is unaffected. Defaults to false so existing
+     * catalog data (OTC items, consumables) needs no backfill.
+     */
+    requiresPrescription: { type: Boolean, default: false },
     batches: { type: [batchSchema], default: [] },
     status: {
       type: String,
@@ -122,6 +129,7 @@ inventoryItemSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     reorderLevel: this.reorderLevel,
     location: this.location,
     unit: this.unit,
+    requiresPrescription: this.requiresPrescription,
     batches: (this.batches || []).map((b) => ({
       id: b._id?.toString(),
       batchNumber: b.batchNumber,

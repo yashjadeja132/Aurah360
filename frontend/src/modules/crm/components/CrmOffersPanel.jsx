@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { useOffers, useCreateOffer, useUpdateOffer } from '@/modules/crm/hooks/useCrmExtensions';
+import { useLoyaltyTiers } from '@/modules/loyalty/hooks/useLoyalty';
 import { PERMISSIONS } from '@/constants/rbac';
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
 // and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
@@ -20,6 +21,8 @@ const emptyForm = {
   validFrom: todayKey(),
   validTo: '',
   bookingCta: 'Book now',
+  requiresMarketingConsent: true,
+  targetTiers: [],
 };
 
 /** §12.5, CRM-001 — offer board (was OfferBoardPage). */
@@ -27,10 +30,20 @@ export function CrmOffersPanel() {
   const { t } = useTranslation();
   const [form, setForm] = useState(emptyForm);
   const { data: offers = [], isLoading } = useOffers();
+  const { data: tiersData } = useLoyaltyTiers();
+  const tiers = tiersData?.items || [];
   const create = useCreateOffer();
   const update = useUpdateOffer();
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const toggleTargetTier = (tierName) =>
+    setForm((f) => ({
+      ...f,
+      targetTiers: f.targetTiers.includes(tierName)
+        ? f.targetTiers.filter((t) => t !== tierName)
+        : [...f.targetTiers, tierName],
+    }));
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -41,6 +54,8 @@ export function CrmOffersPanel() {
       validFrom: form.validFrom,
       validTo: form.validTo,
       bookingCta: form.bookingCta,
+      requiresMarketingConsent: form.requiresMarketingConsent,
+      targetTiers: form.targetTiers,
     });
     setForm(emptyForm);
   };
@@ -81,6 +96,42 @@ export function CrmOffersPanel() {
               <div className="space-y-2">
                 <Label>{t('crm.offers.validTo', 'Valid to')}</Label>
                 <Input type="date" value={form.validTo} onChange={set('validTo')} />
+              </div>
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <input
+                  id="offer-requiresMarketingConsent"
+                  type="checkbox"
+                  checked={Boolean(form.requiresMarketingConsent)}
+                  onChange={(e) => setForm((f) => ({ ...f, requiresMarketingConsent: e.target.checked }))}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="offer-requiresMarketingConsent">
+                  {t('crm.offers.requiresMarketingConsent', 'Requires marketing consent')}
+                </Label>
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>{t('crm.offers.targetTiers', 'Target tiers (leave empty for all)')}</Label>
+                <div className="flex flex-wrap gap-2">
+                  {tiers.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {t('crm.offers.noTiers', 'No loyalty tiers configured.')}
+                    </p>
+                  )}
+                  {tiers.map((tier) => (
+                    <label
+                      key={tier.id}
+                      className="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.targetTiers.includes(tier.name)}
+                        onChange={() => toggleTargetTier(tier.name)}
+                        className="h-3.5 w-3.5"
+                      />
+                      {tier.name}
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="sm:col-span-2">
                 <Button type="submit" disabled={create.isPending}>

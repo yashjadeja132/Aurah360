@@ -3,6 +3,7 @@ import LoyaltyController from '../../controllers/LoyaltyController.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import { requirePermission } from '../../middlewares/permission.middleware.js';
+import { requireStepUp } from '../../middlewares/stepUp.middleware.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import {
   idParamSchema,
@@ -47,7 +48,16 @@ router.use(authenticate);
 
 // LOY-001
 router.get('/settings', requirePermission(...settingsView), controller.getSettings);
-router.put('/settings', requirePermission(...settingsManage), validate({ body: updateSettingsSchema }), controller.updateSettings);
+// SEC-002 — settings can flip the program off or change the redemption conversion rate, both
+// of which are direct money/liability moves; step-up is required unconditionally on this route
+// (unlike the rule-version route below, whose risk is payload-dependent and gated in the service).
+router.put(
+  '/settings',
+  requirePermission(...settingsManage),
+  requireStepUp(),
+  validate({ body: updateSettingsSchema }),
+  controller.updateSettings
+);
 
 // LOY-002
 router.get('/rules', requirePermission(...rulesView), validate({ query: ruleListQuerySchema }), controller.listRules);

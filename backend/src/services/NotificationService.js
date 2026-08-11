@@ -13,6 +13,7 @@ import {
   EVENT_TEMPLATE_MAP,
   NOTIFICATION_CHANNEL,
   NOTIFICATION_STATUS,
+  getNextFallbackChannel,
 } from '../enums/notification.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import {
@@ -300,10 +301,18 @@ class NotificationService {
       actorId: null,
       metadata: {
         notificationId: doc.notificationId,
+        channel: doc.channel,
         reason,
         retryCount,
       },
     });
+
+    // Spec: "Fallback order (WhatsApp→SMS→voice)" — a failed WhatsApp/SMS send escalates
+    // to the next channel in the chain instead of only re-hammering the dead channel.
+    const nextChannel = getNextFallbackChannel(doc.channel);
+    if (nextChannel) {
+      return this.#escalateToFallbackChannel(doc, nextChannel, reason);
+    }
 
     // Retry via delayed re-queue (BullMQ also retries; this records intent)
     if (retryCount <= 3) {
@@ -317,6 +326,73 @@ class NotificationService {
     }
 
     return { success: false, reason, retryCount };
+  }
+
+  /**
+   * WhatsApp→SMS→voice fallback hop: clones the failed notification onto the next
+   * channel in FALLBACK_CHANNEL_ORDER, re-resolving the recipient for that channel, and
+   * queues it for immediate dispatch. The original notification stays FAILED (with
+   * `fallbackFromChannel` on the new doc pointing back to it) so both attempts remain
+   * visible in the delivery log.
+   */
+  async #escalateToFallbackChannel(doc, nextChannel, originalReason) {
+    let patient = null;
+    if (doc.patientId) {
+      patient = await Patient.findById(doc.patientId).exec();
+    }
+    const recipient = this.#resolveRecipient(nextChannel, {
+      recipient: null,
+      patient,
+      user: doc.userId ? { id: doc.userId, _id: doc.userId } : null,
+    });
+
+    const fallbackDoc = await this.notificationRepo.create({
+      notificationId: await generateNotificationId(),
+      eventName: doc.eventName,
+      patientId: doc.patientId || null,
+      userId: doc.userId || null,
+      recipient: recipient || doc.recipient,
+      channel: nextChannel,
+      templateId: doc.templateId || null,
+      templateCode: doc.templateCode || null,
+      subject: doc.subject,
+      message: doc.message,
+      variables: doc.variables,
+      status: NOTIFICATION_STATUS.QUEUED,
+      scheduledAt: null,
+      cancelReason: null,
+      createdBy: doc.createdBy || null,
+      fallbackFromChannel: doc.channel,
+    });
+
+    logger.warn('Notification channel fallback triggered', {
+      notificationId: doc.notificationId,
+      fromChannel: doc.channel,
+      toChannel: nextChannel,
+      fallbackNotificationId: fallbackDoc.notificationId,
+      reason: originalReason,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.NOTIFICATION_QUEUED, {
+      actorId: null,
+      metadata: {
+        notificationId: fallbackDoc.notificationId,
+        eventName: doc.eventName,
+        channel: nextChannel,
+        fallbackFromChannel: doc.channel,
+        fallbackFromNotificationId: doc.notificationId,
+      },
+    });
+
+    await enqueueNotificationDispatch(fallbackDoc._id.toString(), { delayMs: 1000 });
+
+    return {
+      success: false,
+      reason: originalReason,
+      retryCount: doc.retryCount || 0,
+      fallbackTo: nextChannel,
+      fallbackNotificationId: fallbackDoc.notificationId,
+    };
   }
 
   async retry(id, actorId = null, req = null) {
@@ -540,7 +616,18 @@ class NotificationService {
     const doc = await this.templateRepo.findByIdNotDeleted(id);
     if (!doc) throw ApiError.notFound('Template not found');
     const updates = { updatedBy: actorId };
-    for (const f of ['name', 'description', 'subject', 'body', 'isActive', 'channel', 'eventName']) {
+    for (const f of [
+      'name',
+      'description',
+      'subject',
+      'body',
+      'isActive',
+      'channel',
+      'eventName',
+      'dltHeader',
+      'dltTemplateId',
+      'whatsappApprovalStatus',
+    ]) {
       if (payload[f] !== undefined) updates[f] = payload[f];
     }
     if (payload.variables) updates.variables = payload.variables;
@@ -568,6 +655,9 @@ class NotificationService {
       subject: payload.subject || null,
       body: payload.body,
       variables: payload.variables || [],
+      dltHeader: payload.dltHeader || null,
+      dltTemplateId: payload.dltTemplateId || null,
+      whatsappApprovalStatus: payload.whatsappApprovalStatus || undefined,
       createdBy: actorId,
       updatedBy: actorId,
     });

@@ -16,6 +16,17 @@ const offerSchema = new mongoose.Schema(
     branchIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Branch', default: [] }, // empty = all branches
     serviceIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Master', default: [] },
     audience: { type: String, enum: ['ALL', 'NEW_PATIENTS', 'EXISTING_PATIENTS', 'VIP'], default: 'ALL' },
+    /**
+     * CRM-consent — an offer is outbound marketing content, so it defaults to requiring the
+     * patient's marketing consent (opt-in-by-default-safety), unlike LoyaltyEarningRule's
+     * per-rule requiresMarketingConsent (default false there, since most earning rules are not
+     * marketing pushes). CrmExtensionsService.listOffers filters out offers a non-consenting
+     * patient would otherwise see, mirroring LoyaltyEarningEngineService.isEligible's consent
+     * check.
+     */
+    requiresMarketingConsent: { type: Boolean, default: true },
+    /** Names from LoyaltyTier.model.js. Empty = every tier (no targeting). */
+    targetTiers: { type: [String], default: [] },
     terms: { type: localizedTextSchema, default: () => ({}) },
     bookingCta: { type: String, default: 'Book now' },
     isActive: { type: Boolean, default: true, index: true },
@@ -35,6 +46,8 @@ offerSchema.methods.toSafeObject = function toSafeObject() {
     branchIds: (this.branchIds || []).map((id) => id.toString()),
     serviceIds: (this.serviceIds || []).map((id) => id.toString()),
     audience: this.audience,
+    requiresMarketingConsent: this.requiresMarketingConsent,
+    targetTiers: this.targetTiers || [],
     terms: this.terms,
     bookingCta: this.bookingCta,
     isActive: this.isActive,

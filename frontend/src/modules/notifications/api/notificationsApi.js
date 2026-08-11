@@ -37,6 +37,9 @@ export const notificationsApi = {
   processPending() {
     return api.post('/notifications/process-pending').then((r) => r.data);
   },
+  providerStatus() {
+    return api.get('/notifications/provider-status').then((r) => r.data);
+  },
 };
 
 export default notificationsApi;

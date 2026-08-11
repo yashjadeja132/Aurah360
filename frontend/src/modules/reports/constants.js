@@ -25,6 +25,22 @@ export const REPORT_TYPES = [
   { value: 'loyalty-redemption', label: 'Loyalty Redemption' },
   { value: 'loyalty-expiry', label: 'Loyalty Expiry' },
   { value: 'loyalty-referral', label: 'Loyalty Referral' },
+  { value: 'loyalty-program-impact', label: 'Loyalty Program Impact' },
+  { value: 'loyalty-fraud-signals', label: 'Loyalty Fraud Signals' },
+  { value: 'loyalty-audit', label: 'Loyalty Audit View' },
+];
+
+/** The 8 categories the Loyalty Program → Reports tab exposes, in spec order. Values match
+ *  backend REPORT_TYPE / LOYALTY_REPORT_TYPE_LIST exactly. */
+export const LOYALTY_REPORT_CATEGORIES = [
+  { value: 'loyalty-liability', label: 'Liability', fidelity: 'full' },
+  { value: 'loyalty-issuance', label: 'Issuance', fidelity: 'full' },
+  { value: 'loyalty-redemption', label: 'Redemption', fidelity: 'full' },
+  { value: 'loyalty-expiry', label: 'Expiry / Breakage', fidelity: 'full' },
+  { value: 'loyalty-referral', label: 'Referral Performance', fidelity: 'full' },
+  { value: 'loyalty-program-impact', label: 'Program Impact', fidelity: 'best-effort' },
+  { value: 'loyalty-fraud-signals', label: 'Fraud Signals', fidelity: 'best-effort' },
+  { value: 'loyalty-audit', label: 'Audit View', fidelity: 'full' },
 ];
 
 export const EXPORT_FORMATS = [

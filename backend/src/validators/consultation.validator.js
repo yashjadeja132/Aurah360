@@ -3,7 +3,10 @@ import {
   CONSULTATION_STATUS_LIST,
   PHOTO_TYPE_LIST,
   TEMPLATE_TYPE_LIST,
+  TEMPLATE_STATUS_LIST,
   FOLLOW_UP_UNIT_LIST,
+  FOLLOW_UP_PRIORITY_LIST,
+  CONTENT_CLASSIFICATION_LIST,
 } from '../enums/consultation.js';
 import { PATIENT_VISIBILITY_LIST } from '../enums/patient.js';
 
@@ -28,8 +31,30 @@ export const updateConsultationSchema = z.object({
       unit: z.enum(FOLLOW_UP_UNIT_LIST).optional().nullable(),
       reason: z.string().max(500).optional().nullable(),
       instructions: z.string().max(2000).optional().nullable(),
+      priority: z.enum(FOLLOW_UP_PRIORITY_LIST).optional().nullable(),
+      preferredDoctorId: objectId.optional().nullable(),
+      preferredBranchId: objectId.optional().nullable(),
+      reminderDate: z.coerce.date().optional().nullable(),
+      reminderNote: z.string().max(500).optional().nullable(),
     })
     .optional(),
+});
+
+/** §5 — mark a follow-up done/rescheduled from the cross-patient Follow-ups list. */
+export const followUpActionSchema = z.object({
+  status: z.enum(['PENDING', 'DONE', 'RESCHEDULED']),
+  reminderDate: z.coerce.date().optional().nullable(),
+  reminderNote: z.string().max(500).optional().nullable(),
+});
+
+/** §5 — cross-patient Follow-ups due/overdue list filters. */
+export const followUpQueueQuerySchema = z.object({
+  doctorId: objectId.optional(),
+  branchId: objectId.optional(),
+  status: z.enum(['PENDING', 'DONE', 'RESCHEDULED']).optional(),
+  scope: z.enum(['DUE', 'ALL']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 export const soapAutosaveSchema = z.object({
@@ -109,13 +134,47 @@ export const templateListQuerySchema = z.object({
   templateType: z.enum(TEMPLATE_TYPE_LIST).optional(),
 });
 
+/** Settings → Masters admin listing — unscoped (no required doctorId), paginated/searchable. */
+export const templateAdminListQuerySchema = z.object({
+  doctorId: objectId.optional(),
+  templateType: z.enum(TEMPLATE_TYPE_LIST).optional(),
+  status: z.enum(TEMPLATE_STATUS_LIST).optional(),
+  search: z.string().max(200).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const templateUpdateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  templateType: z.enum(TEMPLATE_TYPE_LIST).optional(),
+  content: z.record(z.any()).optional(),
+  isShared: z.boolean().optional(),
+});
+
 export const aiStubSchema = z.object({
   context: z.record(z.any()).optional(),
 });
 
-export const releaseSummarySchema = z.object({
-  summary: z.string().min(1).max(4000),
-});
+// §3.7 — per-section classification. `summary` stays accepted for back-compat callers (treated
+// as one PATIENT_FACING section server-side); new callers send `sections`.
+export const releaseSummarySchema = z
+  .object({
+    summary: z.string().min(1).max(4000).optional(),
+    sections: z
+      .array(
+        z.object({
+          key: z.string().min(1).max(100),
+          label: z.string().max(200).optional().nullable(),
+          text: z.string().max(4000).optional().default(''),
+          classification: z.enum(CONTENT_CLASSIFICATION_LIST).optional(),
+        })
+      )
+      .min(1)
+      .optional(),
+  })
+  .refine((v) => Boolean(v.summary) || Boolean(v.sections), {
+    message: 'Either summary or sections is required',
+  });
 
 export const amendConsultationSchema = z.object({
   text: z.string().min(1).max(4000),

@@ -10,6 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { useSessions, useCreateSession, useSessionDashboard } from '../hooks/useTreatmentSessions';
+import { useTreatmentPlan } from '@/modules/treatmentPlans/hooks/useTreatmentPlans';
+import { useInvoice } from '@/modules/billing/hooks/useBilling';
 import { SessionReadinessCell } from './SessionReadinessCell';
 import { SESSION_STATUS_LABELS } from '../constants';
 import { treatmentSessionPath } from '@/constants/routes';
@@ -28,8 +30,14 @@ export function SessionQueuePanel() {
   const [searchParams] = useSearchParams();
 
   const [status, setStatus] = useState('');
-  const [planId, setPlanId] = useState(searchParams.get('treatmentPlanId') || '');
-  const [invoiceId, setInvoiceId] = useState(searchParams.get('invoiceId') || '');
+  const planFromQuery = searchParams.get('treatmentPlanId') || '';
+  const invoiceFromQuery = searchParams.get('invoiceId') || '';
+  const [planId, setPlanId] = useState(planFromQuery);
+  const [invoiceId, setInvoiceId] = useState(invoiceFromQuery);
+  // Deep-linked from a plan/invoice — resolve to human-readable labels so the raw ObjectId
+  // never has to be shown as visible text; only queried when the id actually came from the URL.
+  const { data: linkedPlan } = useTreatmentPlan(planFromQuery || undefined);
+  const { data: linkedInvoice } = useInvoice(invoiceFromQuery || undefined);
 
   const { data: dashboard, isLoading: summaryLoading } = useSessionDashboard();
   const summary = dashboard?.summary || {};
@@ -80,16 +88,35 @@ export function SessionQueuePanel() {
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Input
-          placeholder={t('treatmentSessions.list.treatmentPlanIdPlaceholder', 'Treatment plan ID')}
-          value={planId}
-          onChange={(e) => setPlanId(e.target.value)}
-        />
-        <Input
-          placeholder={t('treatmentSessions.list.invoiceIdPlaceholder', 'Invoice ID')}
-          value={invoiceId}
-          onChange={(e) => setInvoiceId(e.target.value)}
-        />
+        {planFromQuery ? (
+          <div className="flex items-center rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <span className="font-medium">
+              {linkedPlan?.planNumber || t('common.loading', 'Loading…')}
+            </span>
+            {linkedPlan?.patient?.fullName && (
+              <span className="ml-1 text-muted-foreground">· {linkedPlan.patient.fullName}</span>
+            )}
+          </div>
+        ) : (
+          <Input
+            placeholder={t('treatmentSessions.list.treatmentPlanIdPlaceholder', 'Treatment plan ID')}
+            value={planId}
+            onChange={(e) => setPlanId(e.target.value)}
+          />
+        )}
+        {invoiceFromQuery ? (
+          <div className="flex items-center rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <span className="font-medium">
+              {linkedInvoice?.invoiceNumber || t('common.loading', 'Loading…')}
+            </span>
+          </div>
+        ) : (
+          <Input
+            placeholder={t('treatmentSessions.list.invoiceIdPlaceholder', 'Invoice ID')}
+            value={invoiceId}
+            onChange={(e) => setInvoiceId(e.target.value)}
+          />
+        )}
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">{t('treatmentSessions.list.allStatuses', 'All statuses')}</option>
           {Object.entries(SESSION_STATUS_LABELS).map(([k, v]) => (

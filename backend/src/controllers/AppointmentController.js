@@ -89,7 +89,7 @@ class AppointmentController {
   });
 
   noShow = asyncHandler(async (req, res) => {
-    const appointment = await this.lifecycleService.markNoShow(req.params.id, req.auth.userId, req);
+    const appointment = await this.lifecycleService.markNoShow(req.params.id, req.body, req.auth.userId, req);
     return ApiResponse.success(res, { message: 'Marked as no-show', data: { appointment } });
   });
 

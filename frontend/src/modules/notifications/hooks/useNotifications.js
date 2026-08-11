@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { QUERY_KEYS } from '@/constants/queryKeys';
 import { notificationsApi } from '../api/notificationsApi';
+import { consentApi } from '@/modules/reception/api/consentApi';
 
 function errMsg(e, fallback) {
   return e?.response?.data?.message || fallback;
@@ -50,10 +51,30 @@ export function useNotificationTemplates() {
   });
 }
 
+export function useProviderStatus() {
+  return useQuery({
+    queryKey: ['notifications', 'provider-status'],
+    queryFn: async () => (await notificationsApi.providerStatus()).data?.status,
+    staleTime: 60000,
+  });
+}
+
 export function useNotificationReports() {
   return useQuery({
     queryKey: QUERY_KEYS.NOTIFICATIONS_REPORTS(),
     queryFn: async () => (await notificationsApi.reports()).data,
+  });
+}
+
+/**
+ * Consent categories (Communications → Consent categories). Reuses the existing
+ * GET /consent/definitions endpoint — read-only list of published consent
+ * purposes/versions, no new backend surface.
+ */
+export function useConsentDefinitions() {
+  return useQuery({
+    queryKey: ['consent', 'definitions'],
+    queryFn: async () => (await consentApi.listDefinitions())?.data?.definitions || [],
   });
 }
 

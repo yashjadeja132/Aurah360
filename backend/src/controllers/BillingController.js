@@ -1,7 +1,10 @@
 import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import BillingService from '../services/BillingService.js';
-import { scopedListQuery } from '../helpers/scope.helper.js';
+import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js';
+import { ROLES } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { hasAnyPermission } from '../helpers/permission.helper.js';
 
 /**
  * SEC-030 — the three billing BROWSE lists (invoices, due payments, discount approvals) are
@@ -147,8 +150,46 @@ class BillingController {
   });
 
   refund = asyncHandler(async (req, res) => {
-    const result = await this.service.refund(req.params.paymentId, req.body, req.auth.userId, req);
-    return ApiResponse.success(res, { message: 'Refund recorded', data: result });
+    const canAutoApply =
+      req.auth?.role === ROLES.OWNER ||
+      hasAnyPermission(req.auth?.permissions || [], [
+        PERMISSIONS.BILLING_REFUND_APPROVE,
+        PERMISSIONS.BILLING_ALL,
+      ]);
+    const result = await this.service.requestRefund(
+      req.params.paymentId,
+      req.body,
+      req.auth,
+      req,
+      canAutoApply
+    );
+    return ApiResponse.success(res, {
+      message: result.status === 'PENDING_APPROVAL' ? 'Refund submitted for approval' : 'Refund recorded',
+      data: result,
+    });
+  });
+
+  refundApprovalQueue = asyncHandler(async (req, res) => {
+    const result = await this.service.listRefundApprovalQueue(
+      await scopedListQuery(req, { branch: true })
+    );
+    return ApiResponse.success(res, {
+      message: 'Refund approvals retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
+  });
+
+  approveRefund = asyncHandler(async (req, res) => {
+    const { branchId } = await resolveRecordScope(req, { branch: true, doctor: false });
+    const result = await this.service.approveRefund(req.params.id, req.body, req.auth.userId, req, branchId);
+    return ApiResponse.success(res, { message: 'Refund approved', data: result });
+  });
+
+  rejectRefund = asyncHandler(async (req, res) => {
+    const { branchId } = await resolveRecordScope(req, { branch: true, doctor: false });
+    const result = await this.service.rejectRefund(req.params.id, req.body, req.auth.userId, req, branchId);
+    return ApiResponse.success(res, { message: 'Refund rejected', data: result });
   });
 
   applyCreditNote = asyncHandler(async (req, res) => {

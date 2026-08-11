@@ -9,6 +9,8 @@ export const masterFormSchema = z.object({
   categoryId: z.string().optional().nullable(),
   durationMinutes: z.coerce.number().int().min(1).optional().nullable(),
   price: z.coerce.number().min(0).optional().nullable(),
+  effectiveFrom: z.string().optional().nullable(),
+  effectiveTo: z.string().optional().nullable(),
 });
 
 export const branchFormSchema = z.object({

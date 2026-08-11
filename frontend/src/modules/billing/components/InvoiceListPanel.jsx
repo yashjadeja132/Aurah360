@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { usePatientList } from '@/modules/patients/hooks/usePatients';
 import {
@@ -21,7 +22,13 @@ import {
   emptyItem,
 } from '@/modules/billing/constants';
 import { invoiceDetailPath, invoicePrintPath } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. A branch-scoped role
+// (Cashier, Branch Manager, Pharmacist) only ever works at their own branch, so the branch
+// picker is Owner/Admin-only for them — it is pre-filled and locked instead.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 /**
  * A.2 — invoice browse/create list. Extracted verbatim from the former `InvoiceListPage` body so
@@ -30,6 +37,8 @@ import { PERMISSIONS } from '@/constants/rbac';
  */
 export function InvoiceListPanel() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const planId = searchParams.get('treatmentPlanId') || '';
@@ -39,12 +48,17 @@ export function InvoiceListPanel() {
   const [paymentStatus, setPaymentStatus] = useState('');
   const [search, setSearch] = useState('');
   const [patientId, setPatientId] = useState(patientFromQuery);
+  const [patientSearch, setPatientSearch] = useState('');
 
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
-  const effectiveBranch = branchId || branches[0]?.id || '';
+  const effectiveBranch = !isGlobalScope ? user?.branch || '' : branchId || branches[0]?.id || '';
 
-  const { data: patientsData } = usePatientList({ limit: 50 });
+  const { data: patientsData, isFetching: patientsFetching } = usePatientList({
+    search: patientSearch,
+    limit: 10,
+    page: 1,
+  });
   const patients = patientsData?.items || [];
 
   const { data, isLoading } = useInvoices({
@@ -79,22 +93,35 @@ export function InvoiceListPanel() {
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Select value={effectiveBranch} onChange={(e) => setBranchId(e.target.value)}>
-          <option value="">{t('billing.list.branch', 'Branch')}</option>
-          {branches.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.displayName || b.name}
-            </option>
-          ))}
-        </Select>
-        <Select value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-          <option value="">{t('billing.list.patient', 'Patient')}</option>
-          {patients.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.fullName || `${p.firstName} ${p.lastName}`} ({p.mrn})
-            </option>
-          ))}
-        </Select>
+        {isGlobalScope ? (
+          <Select value={effectiveBranch} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">{t('billing.list.branch', 'Branch')}</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.displayName || b.name}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Input
+            value={branches.find((b) => b.id === effectiveBranch)?.displayName || branches.find((b) => b.id === effectiveBranch)?.name || ''}
+            disabled
+            readOnly
+          />
+        )}
+        <SearchableCombobox
+          value={patientId}
+          onChange={setPatientId}
+          options={patients}
+          search={patientSearch}
+          onSearchChange={setPatientSearch}
+          isLoading={patientsFetching}
+          loadingText={t('common.searching', 'Searching…')}
+          renderLabel={(p) => p.fullName || `${p.firstName} ${p.lastName}`}
+          renderSublabel={(p) => p.mrn}
+          placeholder={t('billing.list.patient', 'Patient')}
+          emptyText={t('billing.list.noPatientMatch', 'No match')}
+        />
         <Select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
           <option value="">{t('billing.list.allPaymentStatus', 'All payment status')}</option>
           {Object.entries(PAYMENT_STATUS_LABELS).map(([k, v]) => (

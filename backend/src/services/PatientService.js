@@ -6,6 +6,7 @@ import MasterRepository from '../repositories/MasterRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
 import PatientDuplicateService from './PatientDuplicateService.js';
 import AuditService from './AuditService.js';
+import { eventBus } from '../events/eventBus.js';
 import { generateMrn, generatePatientCode } from '../helpers/mrn.helper.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { TIMELINE_EVENT } from '../enums/patient.js';
@@ -250,6 +251,16 @@ class PatientService {
       resourceType: 'Patient',
       resourceId: id,
       req,
+    });
+
+    // E10 PROFILE_COMPLETION (loyalty) — reception's WEB profile-edit flow is the only place a
+    // patient's contact/demographic fields get filled in, so this is the natural trigger point.
+    // The listener (backend/src/loyalty/eventSubscriptions.js) decides completeness/one-time-ness;
+    // this call site just reports "a profile save happened".
+    eventBus.emitDomain('PatientProfileUpdated', {
+      patientId: id,
+      branchId: (existing.primaryBranchId || payload.primaryBranchId)?.toString?.() || existing.primaryBranchId,
+      emittedAt: new Date().toISOString(),
     });
 
     return this.#mapPatient(await this.patientRepository.findByIdPopulated(id));

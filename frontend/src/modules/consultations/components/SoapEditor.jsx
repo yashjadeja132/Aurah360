@@ -2,11 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Label } from '@/components/ui/label';
 import { DraftIndicator } from './StatusBadges';
+import { DiagnosisForm } from './DiagnosisExamForms';
 import { useSoapAutosave, useSoapVersions } from '../hooks/useConsultations';
 import { useInsertTarget } from '../hooks/useInsertTarget';
 import { INSERT_TARGETS, appendText } from '../insertBus';
 
-export function SoapEditor({ consultationId, soap, readOnly }) {
+/**
+ * §3 workspace diagram + §3.1: "Assessment / diagnosis" is one section of the note, not a separate
+ * clinical record. The diagnosis picker/favorites (`DiagnosisForm`) is mounted directly under the
+ * Assessment textarea so the doctor writes the free-text assessment and picks/confirms the
+ * structured diagnosis in one place. `DiagnosisForm` keeps its own save call (useSaveDiagnosis) —
+ * this is a UI relocation only, the diagnosis data model and API are untouched.
+ */
+export function SoapEditor({ consultationId, soap, diagnosis, readOnly }) {
   const { t } = useTranslation();
   const [form, setForm] = useState({
     subjective: '',
@@ -81,6 +89,11 @@ export function SoapEditor({ consultationId, soap, readOnly }) {
             disabled={readOnly}
             placeholder={`${label}…`}
           />
+          {key === 'assessment' && (
+            <div className="mt-2 rounded-lg border bg-muted/30 p-3">
+              <DiagnosisForm consultationId={consultationId} diagnosis={diagnosis} readOnly={readOnly} />
+            </div>
+          )}
         </div>
       ))}
       {versions?.versions?.length > 0 && (

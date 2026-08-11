@@ -115,6 +115,32 @@ export function useStartSession(id) {
   });
 }
 
+export function usePauseSession(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => treatmentSessionsApi.pause(id, payload),
+    onSuccess: () => {
+      toast.success('Session paused');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_SESSION_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Pause failed')),
+  });
+}
+
+export function useResumeSession(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => treatmentSessionsApi.resume(id),
+    onSuccess: () => {
+      toast.success('Session resumed');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_SESSION_DETAIL(id) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Resume failed')),
+  });
+}
+
 export function useCompleteSession(id) {
   const qc = useQueryClient();
   return useMutation({

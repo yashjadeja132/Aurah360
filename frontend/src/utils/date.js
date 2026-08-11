@@ -86,4 +86,44 @@ export function addDaysKey(offset, value) {
   return localDateKey(d);
 }
 
-export default { localDateKey, todayKey, startOfWeek, startOfWeekKey, addDaysKey };
+/**
+ * The 1st of the local calendar month containing `value` (defaults to now), as a `YYYY-MM-DD` key.
+ */
+export function startOfMonthKey(value) {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+}
+
+/**
+ * Full Mon–Sun week grid (as `YYYY-MM-DD` keys) covering every day of the month that contains
+ * `monthKey` (a `YYYY-MM-DD`, day ignored) — i.e. the cells a month-view calendar renders,
+ * including the lead-in/lead-out days from the adjacent months that complete the first/last week.
+ */
+export function getMonthGridKeys(monthKey) {
+  const first = new Date(`${startOfMonthKey(monthKey)}T00:00:00`);
+  const gridStart = startOfWeek(first);
+  const lastOfMonth = new Date(first);
+  lastOfMonth.setMonth(lastOfMonth.getMonth() + 1);
+  lastOfMonth.setDate(0); // last day of target month
+  const gridEnd = startOfWeek(lastOfMonth);
+  gridEnd.setDate(gridEnd.getDate() + 6); // that week's Sunday
+
+  const days = [];
+  const cursor = new Date(gridStart);
+  while (cursor <= gridEnd) {
+    days.push(localDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+export default {
+  localDateKey,
+  todayKey,
+  startOfWeek,
+  startOfWeekKey,
+  addDaysKey,
+  startOfMonthKey,
+  getMonthGridKeys,
+};

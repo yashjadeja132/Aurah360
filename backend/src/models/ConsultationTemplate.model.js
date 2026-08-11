@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { TEMPLATE_TYPE_LIST } from '../enums/consultation.js';
+import { TEMPLATE_TYPE_LIST, TEMPLATE_STATUS, TEMPLATE_STATUS_LIST } from '../enums/consultation.js';
 
 const consultationTemplateSchema = new mongoose.Schema(
   {
@@ -18,6 +18,17 @@ const consultationTemplateSchema = new mongoose.Schema(
     },
     content: { type: mongoose.Schema.Types.Mixed, default: {} },
     isShared: { type: Boolean, default: false },
+    /**
+     * Versioning/approval — mirrors TreatmentProtocol's convention (see
+     * models/TreatmentProtocol.model.js §10.2): a new edit bumps `version` and resets to DRAFT;
+     * `previousVersionId` chains back to what it replaced so a template used on an already
+     * signed consultation is never silently mutated out from under that record.
+     */
+    version: { type: Number, default: 1 },
+    previousVersionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ConsultationTemplate', default: null },
+    status: { type: String, enum: TEMPLATE_STATUS_LIST, default: TEMPLATE_STATUS.DRAFT, index: true },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    approvedAt: { type: Date, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null, index: true },
@@ -36,6 +47,11 @@ consultationTemplateSchema.methods.toSafeObject = function toSafeObject(extra = 
     templateType: this.templateType,
     content: this.content || {},
     isShared: this.isShared,
+    version: this.version,
+    previousVersionId: this.previousVersionId ? this.previousVersionId.toString() : null,
+    status: this.status,
+    approvedBy: this.approvedBy ? this.approvedBy.toString() : null,
+    approvedAt: this.approvedAt,
     createdBy: this.createdBy ? this.createdBy.toString() : null,
     updatedBy: this.updatedBy ? this.updatedBy.toString() : null,
     createdAt: this.createdAt,

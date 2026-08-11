@@ -3,12 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import {
   useNotificationTemplates,
   useUpdateTemplate,
 } from '@/modules/notifications/hooks/useNotifications';
+
+const WHATSAPP_APPROVAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'];
 
 /**
  * Body of the former TemplateManagerPage. That page carried no per-action
@@ -23,11 +26,17 @@ export function NotificationTemplatesPanel() {
   const [editing, setEditing] = useState(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [dltHeader, setDltHeader] = useState('');
+  const [dltTemplateId, setDltTemplateId] = useState('');
+  const [whatsappApprovalStatus, setWhatsappApprovalStatus] = useState('PENDING');
 
   const startEdit = (tpl) => {
     setEditing(tpl.id);
     setSubject(tpl.subject || '');
     setBody(tpl.body || '');
+    setDltHeader(tpl.dltHeader || '');
+    setDltTemplateId(tpl.dltTemplateId || '');
+    setWhatsappApprovalStatus(tpl.whatsappApprovalStatus || 'PENDING');
   };
 
   return (
@@ -51,7 +60,13 @@ export function NotificationTemplatesPanel() {
                   {tpl.name} <span className="text-xs text-muted-foreground">{tpl.code}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {t('notifications.templates.event')}: {tpl.eventName || '—'}
+                  {t('notifications.templates.event')}: {tpl.eventName || '—'} · {tpl.channel}
+                  {tpl.channel === 'SMS' && (tpl.dltHeader || tpl.dltTemplateId) && (
+                    <> · DLT {tpl.dltHeader || '—'}/{tpl.dltTemplateId || '—'}</>
+                  )}
+                  {tpl.channel === 'WHATSAPP' && tpl.whatsappApprovalStatus && (
+                    <> · {tpl.whatsappApprovalStatus}</>
+                  )}
                 </p>
               </div>
               <Button size="sm" variant="outline" onClick={() => startEdit(tpl)}>
@@ -70,11 +85,54 @@ export function NotificationTemplatesPanel() {
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                 />
+                {tpl.channel === 'SMS' && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input
+                      value={dltHeader}
+                      onChange={(e) => setDltHeader(e.target.value)}
+                      placeholder={t('notifications.templates.dltHeaderPlaceholder', 'DLT header')}
+                    />
+                    <Input
+                      value={dltTemplateId}
+                      onChange={(e) => setDltTemplateId(e.target.value)}
+                      placeholder={t(
+                        'notifications.templates.dltTemplateIdPlaceholder',
+                        'DLT template ID'
+                      )}
+                    />
+                  </div>
+                )}
+                {tpl.channel === 'WHATSAPP' && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      {t('notifications.templates.whatsappApprovalStatus', 'WhatsApp approval status')}
+                    </p>
+                    <Select
+                      value={whatsappApprovalStatus}
+                      onChange={(e) => setWhatsappApprovalStatus(e.target.value)}
+                    >
+                      {WHATSAPP_APPROVAL_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
                 <Button
                   size="sm"
                   disabled={update.isPending}
                   onClick={() =>
-                    update.mutate({ id: tpl.id, subject, body }, { onSuccess: () => setEditing(null) })
+                    update.mutate(
+                      {
+                        id: tpl.id,
+                        subject,
+                        body,
+                        ...(tpl.channel === 'SMS' ? { dltHeader, dltTemplateId } : {}),
+                        ...(tpl.channel === 'WHATSAPP' ? { whatsappApprovalStatus } : {}),
+                      },
+                      { onSuccess: () => setEditing(null) }
+                    )
                   }
                 >
                   {t('common.save')}

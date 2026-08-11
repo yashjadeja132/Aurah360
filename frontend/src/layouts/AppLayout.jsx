@@ -2,6 +2,7 @@ import { Suspense, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
+  Building2,
   Users,
   UserCircle,
   LogOut,
@@ -32,6 +33,8 @@ import {
   Gift,
   FlaskConical,
   HardHat,
+  FileSearch,
+  Plug,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/contexts/AuthContext';
@@ -86,10 +89,12 @@ const navGroups = [
     items: [
       { to: APP_ROUTES.CONSULTATIONS, labelKey: 'nav.emr', label: 'EMR', icon: FileHeart, roles: [...MANAGERS, ...CLINICAL], permissions: [PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL] },
       { to: APP_ROUTES.REPORT_REVIEW_QUEUE, labelKey: 'nav.reportReview', label: 'Report review', icon: FlaskConical, roles: [...ADMINS, ROLES.DOCTOR], permissions: [PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL] },
+      { to: APP_ROUTES.FOLLOW_UPS_QUEUE, labelKey: 'nav.followUps', label: 'Follow-ups', icon: CalendarClock, roles: [...ADMINS, ROLES.DOCTOR], permissions: [PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL] },
       { to: APP_ROUTES.PRESCRIPTIONS, labelKey: 'nav.prescriptions', label: 'Prescriptions', icon: Pill, roles: [...MANAGERS, ...CLINICAL, ROLES.PHARMACIST], permissions: [PERMISSIONS.PRESCRIPTION_VIEW, PERMISSIONS.PRESCRIPTION_ALL] },
       // Plans / sessions / protocols / packages / safety are now tabs inside the Treatments hub,
       // so three sidebar entries collapse to one. The old routes stay registered for deep links.
       { to: APP_ROUTES.TREATMENT_DASHBOARD, labelKey: 'nav.treatments', label: 'Treatments', icon: Activity, roles: [...MANAGERS, ...CLINICAL, ROLES.TECHNICIAN], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL, PERMISSIONS.TREATMENT_PLAN_VIEW, PERMISSIONS.TREATMENT_PLAN_ALL, PERMISSIONS.ADVERSE_EVENT_VIEW, PERMISSIONS.ADVERSE_EVENT_CREATE, PERMISSIONS.PATCH_TEST_VIEW] },
+      { to: APP_ROUTES.TREATMENT_PLAN_APPROVAL_QUEUE, labelKey: 'nav.treatmentPlanApprovals', label: 'Approve treatment plans', icon: Stethoscope, roles: [...ADMINS, ROLES.DOCTOR], permissions: [PERMISSIONS.TREATMENT_PLAN_APPROVE, PERMISSIONS.TREATMENT_PLAN_ALL] },
       { to: APP_ROUTES.TECHNICIAN_WORKLIST, labelKey: 'nav.technicianWorklist', label: 'My worklist', icon: HardHat, roles: [...ADMINS, ROLES.TECHNICIAN], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL] },
     ],
   },
@@ -134,6 +139,9 @@ const navGroups = [
       { to: APP_ROUTES.SETTINGS_RESOURCES, labelKey: 'nav.resources', label: 'Resources', icon: DoorOpen, permissions: [PERMISSIONS.RESOURCES_VIEW, PERMISSIONS.RESOURCES_ALL] },
       { to: APP_ROUTES.SETTINGS_PRIVACY, labelKey: 'nav.privacy', label: 'Privacy & access', icon: ShieldCheck, permissions: [PERMISSIONS.PRIVACY_REQUEST_VIEW, PERMISSIONS.PRIVACY_REQUEST_ALL, PERMISSIONS.BREAK_GLASS] },
       { to: APP_ROUTES.SETTINGS_AI_GOVERNANCE, labelKey: 'nav.aiGovernance', label: 'AI governance', icon: Sparkles, permissions: [PERMISSIONS.AI_GOVERNANCE_VIEW, PERMISSIONS.AI_GOVERNANCE_MANAGE] },
+      { to: APP_ROUTES.SETTINGS_INTEGRATIONS, labelKey: 'nav.integrations', label: 'Integrations', icon: Plug, permissions: [PERMISSIONS.AI_GOVERNANCE_VIEW, PERMISSIONS.AI_GOVERNANCE_MANAGE, PERMISSIONS.NOTIFICATIONS_VIEW, PERMISSIONS.NOTIFICATIONS_ALL] },
+      { to: APP_ROUTES.SETTINGS_ORGANIZATION, labelKey: 'nav.organizationProfile', label: 'Organization profile', icon: Building2, permissions: [PERMISSIONS.BRANCHES_VIEW, PERMISSIONS.BRANCHES_ALL] },
+      { to: APP_ROUTES.SETTINGS_AUDIT_LOG, labelKey: 'nav.auditLog', label: 'Audit log', icon: FileSearch, permissions: [PERMISSIONS.AUDIT_VIEW] },
       {
         to: APP_ROUTES.SETTINGS,
         labelKey: 'nav.settings',

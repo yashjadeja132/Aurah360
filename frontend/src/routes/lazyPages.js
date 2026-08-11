@@ -7,6 +7,7 @@ export const ForgotPasswordPage = lazy(() => import('@/pages/auth/ForgotPassword
 export const OwnerLandingPage = lazy(() => import('@/pages/dashboard/OwnerLandingPage'));
 export const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
 export const DoctorMyDayPage = lazy(() => import('@/pages/doctor/DoctorMyDayPage'));
+export const NurseTodayPage = lazy(() => import('@/pages/nurse/NurseTodayPage'));
 export const StaffListPage = lazy(() => import('@/pages/users/StaffListPage'));
 export const StaffCreatePage = lazy(() => import('@/pages/users/StaffCreatePage'));
 export const StaffDetailPage = lazy(() => import('@/pages/users/StaffDetailPage'));
@@ -22,6 +23,10 @@ export const MasterPage = lazy(() => import('@/pages/settings/masters/MasterPage
 export const ResourcesPage = lazy(() => import('@/pages/settings/ResourcesPage'));
 export const PrivacyAdminPage = lazy(() => import('@/pages/settings/PrivacyAdminPage'));
 export const AiGovernancePage = lazy(() => import('@/pages/settings/AiGovernancePage'));
+export const IntegrationsPage = lazy(() => import('@/pages/settings/IntegrationsPage'));
+export const OrganizationProfilePage = lazy(() => import('@/pages/settings/OrganizationProfilePage'));
+export const AuditLogPage = lazy(() => import('@/pages/audit/AuditLogPage'));
+export const ConsultationTemplatesPage = lazy(() => import('@/pages/settings/masters/ConsultationTemplatesPage'));
 export const DoctorListPage = lazy(() => import('@/pages/doctors/DoctorListPage'));
 export const DoctorCreatePage = lazy(() => import('@/pages/doctors/DoctorCreatePage'));
 export const DoctorDetailPage = lazy(() => import('@/pages/doctors/DoctorDetailPage'));
@@ -52,10 +57,16 @@ export const ConsultationWorkspacePage = lazy(
 export const ReportReviewQueuePage = lazy(
   () => import('@/pages/consultations/ReportReviewQueuePage')
 );
+export const FollowUpsQueuePage = lazy(
+  () => import('@/pages/consultations/FollowUpsQueuePage')
+);
 export const PrescriptionListPage = lazy(() => import('@/pages/prescriptions/PrescriptionListPage'));
 export const PrescriptionEditorPage = lazy(() => import('@/pages/prescriptions/PrescriptionEditorPage'));
 export const PrescriptionPrintPage = lazy(() => import('@/pages/prescriptions/PrescriptionPrintPage'));
 export const TreatmentPlanListPage = lazy(() => import('@/pages/treatmentPlans/TreatmentPlanListPage'));
+export const TreatmentPlanApprovalQueuePage = lazy(
+  () => import('@/pages/treatmentPlans/TreatmentPlanApprovalQueuePage')
+);
 export const TreatmentPlanBuilderPage = lazy(
   () => import('@/pages/treatmentPlans/TreatmentPlanBuilderPage')
 );
@@ -65,6 +76,7 @@ export const PackageBuilderPage = lazy(() => import('@/pages/treatmentPlans/Pack
 export const InvoiceListPage = lazy(() => import('@/pages/billing/InvoiceListPage'));
 export const CashClosePage = lazy(() => import('@/pages/billing/CashClosePage'));
 export const DiscountApprovalQueuePage = lazy(() => import('@/pages/billing/DiscountApprovalQueuePage'));
+export const RefundApprovalQueuePage = lazy(() => import('@/pages/billing/RefundApprovalQueuePage'));
 export const DuePaymentsPage = lazy(() => import('@/pages/billing/DuePaymentsPage'));
 export const BillingHubPage = lazy(() => import('@/pages/billing/BillingHubPage'));
 export const CashierDashboardPage = lazy(() => import('@/pages/billing/CashierDashboardPage'));
@@ -81,6 +93,7 @@ export const SessionPrintPage = lazy(() => import('@/pages/treatmentSessions/Ses
 export const PharmacyDashboardPage = lazy(() => import('@/pages/pharmacy/PharmacyDashboardPage'));
 export const PrescriptionQueuePage = lazy(() => import('@/pages/pharmacy/PrescriptionQueuePage'));
 export const DispenseScreenPage = lazy(() => import('@/pages/pharmacy/DispenseScreenPage'));
+export const DirectSalePage = lazy(() => import('@/pages/pharmacy/DirectSalePage'));
 export const InventoryDashboardPage = lazy(() => import('@/pages/inventory/InventoryDashboardPage'));
 export const InventoryTransfersPage = lazy(() => import('@/pages/inventory/InventoryTransfersPage'));
 export const StockLedgerPage = lazy(() => import('@/pages/inventory/StockLedgerPage'));

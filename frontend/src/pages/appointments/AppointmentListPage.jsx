@@ -12,11 +12,21 @@ import { useAppointmentList } from '@/modules/appointments/hooks/useAppointments
 import { STATUS_OPTIONS, APPOINTMENT_STATUS_LABELS } from '@/modules/appointments/constants';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
+import { useMasterActive } from '@/modules/masters/hooks/useMasters';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. A branch-scoped role only
+// ever sees their own branch's appointments (the backend defaults/pins the list to it), so the
+// "all branches" filter is Owner/Admin-only — for everyone else it is a control they can't
+// actually use.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 export default function AppointmentListPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const [filters, setFilters] = useState({
     page: 1,
     limit: 20,
@@ -24,6 +34,7 @@ export default function AppointmentListPage() {
     status: '',
     doctorId: '',
     branchId: '',
+    serviceId: '',
     from: '',
     to: '',
     sortBy: 'appointmentDate',
@@ -41,6 +52,7 @@ export default function AppointmentListPage() {
   const { data, isLoading, isError, error } = useAppointmentList(params);
   const { data: doctorsData } = useDoctorList({ limit: 50 });
   const { data: branchesData } = useBranchList({ limit: 50 });
+  const { data: services = [] } = useMasterActive('services');
 
   return (
     <section className="space-y-6">
@@ -95,13 +107,24 @@ export default function AppointmentListPage() {
             <option key={d.id} value={d.id}>{d.user?.fullName || d.doctorCode}</option>
           ))}
         </Select>
+        {isGlobalScope && (
+          <Select
+            value={filters.branchId}
+            onChange={(e) => setFilters((p) => ({ ...p, branchId: e.target.value, page: 1 }))}
+          >
+            <option value="">{t('appointments.list.allBranches', 'All branches')}</option>
+            {(branchesData?.items || []).map((b) => (
+              <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
+            ))}
+          </Select>
+        )}
         <Select
-          value={filters.branchId}
-          onChange={(e) => setFilters((p) => ({ ...p, branchId: e.target.value, page: 1 }))}
+          value={filters.serviceId}
+          onChange={(e) => setFilters((p) => ({ ...p, serviceId: e.target.value, page: 1 }))}
         >
-          <option value="">{t('appointments.list.allBranches', 'All branches')}</option>
-          {(branchesData?.items || []).map((b) => (
-            <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
+          <option value="">{t('appointments.list.allServices', 'All services')}</option>
+          {(Array.isArray(services) ? services : []).map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </Select>
         <Input

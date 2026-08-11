@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import {
   Dialog,
   DialogContent,
@@ -15,6 +16,7 @@ import {
 import { usePatientList } from '@/modules/patients/hooks/usePatients';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useMasterActive } from '@/modules/masters/hooks/useMasters';
+import { QuickAddPatientDialog } from '@/modules/patients/components/QuickAddPatientDialog';
 import { appointmentsApi } from '@/modules/appointments/api/appointmentsApi';
 import { QUEUE_PRIORITY_OPTIONS } from '../constants';
 import { useWalkIn } from '../hooks/useReception';
@@ -36,23 +38,14 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
   const [endTime, setEndTime] = useState('');
   const [slots, setSlots] = useState([]);
   const [queuePriority, setQueuePriority] = useState('NORMAL');
+  const [handoffNote, setHandoffNote] = useState('');
   const [patientSearch, setPatientSearch] = useState('');
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   const patients = patientsData?.items || [];
   const doctors = doctorsData?.items || [];
   const services = servicesData || [];
-
-  const filteredPatients = useMemo(() => {
-    const q = patientSearch.trim().toLowerCase();
-    if (!q) return patients.slice(0, 30);
-    return patients.filter(
-      (p) =>
-        p.mrn?.toLowerCase().includes(q) ||
-        p.firstName?.toLowerCase().includes(q) ||
-        p.lastName?.toLowerCase().includes(q) ||
-        p.mobile?.includes(q)
-    );
-  }, [patients, patientSearch]);
+  const [pendingName, setPendingName] = useState('');
 
   useEffect(() => {
     if (!open || !doctorId || !branchId) {
@@ -84,7 +77,7 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
       startTime,
       endTime,
       queuePriority,
-      receptionNotes: 'Walk-in',
+      receptionNotes: handoffNote.trim() || 'Walk-in',
     });
     onOpenChange(false);
   };
@@ -102,43 +95,55 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-2">
             <Label>{t('reception.walkIn.searchPatient')}</Label>
-            <Input
-              value={patientSearch}
-              onChange={(e) => setPatientSearch(e.target.value)}
+            <SearchableCombobox
+              value={patientId}
+              onChange={setPatientId}
+              options={patients}
+              filterKeys={['mrn', 'firstName', 'lastName', 'mobile']}
+              renderLabel={(p) => `${p.mrn} — ${[p.firstName, p.lastName].filter(Boolean).join(' ')}`}
+              renderSublabel={(p) => p.mobile}
               placeholder={t('reception.walkIn.searchPatientPlaceholder')}
+              emptyText={t('appointments.wizard.noPatientMatch', 'No match')}
+              onAddNew={(typed) => {
+                setPendingName(typed);
+                setQuickAddOpen(true);
+              }}
+              addNewLabel={t('appointments.wizard.addNewPatient', 'Add new patient')}
             />
-            <Select value={patientId} onChange={(e) => setPatientId(e.target.value)} required>
-              <option value="">{t('reception.walkIn.selectPatient')}</option>
-              {filteredPatients.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.mrn} — {[p.firstName, p.lastName].filter(Boolean).join(' ')}
-                </option>
-              ))}
-            </Select>
           </div>
+          <QuickAddPatientDialog
+            open={quickAddOpen}
+            onOpenChange={setQuickAddOpen}
+            defaultBranchId={branchId}
+            defaultName={pendingName}
+            onCreated={(patient) => setPatientId(patient.id)}
+          />
 
           <div className="space-y-2">
             <Label>{t('reception.doctor')}</Label>
-            <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} required>
-              <option value="">{t('reception.filters.selectDoctor')}</option>
-              {(Array.isArray(doctors) ? doctors : []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.doctorCode} — {d.user?.fullName || d.name || t('reception.doctor')}
-                </option>
-              ))}
-            </Select>
+            <SearchableCombobox
+              value={doctorId}
+              onChange={setDoctorId}
+              options={Array.isArray(doctors) ? doctors : []}
+              filterKeys={['doctorCode']}
+              renderLabel={(d) => d.user?.fullName || d.name || t('reception.doctor')}
+              renderSublabel={(d) => `(${d.doctorCode})`}
+              placeholder={t('reception.filters.selectDoctor')}
+              emptyText={t('appointments.wizard.noDoctorMatch', 'No doctor matches')}
+            />
           </div>
 
           <div className="space-y-2">
             <Label>{t('reception.walkIn.service')}</Label>
-            <Select value={serviceId} onChange={(e) => setServiceId(e.target.value)} required>
-              <option value="">{t('reception.walkIn.selectService')}</option>
-              {(Array.isArray(services) ? services : []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
+            <SearchableCombobox
+              value={serviceId}
+              onChange={setServiceId}
+              options={Array.isArray(services) ? services : []}
+              filterKeys={['name']}
+              renderLabel={(s) => s.name}
+              placeholder={t('reception.walkIn.selectService')}
+              emptyText={t('appointments.wizard.noServiceMatch', 'No service matches')}
+            />
           </div>
 
           <div className="space-y-2">
@@ -173,6 +178,15 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
                 </option>
               ))}
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t('reception.walkIn.handoffNote', 'Handoff note (optional)')}</Label>
+            <Input
+              value={handoffNote}
+              onChange={(e) => setHandoffNote(e.target.value)}
+              placeholder={t('reception.checkIn.optionalNotes')}
+            />
           </div>
 
           <DialogFooter>

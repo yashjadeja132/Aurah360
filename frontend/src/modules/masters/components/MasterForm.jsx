@@ -29,6 +29,8 @@ export function MasterForm({
       categoryId: '',
       durationMinutes: 30,
       price: 0,
+      effectiveFrom: '',
+      effectiveTo: '',
       ...defaultValues,
     },
   });
@@ -60,6 +62,17 @@ export function MasterForm({
         <div className="space-y-2">
           <Label htmlFor="color">Color</Label>
           <Input id="color" placeholder="#2563eb" {...register('color')} />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="effectiveFrom">Effective from</Label>
+          <Input id="effectiveFrom" type="date" {...register('effectiveFrom')} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="effectiveTo">Effective to</Label>
+          <Input id="effectiveTo" type="date" {...register('effectiveTo')} />
         </div>
       </div>
 

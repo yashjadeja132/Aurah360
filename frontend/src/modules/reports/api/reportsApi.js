@@ -16,18 +16,20 @@ export const reportsApi = {
   generate(type, params) {
     return api.get(`/reports/generate/${type}`, { params }).then((r) => r.data);
   },
-  async exportDownload(type, params = {}) {
+  async exportDownload(type, params = {}, stepUpToken) {
     const res = await api.get(`/reports/export/${type}`, {
       params,
       responseType: 'blob',
+      headers: stepUpToken ? { 'x-step-up-token': stepUpToken } : undefined,
     });
     const disposition = res.headers['content-disposition'] || '';
     const match = disposition.match(/filename="?([^"]+)"?/i);
     const filename = match?.[1] || `${type}-export`;
     return { blob: res.data, filename };
   },
-  queueExport(type, payload) {
-    return api.post(`/reports/export/${type}/queue`, payload).then((r) => r.data);
+  queueExport(type, payload, stepUpToken) {
+    const config = stepUpToken ? { headers: { 'x-step-up-token': stepUpToken } } : undefined;
+    return api.post(`/reports/export/${type}/queue`, payload, config).then((r) => r.data);
   },
   getRun(id) {
     return api.get(`/reports/runs/${id}`).then((r) => r.data);

@@ -88,13 +88,13 @@ class DoctorController {
   });
 
   upsertSchedules = asyncHandler(async (req, res) => {
-    const schedules = await this.scheduleService.upsertWeekly(
+    const result = await this.scheduleService.upsertWeekly(
       req.params.id,
       req.body,
       req.auth.userId,
       req
     );
-    return ApiResponse.success(res, { message: 'Schedule updated', data: schedules });
+    return ApiResponse.success(res, { message: 'Schedule updated', data: result });
   });
 
   deleteSchedule = asyncHandler(async (req, res) => {
@@ -123,24 +123,24 @@ class DoctorController {
   });
 
   createLeave = asyncHandler(async (req, res) => {
-    const leave = await this.leaveService.create(
+    const result = await this.leaveService.create(
       req.params.id,
       req.body,
       req.auth.userId,
       req
     );
-    return ApiResponse.created(res, { message: 'Leave added', data: { leave } });
+    return ApiResponse.created(res, { message: 'Leave added', data: result });
   });
 
   updateLeave = asyncHandler(async (req, res) => {
-    const leave = await this.leaveService.update(
+    const result = await this.leaveService.update(
       req.params.id,
       req.params.leaveId,
       req.body,
       req.auth.userId,
       req
     );
-    return ApiResponse.success(res, { message: 'Leave updated', data: { leave } });
+    return ApiResponse.success(res, { message: 'Leave updated', data: result });
   });
 
   deleteLeave = asyncHandler(async (req, res) => {

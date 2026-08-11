@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -120,18 +121,17 @@ export function InventoryTransfersPanel() {
               </div>
               <div className="space-y-2">
                 <Label>{t('inventory.transfers.item', 'Item')}</Label>
-                <Select
+                <SearchableCombobox
                   value={form.fromItemId}
-                  onChange={set('fromItemId')}
+                  onChange={(id) => setForm((f) => ({ ...f, fromItemId: id }))}
                   disabled={!form.fromBranchId}
-                >
-                  <option value="">{t('inventory.transfers.selectItem', 'Select item')}</option>
-                  {items.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} ({i.sku})
-                    </option>
-                  ))}
-                </Select>
+                  options={items}
+                  filterKeys={['name', 'sku']}
+                  renderLabel={(i) => i.name}
+                  renderSublabel={(i) => `(${i.sku})`}
+                  placeholder={t('inventory.transfers.selectItem', 'Select item')}
+                  emptyText={t('inventory.transfers.selectItem', 'Select item')}
+                />
               </div>
               <div className="space-y-2">
                 <Label>{t('inventory.transfers.quantity', 'Quantity')}</Label>

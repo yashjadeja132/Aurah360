@@ -20,6 +20,8 @@ import {
   creditNoteIdParamSchema,
   discountDecisionSchema,
   discountApprovalQueueQuerySchema,
+  refundDecisionSchema,
+  refundApprovalQueueQuerySchema,
   duePaymentsQuerySchema,
   voidDraftSchema,
   cancelInvoiceSchema,
@@ -38,6 +40,7 @@ const payment = [PERMISSIONS.BILLING_PAYMENT, PERMISSIONS.BILLING_ALL];
 const refund = [PERMISSIONS.BILLING_REFUND, PERMISSIONS.BILLING_ALL];
 const print = [PERMISSIONS.BILLING_PRINT, PERMISSIONS.BILLING_ALL];
 const discountApprove = [PERMISSIONS.BILLING_DISCOUNT_APPROVE, PERMISSIONS.BILLING_ALL];
+const refundApprove = [PERMISSIONS.BILLING_REFUND_APPROVE, PERMISSIONS.BILLING_ALL];
 /**
  * MON-002 — deliberately WITHOUT PERMISSIONS.BILLING_ALL. Every other billing capability accepts
  * the module wildcard, but cancelling an issued invoice and writing off a debt destroy
@@ -116,6 +119,26 @@ router.get(
   requirePermission(...discountApprove),
   validate({ query: discountApprovalQueueQuerySchema }),
   controller.discountApprovalQueue
+);
+
+// A.8 — must stay above '/:id' so 'refund-approvals' is not swallowed as an invoice id.
+router.get(
+  '/refund-approvals',
+  requirePermission(...refundApprove),
+  validate({ query: refundApprovalQueueQuerySchema }),
+  controller.refundApprovalQueue
+);
+router.post(
+  '/refunds/:id/approve',
+  requirePermission(...refundApprove),
+  validate({ params: invoiceIdParamSchema, body: refundDecisionSchema }),
+  controller.approveRefund
+);
+router.post(
+  '/refunds/:id/reject',
+  requirePermission(...refundApprove),
+  validate({ params: invoiceIdParamSchema, body: refundDecisionSchema }),
+  controller.rejectRefund
 );
 
 router.get(

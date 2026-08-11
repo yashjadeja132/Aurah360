@@ -41,6 +41,9 @@ export default function AppointmentDetailPage() {
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [rsDate, setRsDate] = useState('');
   const [rsSlot, setRsSlot] = useState(null);
+  const [noShowOpen, setNoShowOpen] = useState(false);
+  const [noShowReason, setNoShowReason] = useState('');
+  const [noShowRecall, setNoShowRecall] = useState(false);
 
   const { data: slotsData } = useAvailableAppointmentSlots(
     {
@@ -82,7 +85,7 @@ export default function AppointmentDetailPage() {
                 {t('appointments.detail.confirm', 'Confirm')}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={() => noShow.mutateAsync(id).then(() => toast.success(t('appointments.detail.toastNoShow', 'No-show')))}>
+            <Button size="sm" variant="outline" onClick={() => setNoShowOpen((v) => !v)}>
               {t('appointments.detail.noShow', 'No-show')}
             </Button>
           </PermissionGuard>
@@ -236,6 +239,54 @@ export default function AppointmentDetailPage() {
                 }}
               >
                 {t('appointments.detail.confirmCancel', 'Confirm cancellation')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {noShowOpen && (
+        <Card>
+          <CardHeader><CardTitle>{t('appointments.detail.noShowTitle', 'Mark as no-show')}</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              placeholder={t('appointments.detail.noShowReasonPlaceholder', 'Reason (optional)')}
+              value={noShowReason}
+              onChange={(e) => setNoShowReason(e.target.value)}
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={noShowRecall}
+                onChange={(e) => setNoShowRecall(e.target.checked)}
+              />
+              {t('appointments.detail.noShowRecall', 'Add to recall worklist for rebooking follow-up')}
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setNoShowOpen(false)}>
+                {t('common.close', 'Close')}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={noShow.isPending}
+                onClick={async () => {
+                  try {
+                    await noShow.mutateAsync({
+                      id,
+                      reason: noShowReason.trim() || undefined,
+                      addToRecallWorklist: noShowRecall,
+                    });
+                    toast.success(t('appointments.detail.toastNoShow', 'No-show'));
+                    setNoShowOpen(false);
+                    setNoShowReason('');
+                    setNoShowRecall(false);
+                  } catch (err) {
+                    toast.error(err?.response?.data?.message || t('appointments.detail.noShowFailed', 'Failed to mark no-show'));
+                  }
+                }}
+              >
+                {t('appointments.detail.confirmNoShow', 'Confirm no-show')}
               </Button>
             </div>
           </CardContent>

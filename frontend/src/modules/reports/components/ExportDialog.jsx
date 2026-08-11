@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { StepUpModal } from '@/modules/auth/components/StepUpModal';
 import { EXPORT_FORMATS } from '../constants';
 import { reportsApi } from '../api/reportsApi';
 
@@ -14,20 +15,38 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// SEC-002 — exportDownload uses responseType: 'blob', so an error response (including the
+// STEP_UP_REQUIRED 403) still arrives as a Blob rather than parsed JSON. Read it back out to
+// find the error code.
+async function readErrorCode(err) {
+  const data = err?.response?.data;
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text();
+      return JSON.parse(text)?.code;
+    } catch {
+      return undefined;
+    }
+  }
+  return data?.code;
+}
+
 export function ExportDialog({ reportType, filters = {}, open, onClose }) {
   const { t } = useTranslation();
   const [format, setFormat] = useState('csv');
   const [busy, setBusy] = useState(false);
+  const [stepUpOpen, setStepUpOpen] = useState(false);
 
   if (!open) return null;
 
-  async function handleExport() {
+  async function runExport(stepUpToken) {
     setBusy(true);
     try {
-      const { blob, filename } = await reportsApi.exportDownload(reportType, {
-        ...filters,
-        format,
-      });
+      const { blob, filename } = await reportsApi.exportDownload(
+        reportType,
+        { ...filters, format },
+        stepUpToken
+      );
       downloadBlob(blob, filename);
       toast.success(
         format === 'pdf'
@@ -36,10 +55,20 @@ export function ExportDialog({ reportType, filters = {}, open, onClose }) {
       );
       onClose?.();
     } catch (err) {
+      // SEC-002 — sensitive exports require a fresh step-up token; prompt for one and retry.
+      const code = await readErrorCode(err);
+      if (code === 'STEP_UP_REQUIRED') {
+        setStepUpOpen(true);
+        return;
+      }
       toast.error(err.message || t('reports.exportDialog.exportFailed', 'Export failed'));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleExport() {
+    await runExport();
   }
 
   return (
@@ -73,6 +102,17 @@ export function ExportDialog({ reportType, filters = {}, open, onClose }) {
           </Button>
         </div>
       </div>
+
+      <StepUpModal
+        open={stepUpOpen}
+        onOpenChange={setStepUpOpen}
+        title={t('reports.exportDialog.stepUpTitle', 'Confirm export')}
+        description={t(
+          'reports.exportDialog.stepUpDescription',
+          'This report may contain sensitive patient or financial data. Re-authenticate to continue.'
+        )}
+        onVerified={(stepUpToken) => runExport(stepUpToken)}
+      />
     </div>
   );
 }

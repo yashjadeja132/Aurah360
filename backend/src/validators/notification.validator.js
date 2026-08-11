@@ -4,6 +4,7 @@ import {
   NOTIFICATION_STATUS_LIST,
   PHI_BLOCKED_KEYWORDS,
   PHI_BLOCKED_MERGE_FIELDS,
+  WHATSAPP_APPROVAL_STATUS_LIST,
 } from '../enums/notification.js';
 
 /**
@@ -87,6 +88,12 @@ const baseTemplateSchema = z.object({
   body: z.string().min(1),
   variables: z.array(z.string()).optional(),
   isActive: z.boolean().optional(),
+  // DLT SMS registration fields — meaningful only for channel === 'SMS', but accepted
+  // regardless of channel so the schema never blocks saving other channel types.
+  dltHeader: z.string().optional().nullable(),
+  dltTemplateId: z.string().optional().nullable(),
+  // WhatsApp Business/Meta approval state — meaningful only for channel === 'WHATSAPP'.
+  whatsappApprovalStatus: z.enum(WHATSAPP_APPROVAL_STATUS_LIST).optional().nullable(),
 });
 
 export const templateSchema = addPhiGuard(baseTemplateSchema);

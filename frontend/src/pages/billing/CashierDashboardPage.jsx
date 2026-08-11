@@ -15,7 +15,12 @@ import { useCashierDay } from '@/modules/billing/hooks/useCashierDay';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { formatMoney, PAYMENT_METHOD_OPTIONS } from '@/modules/billing/constants';
 import { APP_ROUTES } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. The Cashier landing page is
+// used by the branch-scoped Cashier role — their own branch is fixed context, not a picker.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 const METHOD_LABEL = Object.fromEntries(PAYMENT_METHOD_OPTIONS.map((m) => [m.value, m.label]));
 
@@ -28,12 +33,15 @@ const METHOD_LABEL = Object.fromEntries(PAYMENT_METHOD_OPTIONS.map((m) => [m.val
  */
 export default function CashierDashboardPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
   const [branchId, setBranchId] = useState('');
+  const effectiveBranch = !isGlobalScope ? user?.branch || '' : branchId;
 
   const { awaitingBilling, dues, duesAtDesk, approvals, collection } = useCashierDay({
-    branchId: branchId || undefined,
+    branchId: effectiveBranch || undefined,
   });
 
   return (
@@ -51,14 +59,16 @@ export default function CashierDashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-48">
-            <option value="">{t('billing.cashier.allBranches', 'All branches')}</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.displayName || b.name}
-              </option>
-            ))}
-          </Select>
+          {isGlobalScope && (
+            <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-48">
+              <option value="">{t('billing.cashier.allBranches', 'All branches')}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.displayName || b.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <Button asChild variant="outline">
             <Link to={APP_ROUTES.BILLING}>{t('billing.cashier.openBilling', 'Open billing')}</Link>
           </Button>

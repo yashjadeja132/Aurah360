@@ -17,6 +17,10 @@ const branchFormSchema = z.object({
   state: z.string().optional().nullable(),
   country: z.string().optional().nullable(),
   postalCode: z.string().optional().nullable(),
+  latitude: z.union([z.string(), z.number()]).optional().nullable()
+    .transform((v) => (v === '' || v === null || v === undefined ? null : Number(v))),
+  longitude: z.union([z.string(), z.number()]).optional().nullable()
+    .transform((v) => (v === '' || v === null || v === undefined ? null : Number(v))),
   timezone: z.string().optional(),
   currency: z.string().optional(),
   workingHours: z.string().optional().nullable(),
@@ -42,6 +46,8 @@ export function BranchForm({ mode = 'create', defaultValues, onSubmit, isSubmitt
       state: 'Gujarat',
       country: 'India',
       postalCode: '',
+      latitude: '',
+      longitude: '',
       timezone: 'Asia/Kolkata',
       currency: 'INR',
       workingHours: '10:00 - 19:00',
@@ -82,6 +88,8 @@ export function BranchForm({ mode = 'create', defaultValues, onSubmit, isSubmitt
         <Field label="State"><Input {...register('state')} /></Field>
         <Field label="Country"><Input {...register('country')} /></Field>
         <Field label="Postal code"><Input {...register('postalCode')} /></Field>
+        <Field label="Latitude"><Input type="number" step="any" {...register('latitude')} /></Field>
+        <Field label="Longitude"><Input type="number" step="any" {...register('longitude')} /></Field>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">

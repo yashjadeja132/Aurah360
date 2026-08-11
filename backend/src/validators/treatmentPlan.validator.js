@@ -102,6 +102,28 @@ export const rejectPlanSchema = z.object({
   reason: z.string().max(1000).optional().nullable(),
 });
 
+// Approve-queue queries/actions (§3.5 approval gap).
+export const pendingApprovalQuerySchema = z.object({
+  doctorId: objectId.optional(),
+  branchId: objectId.optional(),
+  onHold: z.enum(['true', 'false']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const holdPlanSchema = z.object({
+  note: z.string().max(1000).optional().nullable(),
+});
+
+// `escalatedTo` is optional: this codebase has no staff-picker endpoint a DOCTOR can call (GET
+// /users requires USERS_VIEW, which the DOCTOR role doesn't hold — see CrmFeedbackPanel.jsx's
+// identical note). Escalating just flags the plan + reason for senior/owner review; a specific
+// assignee can still be set later by whoever picks it up.
+export const escalatePlanSchema = z.object({
+  escalatedTo: objectId.optional().nullable(),
+  reason: z.string().max(1000).optional().nullable(),
+});
+
 export const transferPackageOwnershipSchema = z.object({
   targetBranchId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid branch id'),
   reason: z.string().min(1, 'A reason is required to transfer this package').max(1000),

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
@@ -25,46 +25,78 @@ import { INSERT_TARGETS, emitInsert } from '../insertBus';
 
 const LIKELIHOOD_VARIANT = { high: 'warning', medium: 'info', low: 'secondary' };
 
-/** The mandatory label carried by every AI block. Never rendered as a conclusion. */
-function AiLabel({ className }) {
+/**
+ * A single, prominent disclaimer for the whole results area — replaces a per-section badge
+ * repeated nine times over, which was pure visual noise without adding any real caution (a
+ * doctor scanning nine identical pills learns nothing from the 2nd through 9th one).
+ */
+function VerifyBanner() {
   const { t } = useTranslation();
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full bg-info-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-info',
-        className
+    <div className="flex items-center gap-2 rounded-lg border border-info/40 bg-info-soft px-3 py-2 text-xs font-medium text-info">
+      <Sparkles className="h-4 w-4 shrink-0" />
+      {t(
+        'consultations.copilot.verifyBannerAll',
+        'Everything below is an AI suggestion, not a diagnosis — verify before you use any of it.'
       )}
-    >
-      <Sparkles className="h-3 w-3" />
-      {t('consultations.copilot.verifyLabel', 'AI suggestion — verify before use')}
-    </span>
+    </div>
   );
 }
 
-function Section({ icon: Icon, title, children, tone = 'default', action }) {
+/**
+ * A section that can be collapsed. Sections carrying the most time-critical or highest-signal
+ * content default OPEN (defaultOpen=true); longer reference-style lists default CLOSED so the
+ * first screenful is short and scannable, with a count badge so nothing feels hidden — the
+ * doctor expands what's relevant to this patient instead of scrolling past everything.
+ */
+function Section({
+  icon: Icon,
+  title,
+  children,
+  tone = 'default',
+  action,
+  count,
+  defaultOpen = true,
+  openSignal,
+  sectionRef,
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  // openSignal is a changing token bumped by the mode buttons above — when a doctor clicks
+  // "Draft note" etc. we need the matching section to expand even if it defaults closed.
+  useEffect(() => {
+    if (openSignal) setOpen(true);
+  }, [openSignal]);
+
   return (
     <section
+      ref={sectionRef}
       className={cn(
-        'rounded-lg border p-3',
+        'rounded-lg border',
         tone === 'danger' ? 'border-destructive/50 bg-destructive/5' : 'border-border/70 bg-background'
       )}
     >
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full flex-wrap items-center justify-between gap-2 p-3 text-left"
+      >
         <h4
           className={cn(
             'flex items-center gap-2 text-sm font-semibold',
             tone === 'danger' ? 'text-destructive' : 'text-foreground'
           )}
         >
+          {open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
           {Icon && <Icon className="h-4 w-4" />}
           {title}
+          {typeof count === 'number' && (
+            <Badge variant={tone === 'danger' ? 'destructive' : 'secondary'}>{count}</Badge>
+          )}
         </h4>
-        <div className="flex items-center gap-2">
-          {action}
-          <AiLabel />
-        </div>
-      </div>
-      {children}
+        {action && <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>{action}</div>}
+      </button>
+      {open && <div className="space-y-2 px-3 pb-3">{children}</div>}
     </section>
   );
 }
@@ -132,6 +164,42 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
   const [showPrevious, setShowPrevious] = useState(false);
   const diff = useDiff(previous, current);
 
+  /**
+   * Four distinct entry points instead of one combined "Analyse" button. The backend still runs
+   * one full copilot analysis per call (narrowing the prompt per-mode would mean touching the
+   * shared JSON-schema contract in clinical-copilot-v1.txt, which is riskier than this pass
+   * warrants) — each button fires the same run() and then jumps the doctor straight to the
+   * section their chosen action is about, expanding it if it defaults closed. `pendingFocus`
+   * survives the async run and is consumed once the matching section mounts.
+   */
+  const [pendingFocus, setPendingFocus] = useState(null);
+  const [focusSignals, setFocusSignals] = useState({});
+  const sectionRefs = useRef({});
+
+  const MODE_SECTION = {
+    suggest_questions: 'questions',
+    summarize_timeline: 'summary',
+    summarize_report: 'investigations',
+    draft_note: 'patientAdvice',
+  };
+
+  const runMode = (mode) => {
+    setPendingFocus(MODE_SECTION[mode] || null);
+    run({ includePhotos });
+  };
+
+  useEffect(() => {
+    if (!pendingFocus || !current) return;
+    const key = pendingFocus;
+    setPendingFocus(null);
+    // Bump the section's open signal (forces it open even if defaultOpen=false) and scroll to it
+    // once React has had a chance to render the new output.
+    setFocusSignals((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
+    requestAnimationFrame(() => {
+      sectionRefs.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [pendingFocus, current]);
+
   const accept = (payload, target, label) => {
     emitInsert(target, payload);
     onInsert?.(target);
@@ -185,15 +253,33 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
               />
               {t('consultations.copilot.includePhotos', 'Include clinical photos')}
             </label>
-            <Button size="sm" onClick={() => run({ includePhotos })} disabled={isRunning}>
-              <Sparkles className="h-4 w-4" />
-              {isRunning
-                ? t('consultations.copilot.running', 'Analysing…')
-                : current
-                  ? t('consultations.copilot.rerun', 'Re-run')
-                  : t('consultations.copilot.start', 'Analyse this consultation')}
-            </Button>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => runMode('suggest_questions')} disabled={isRunning}>
+            <ClipboardList className="h-4 w-4" />
+            {t('consultations.copilot.modeSuggestQuestions', 'Suggest questions')}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => runMode('summarize_timeline')} disabled={isRunning}>
+            <RefreshCw className="h-4 w-4" />
+            {t('consultations.copilot.modeSummarizeTimeline', 'Summarize timeline')}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => runMode('summarize_report')} disabled={isRunning}>
+            <FlaskConical className="h-4 w-4" />
+            {t('consultations.copilot.modeSummarizeReport', 'Summarize report')}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => runMode('draft_note')} disabled={isRunning}>
+            <Languages className="h-4 w-4" />
+            {t('consultations.copilot.modeDraftNote', 'Draft note')}
+          </Button>
+          <Button size="sm" onClick={() => runMode(null)} disabled={isRunning}>
+            <Sparkles className="h-4 w-4" />
+            {isRunning
+              ? t('consultations.copilot.running', 'Analysing…')
+              : current
+                ? t('consultations.copilot.rerun', 'Re-run')
+                : t('consultations.copilot.start', 'Analyse this consultation')}
+          </Button>
         </div>
         {chiefComplaint && (
           <p className="text-xs text-muted-foreground">
@@ -245,11 +331,13 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
 
         {output && (
           <>
+            <VerifyBanner />
             {/* SAFETY FIRST — red flags sit above the differential whenever present. */}
             {output.red_flags.length > 0 && (
               <Section
                 icon={ShieldAlert}
                 tone="danger"
+                count={output.red_flags.length}
                 title={t('consultations.copilot.redFlags', 'Red flags — rule out now')}
               >
                 <ul className="space-y-1.5">
@@ -368,7 +456,12 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             )}
 
             {output.summary && (
-              <Section icon={Info} title={t('consultations.copilot.summary', 'Context summary')}>
+              <Section
+                icon={Info}
+                title={t('consultations.copilot.summary', 'Context summary')}
+                sectionRef={(el) => { sectionRefs.current.summary = el; }}
+                openSignal={focusSignals.summary}
+              >
                 <p className="whitespace-pre-wrap text-sm text-muted-foreground">{output.summary}</p>
               </Section>
             )}
@@ -378,6 +471,8 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
               <Section
                 icon={ClipboardList}
                 title={t('consultations.copilot.questions', 'Questions to ask the patient')}
+                sectionRef={(el) => { sectionRefs.current.questions = el; }}
+                openSignal={focusSignals.questions}
                 action={
                   <Badge variant={answeredCount ? 'success' : 'secondary'}>
                     {t('consultations.copilot.answeredCount', '{{answered}} of {{total}} answered', {
@@ -459,6 +554,7 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             {output.possible_conditions.length > 0 && (
               <Section
                 icon={Stethoscope}
+                count={output.possible_conditions.length}
                 title={t('consultations.copilot.differential', 'Conditions to consider (not a diagnosis)')}
               >
                 <ul className="space-y-2">
@@ -514,7 +610,14 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             )}
 
             {output.investigations.length > 0 && (
-              <Section icon={FlaskConical} title={t('consultations.copilot.investigations', 'Investigations to consider')}>
+              <Section
+                icon={FlaskConical}
+                count={output.investigations.length}
+                defaultOpen={false}
+                title={t('consultations.copilot.investigations', 'Investigations to consider')}
+                sectionRef={(el) => { sectionRefs.current.investigations = el; }}
+                openSignal={focusSignals.investigations}
+              >
                 <ul className="space-y-2">
                   {output.investigations.map((inv) => (
                     <li
@@ -547,53 +650,41 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             )}
 
             {output.medication_suggestions.length > 0 && (
-              <Section icon={Pill} title={t('consultations.copilot.medications', 'Medication options (verify dose, allergy, interactions)')}>
+              <Section
+                icon={Pill}
+                count={output.medication_suggestions.length}
+                defaultOpen={false}
+                title={t('consultations.copilot.medications', 'Medication options (verify dose, allergy, interactions)')}
+              >
                 <ul className="space-y-2">
                   {output.medication_suggestions.map((m) => (
                     <li key={`${m.generic_name}-${m.form_strength}`} className="rounded-md border bg-card p-2.5">
-                      <p className="text-sm font-semibold">{m.generic_name}</p>
-                      <dl className="mt-1 grid gap-x-3 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-2">
-                        {m.composition && (
-                          <div>
-                            <dt className="inline font-medium text-foreground">
-                              {t('consultations.copilot.med.composition', 'Composition')}:{' '}
-                            </dt>
-                            <dd className="inline">{m.composition}</dd>
-                          </div>
-                        )}
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-sm font-semibold">{m.generic_name}</p>
                         {m.form_strength && (
-                          <div>
-                            <dt className="inline font-medium text-foreground">
-                              {t('consultations.copilot.med.formStrength', 'Form / strength')}:{' '}
-                            </dt>
-                            <dd className="inline">{m.form_strength}</dd>
-                          </div>
+                          <span className="text-xs text-muted-foreground">{m.form_strength}</span>
                         )}
-                        {m.typical_dosing && (
-                          <div>
-                            <dt className="inline font-medium text-foreground">
-                              {t('consultations.copilot.med.dosing', 'Typical dosing')}:{' '}
-                            </dt>
-                            <dd className="inline">{m.typical_dosing}</dd>
-                          </div>
-                        )}
-                        {m.typical_duration && (
-                          <div>
-                            <dt className="inline font-medium text-foreground">
-                              {t('consultations.copilot.med.duration', 'Typical duration')}:{' '}
-                            </dt>
-                            <dd className="inline">{m.typical_duration}</dd>
-                          </div>
-                        )}
-                        {m.indian_brand_example && (
-                          <div>
-                            <dt className="inline font-medium text-foreground">
-                              {t('consultations.copilot.med.brand', 'Brand example')}:{' '}
-                            </dt>
-                            <dd className="inline">{m.indian_brand_example}</dd>
-                          </div>
-                        )}
-                      </dl>
+                      </div>
+                      {(m.typical_dosing || m.typical_duration) && (
+                        <p className="mt-1 text-sm">
+                          {m.typical_dosing}
+                          {m.typical_dosing && m.typical_duration && (
+                            <span className="text-muted-foreground"> · </span>
+                          )}
+                          {m.typical_duration && <span className="text-muted-foreground">{m.typical_duration}</span>}
+                        </p>
+                      )}
+                      {(m.composition || m.indian_brand_example) && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {m.composition}
+                          {m.composition && m.indian_brand_example && ' · '}
+                          {m.indian_brand_example && (
+                            <>
+                              {t('consultations.copilot.med.brand', 'Brand example')}: {m.indian_brand_example}
+                            </>
+                          )}
+                        </p>
+                      )}
                       <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-warning-soft px-2 py-1 text-xs font-medium text-warning">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span>
@@ -628,7 +719,11 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             )}
 
             {output.procedural_options_note && (
-              <Section icon={Info} title={t('consultations.copilot.procedures', 'Procedural options note')}>
+              <Section
+                icon={Info}
+                defaultOpen={false}
+                title={t('consultations.copilot.procedures', 'Procedural options note')}
+              >
                 <p className="whitespace-pre-wrap text-sm text-muted-foreground">
                   {output.procedural_options_note}
                 </p>
@@ -652,7 +747,12 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             )}
 
             {output.diet_lifestyle_advice.length > 0 && (
-              <Section icon={ClipboardList} title={t('consultations.copilot.lifestyle', 'Diet and lifestyle advice')}>
+              <Section
+                icon={ClipboardList}
+                count={output.diet_lifestyle_advice.length}
+                defaultOpen={false}
+                title={t('consultations.copilot.lifestyle', 'Diet and lifestyle advice')}
+              >
                 <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
                   {output.diet_lifestyle_advice.map((a) => (
                     <li key={a}>{a}</li>
@@ -678,7 +778,13 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
             )}
 
             {(output.aftercare_advice_english || output.patient_advice_gujarati) && (
-              <Section icon={Languages} title={t('consultations.copilot.patientAdvice', 'Patient advice draft')}>
+              <Section
+                icon={Languages}
+                defaultOpen={false}
+                title={t('consultations.copilot.patientAdvice', 'Patient advice draft')}
+                sectionRef={(el) => { sectionRefs.current.patientAdvice = el; }}
+                openSignal={focusSignals.patientAdvice}
+              >
                 {output.aftercare_advice_english && (
                   <div className="rounded-md border bg-card p-2.5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

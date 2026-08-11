@@ -20,6 +20,8 @@ const baseMasterSchema = z.object({
   sortOrder: z.coerce.number().int().optional(),
   color: z.string().max(30).optional().nullable(),
   metadata: z.record(z.any()).optional(),
+  effectiveFrom: z.coerce.date().optional().nullable(),
+  effectiveTo: z.coerce.date().optional().nullable(),
 });
 
 export const createMasterBodySchema = baseMasterSchema;

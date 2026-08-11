@@ -19,6 +19,10 @@ import { PERMISSIONS } from '@/constants/rbac';
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
 // and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
 import { todayKey } from '@/utils/date';
+import { useBranchList } from '@/modules/branches/hooks/useBranches';
+import { useMasterActive } from '@/modules/masters/hooks/useMasters';
+import { usePackages } from '@/modules/treatmentPlans/hooks/useTreatmentPlans';
+import { TargetingPills } from '@/modules/loyalty/components/TargetingPills';
 import {
   useLoyaltyRules,
   useCreateLoyaltyRule,
@@ -63,6 +67,9 @@ const EMPTY_DRAFT = {
   minimumVisits: '',
   requiresMarketingConsent: false,
   effectiveFrom: todayKey(),
+  branchIds: [],
+  serviceIds: [],
+  packageIds: [],
 };
 
 /**
@@ -162,9 +169,44 @@ function PreviewWidget({ draft }) {
 function RuleFormFields({ draft, setDraft }) {
   const { t } = useTranslation();
   const set = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }));
+  const { data: branchesData, isLoading: branchesLoading } = useBranchList({ limit: 50 });
+  const { data: services = [], isLoading: servicesLoading } = useMasterActive('services');
+  const { data: packages = [], isLoading: packagesLoading } = usePackages();
 
   return (
     <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <TargetingPills
+          label={t('loyalty.rules.fields.branchIds', 'Branches')}
+          options={branchesData?.items || []}
+          value={draft.branchIds || []}
+          onChange={(v) => set('branchIds', v)}
+          getId={(b) => b.id}
+          getLabel={(b) => b.displayName || b.name}
+          allLabel={t('loyalty.rules.fields.allBranches', 'All branches')}
+          isLoading={branchesLoading}
+        />
+        <TargetingPills
+          label={t('loyalty.rules.fields.serviceIds', 'Services')}
+          options={services}
+          value={draft.serviceIds || []}
+          onChange={(v) => set('serviceIds', v)}
+          getId={(s) => s.id}
+          getLabel={(s) => s.name}
+          allLabel={t('loyalty.rules.fields.allServices', 'All services')}
+          isLoading={servicesLoading}
+        />
+        <TargetingPills
+          label={t('loyalty.rules.fields.packageIds', 'Packages')}
+          options={packages}
+          value={draft.packageIds || []}
+          onChange={(v) => set('packageIds', v)}
+          getId={(p) => p.id}
+          getLabel={(p) => p.name}
+          allLabel={t('loyalty.rules.fields.allPackages', 'All packages')}
+          isLoading={packagesLoading}
+        />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label>{t('loyalty.rules.fields.formulaType', 'Formula type')}</Label>
