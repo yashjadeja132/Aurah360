@@ -7,6 +7,7 @@ const labOrderSchema = new mongoose.Schema(
   {
     consultationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Consultation', required: true, index: true },
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true, index: true },
+    branchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
     testName: { type: String, required: true, trim: true },
     reason: { type: String, default: null },
     dueDate: { type: Date, default: null },
@@ -27,6 +28,7 @@ labOrderSchema.methods.toSafeObject = function toSafeObject() {
     id: this._id.toString(),
     consultationId: this.consultationId.toString(),
     patientId: this.patientId.toString(),
+    branchId: this.branchId?.toString?.() || this.branchId,
     testName: this.testName,
     reason: this.reason,
     dueDate: this.dueDate,

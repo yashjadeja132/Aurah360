@@ -6,6 +6,7 @@ import {
   TreatmentSessionLogRepository,
 } from '../repositories/TreatmentSessionRepository.js';
 import TreatmentPlanRepository from '../repositories/TreatmentPlanRepository.js';
+import AppointmentRepository from '../repositories/AppointmentRepository.js';
 import { InvoiceRepository } from '../repositories/BillingRepository.js';
 import { ClinicalPhotoRepository } from '../repositories/ConsultationClinicalRepository.js';
 import AuditService from './AuditService.js';
@@ -32,6 +33,7 @@ import {
   PREFLIGHT_GATE,
 } from '../enums/treatmentSession.js';
 import { TREATMENT_PLAN_STATUS, CONSENT_STATUS } from '../enums/treatmentPlan.js';
+import { APPOINTMENT_STATUS, ACTIVE_APPOINTMENT_STATUSES } from '../enums/appointment.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { PHOTO_TYPE } from '../enums/consultation.js';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -52,6 +54,7 @@ class TreatmentSessionService {
     this.sessionRepository = new TreatmentSessionRepository();
     this.logRepository = new TreatmentSessionLogRepository();
     this.planRepository = new TreatmentPlanRepository();
+    this.appointmentRepository = new AppointmentRepository();
     this.invoiceRepository = new InvoiceRepository();
     this.photoRepository = new ClinicalPhotoRepository();
     this.auditService = new AuditService();
@@ -61,6 +64,26 @@ class TreatmentSessionService {
     this.resourceService = new ResourceService();
     this.inventoryService = new InventoryService();
     this.loyaltyLedgerService = new LoyaltyLedgerService();
+  }
+
+  /**
+   * APT-005 — advance the linked Appointment's status to keep it in step with treatment
+   * execution (the same shape as QueueService#assignToQueue's WAITING flip). Forward-only: an
+   * appointment already at or past `targetStatus` in the active lifecycle (or already off it
+   * entirely — COMPLETED/CANCELLED/NO_SHOW/RESCHEDULED) must never be moved, so this is a no-op
+   * unless the current status is strictly earlier than the target in ACTIVE_APPOINTMENT_STATUSES.
+   */
+  async #advanceAppointmentStatus(appointmentId, targetStatus, actorId) {
+    if (!appointmentId) return;
+    const appointment = await this.appointmentRepository.findByIdNotDeleted(appointmentId);
+    if (!appointment) return;
+    const currentIdx = ACTIVE_APPOINTMENT_STATUSES.indexOf(appointment.status);
+    const targetIdx = ACTIVE_APPOINTMENT_STATUSES.indexOf(targetStatus);
+    if (currentIdx === -1 || targetIdx === -1 || currentIdx >= targetIdx) return;
+    await this.appointmentRepository.updateById(appointment._id, {
+      status: targetStatus,
+      updatedBy: actorId,
+    });
   }
 
   /**
@@ -1049,6 +1072,14 @@ class TreatmentSessionService {
       req,
     });
 
+    // APT-005 — a treatment session existing for this appointment means it's due for treatment
+    // execution; reflect that on the appointment record itself.
+    await this.#advanceAppointmentStatus(
+      session.appointmentId,
+      APPOINTMENT_STATUS.AWAITING_TREATMENT,
+      actorId
+    );
+
     return this.getById(session._id.toString());
   }
 
@@ -1318,6 +1349,9 @@ class TreatmentSessionService {
     };
     eventBus.emitDomain(TREATMENT_SESSION_EVENTS.STARTED, eventPayload);
     emitQueueEvent(SOCKET_EVENTS.TREATMENT_SESSION_STARTED, eventPayload);
+
+    // APT-005 — the session is now actually in progress; the linked appointment must say so too.
+    await this.#advanceAppointmentStatus(session.appointmentId, APPOINTMENT_STATUS.TREATMENT, actorId);
 
     return this.getById(id);
   }

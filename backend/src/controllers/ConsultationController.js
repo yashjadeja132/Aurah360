@@ -320,25 +320,6 @@ class ConsultationController {
     return ApiResponse.success(res, { message: 'Template approved', data: { template } });
   });
 
-  aiSummarize = asyncHandler(async (req, res) => {
-    const result = await this.consultationService.getAiInterface().summarizeConsultation(req.body);
-    return ApiResponse.success(res, { data: result });
-  });
-
-  aiDraftSoap = asyncHandler(async (req, res) => {
-    const result = await this.consultationService.getAiInterface().draftSoap(req.body);
-    return ApiResponse.success(res, { data: result });
-  });
-
-  aiSuggestDiagnosis = asyncHandler(async (req, res) => {
-    const result = await this.consultationService.getAiInterface().suggestDiagnosis(req.body);
-    return ApiResponse.success(res, { data: result });
-  });
-
-  aiSuggestQuestions = asyncHandler(async (req, res) => {
-    const result = await this.consultationService.getAiInterface().suggestQuestions(req.body);
-    return ApiResponse.success(res, { data: result });
-  });
 }
 
 export default ConsultationController;

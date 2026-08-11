@@ -16,7 +16,6 @@ import {
 import PatientTimelineService from './PatientTimelineService.js';
 import AppointmentLifecycleService from './AppointmentLifecycleService.js';
 import AuditService from './AuditService.js';
-import ConsultationAiInterface from './ai/ConsultationAiInterface.js';
 import PrescriptionRepository from '../repositories/PrescriptionRepository.js';
 import TreatmentPlanRepository from '../repositories/TreatmentPlanRepository.js';
 import LabOrder, {
@@ -64,7 +63,6 @@ class ConsultationService {
     this.photoRepository = new ClinicalPhotoRepository();
     this.timelineService = new PatientTimelineService();
     this.auditService = new AuditService();
-    this.ai = new ConsultationAiInterface();
     this.prescriptionRepository = new PrescriptionRepository();
     this.treatmentPlanRepository = new TreatmentPlanRepository();
     this.appointmentLifecycleService = new AppointmentLifecycleService();
@@ -618,6 +616,7 @@ class ConsultationService {
       ...payload,
       consultationId,
       patientId: consultation.patientId,
+      branchId: consultation.branchId,
       orderedBy: actorId,
     });
 
@@ -914,9 +913,6 @@ class ConsultationService {
     return order.toSafeObject();
   }
 
-  getAiInterface() {
-    return this.ai;
-  }
 }
 
 export default ConsultationService;

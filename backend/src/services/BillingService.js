@@ -4,6 +4,7 @@ import { config } from '../config/index.js';
 import { InvoiceRepository, PaymentRepository } from '../repositories/BillingRepository.js';
 import TreatmentPlanRepository from '../repositories/TreatmentPlanRepository.js';
 import ConsultationRepository from '../repositories/ConsultationRepository.js';
+import AppointmentRepository from '../repositories/AppointmentRepository.js';
 import PatientRepository from '../repositories/PatientRepository.js';
 import BranchRepository from '../repositories/BranchRepository.js';
 import AuditService from './AuditService.js';
@@ -39,6 +40,7 @@ import {
   REFUND_APPROVAL_STATUS_LIST,
   WRITE_OFF_REASON_LIST,
 } from '../enums/billing.js';
+import { APPOINTMENT_STATUS, ACTIVE_APPOINTMENT_STATUSES } from '../enums/appointment.js';
 import RefundRequest from '../models/RefundRequest.model.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import CreditNote from '../models/CreditNote.model.js';
@@ -57,6 +59,7 @@ class BillingService {
     this.paymentRepository = new PaymentRepository();
     this.treatmentPlanRepository = new TreatmentPlanRepository();
     this.consultationRepository = new ConsultationRepository();
+    this.appointmentRepository = new AppointmentRepository();
     this.patientRepository = new PatientRepository();
     this.branchRepository = new BranchRepository();
     this.auditService = new AuditService();
@@ -67,6 +70,26 @@ class BillingService {
 
   #round(n) {
     return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+  }
+
+  /**
+   * APT-005 — an invoice being raised for a completed clinical encounter means the appointment
+   * has entered billing; reflect that on the appointment record (same forward-only pattern as
+   * QueueService#assignToQueue's WAITING flip and TreatmentSessionService's AWAITING_TREATMENT/
+   * TREATMENT flips). Never regresses a status and never touches an appointment already at or
+   * past AWAITING_BILLING (e.g. already COMPLETED) or off the active lifecycle entirely.
+   */
+  async #advanceAppointmentToAwaitingBilling(appointmentId, actorId) {
+    if (!appointmentId) return;
+    const appointment = await this.appointmentRepository.findByIdNotDeleted(appointmentId);
+    if (!appointment) return;
+    const currentIdx = ACTIVE_APPOINTMENT_STATUSES.indexOf(appointment.status);
+    const targetIdx = ACTIVE_APPOINTMENT_STATUSES.indexOf(APPOINTMENT_STATUS.AWAITING_BILLING);
+    if (currentIdx === -1 || targetIdx === -1 || currentIdx >= targetIdx) return;
+    await this.appointmentRepository.updateById(appointment._id, {
+      status: APPOINTMENT_STATUS.AWAITING_BILLING,
+      updatedBy: actorId,
+    });
   }
 
   #mapInvoice(doc, payments = null) {
@@ -534,6 +557,8 @@ class BillingService {
       patientId: payload.patientId,
       total: invoice.total,
     });
+
+    await this.#advanceAppointmentToAwaitingBilling(invoice.appointmentId, actorId);
 
     return this.getById(invoice._id.toString());
   }

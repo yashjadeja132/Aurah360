@@ -132,27 +132,6 @@ router.get(
   controller.patientSummary
 );
 
-router.post(
-  '/ai/summarize',
-  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
-  controller.aiSummarize
-);
-router.post(
-  '/ai/draft-soap',
-  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
-  controller.aiDraftSoap
-);
-router.post(
-  '/ai/suggest-diagnosis',
-  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
-  controller.aiSuggestDiagnosis
-);
-router.post(
-  '/ai/suggest-questions',
-  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
-  controller.aiSuggestQuestions
-);
-
 router.get(
   '/:id/workspace',
   requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
