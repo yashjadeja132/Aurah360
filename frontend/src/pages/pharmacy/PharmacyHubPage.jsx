@@ -27,10 +27,12 @@ export default function PharmacyHubPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Queue first: the counter's main job is dispensing waiting prescriptions,
+  // so it is the default tab when no ?tab= is present.
   const TABS = useMemo(
     () => [
-      { id: 'overview', label: t('pharmacy.hub.tabs.overview', 'Overview') },
       { id: 'queue', label: t('pharmacy.hub.tabs.queue', 'Prescription queue') },
+      { id: 'overview', label: t('pharmacy.hub.tabs.overview', 'Overview') },
     ],
     [t]
   );

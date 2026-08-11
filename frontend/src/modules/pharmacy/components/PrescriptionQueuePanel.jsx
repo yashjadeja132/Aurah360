@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Pill } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { usePharmacyQueue, useStartDispense } from '@/modules/inventory/hooks/useInventory';
@@ -18,8 +20,21 @@ export function PrescriptionQueuePanel({ highlight = null }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, isLoading } = usePharmacyQueue();
-  const items = data?.items || [];
+  const allItems = data?.items || [];
   const start = useStartDispense();
+  const [q, setQ] = useState('');
+
+  // The counter finds the patient by name/MRN/mobile — that is all they have.
+  const term = q.trim().toLowerCase();
+  const items = term
+    ? allItems.filter((r) =>
+        [r.patientName, r.patientMrn, r.patientMobile, r.prescriptionNumber, ...(r.medicines || [])]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(term)
+      )
+    : allItems;
 
   const open = async (prescriptionId) => {
     const res = await start.mutateAsync({ prescriptionId });
@@ -33,25 +48,37 @@ export function PrescriptionQueuePanel({ highlight = null }) {
         {t('pharmacy.queue.subtitle', 'Finalized prescriptions awaiting dispense.')}
       </p>
 
+      <Input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder={t('pharmacy.queue.search', 'Search patient name, mobile, MRN or medicine…')}
+      />
+
       <div className="space-y-2">
         {isLoading && <Skeleton className="h-20 w-full" />}
-        {items.map((q) => (
+        {items.map((row) => (
           <div
-            key={q.prescriptionId}
+            key={row.prescriptionId}
             className={`flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between ${
-              highlight === q.prescriptionId ? 'border-primary' : ''
+              highlight === row.prescriptionId ? 'border-primary' : ''
             }`}
           >
-            <div>
-              <p className="font-medium">{q.prescriptionNumber}</p>
-              <p className="text-xs text-muted-foreground">
-                {q.itemCount} {t('pharmacy.queue.items', 'items')} ·{' '}
-                {q.finalizedAt ? new Date(q.finalizedAt).toLocaleString() : '—'}
+            <div className="min-w-0">
+              <p className="font-medium">
+                {row.patientName || t('pharmacy.queue.patient', 'Patient')}
+                {row.patientMrn ? <span className="ml-1 text-xs text-muted-foreground">({row.patientMrn})</span> : null}
               </p>
+              <p className="text-xs text-muted-foreground">
+                {row.prescriptionNumber} · {row.itemCount} {t('pharmacy.queue.items', 'items')} ·{' '}
+                {row.finalizedAt ? new Date(row.finalizedAt).toLocaleString() : '—'}
+              </p>
+              {row.medicines?.length ? (
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">{row.medicines.join(', ')}</p>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
-              <Badge>{q.dispenseStatus}</Badge>
-              <Button size="sm" disabled={start.isPending} onClick={() => open(q.prescriptionId)}>
+              <Badge>{row.dispenseStatus}</Badge>
+              <Button size="sm" disabled={start.isPending} onClick={() => open(row.prescriptionId)}>
                 {t('pharmacy.queue.dispense', 'Dispense')}
               </Button>
             </div>

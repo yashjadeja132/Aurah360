@@ -30,7 +30,7 @@ const PAY_METHODS = [
 export function IntakeStep({ intake, onDone }) {
   const { appointmentId, consultationId, patientId, branchId, tokenNumber, feeDefault } = intake;
 
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [photoType, setPhotoType] = useState('BEFORE');
   const [bodyRegion, setBodyRegion] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -47,7 +47,7 @@ export function IntakeStep({ intake, onDone }) {
   const [sending, setSending] = useState(false);
 
   const uploadPhoto = async () => {
-    if (!file || !consultationId) return;
+    if (!files.length || !consultationId) return;
     setUploading(true);
     try {
       // The photo policy cross-checks the append-only consent log, so record the
@@ -63,15 +63,21 @@ export function IntakeStep({ intake, onDone }) {
         });
         setConsentRecorded(true);
       }
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('photoType', photoType);
-      if (bodyRegion) fd.append('bodyRegion', bodyRegion);
-      fd.append('consentVerified', 'true');
-      await consultationsApi.uploadPhoto(consultationId, fd);
-      setPhotoCount((n) => n + 1);
-      setFile(null);
-      toast.success('Photo added to the file');
+      // Upload every selected file (multiple photos of the affected area in one go).
+      let done = 0;
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append('file', f);
+        fd.append('photoType', photoType);
+        if (bodyRegion) fd.append('bodyRegion', bodyRegion);
+        fd.append('consentVerified', 'true');
+        // eslint-disable-next-line no-await-in-loop
+        await consultationsApi.uploadPhoto(consultationId, fd);
+        done += 1;
+      }
+      setPhotoCount((n) => n + done);
+      setFiles([]);
+      toast.success(`${done} photo${done > 1 ? 's' : ''} added to the file`);
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Photo upload failed');
     } finally {
@@ -157,8 +163,9 @@ export function IntakeStep({ intake, onDone }) {
           <Input
             type="file"
             accept="image/*"
-            className="max-w-[180px]"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            multiple
+            className="max-w-[220px]"
+            onChange={(e) => setFiles(Array.from(e.target.files || []))}
           />
           <Select value={photoType} onChange={(e) => setPhotoType(e.target.value)} className="w-28">
             {PHOTO_TYPES.map((o) => (
@@ -175,9 +182,9 @@ export function IntakeStep({ intake, onDone }) {
             type="button"
             size="sm"
             onClick={uploadPhoto}
-            disabled={!file || uploading || !consultationId || !photoConsent}
+            disabled={!files.length || uploading || !consultationId || !photoConsent}
           >
-            {uploading ? 'Uploading…' : 'Add photo'}
+            {uploading ? 'Uploading…' : files.length > 1 ? `Add ${files.length} photos` : 'Add photo'}
           </Button>
         </div>
         {!consultationId && (

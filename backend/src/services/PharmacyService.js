@@ -4,6 +4,7 @@ import {
   InventoryItemRepository,
 } from '../repositories/InventoryRepository.js';
 import PrescriptionRepository from '../repositories/PrescriptionRepository.js';
+import Patient from '../models/Patient.model.js';
 import InventoryService from './InventoryService.js';
 import AuditService from './AuditService.js';
 import { eventBus } from '../events/eventBus.js';
@@ -82,10 +83,21 @@ class PharmacyService {
 
       if (dispenseStatus === 'DISPENSED') continue;
 
+      const patient = rx.patientId
+        ? await Patient.findById(rx.patientId).select('firstName lastName mrn patientCode mobile').lean()
+        : null;
+      const patientName = patient
+        ? [patient.firstName, patient.lastName].filter(Boolean).join(' ')
+        : 'Patient';
+
       result.push({
         prescriptionId: rx._id.toString(),
         prescriptionNumber: rx.prescriptionNumber,
         patientId: rx.patientId?.toString?.() || rx.patientId,
+        patientName,
+        patientMrn: patient?.mrn || patient?.patientCode || '',
+        patientMobile: patient?.mobile || '',
+        medicines: (rx.items || []).map((it) => it.medicineName || it.genericName).filter(Boolean),
         branchId: rx.branchId?.toString?.() || rx.branchId,
         finalizedAt: rx.finalizedAt,
         itemCount: (rx.items || []).length,
