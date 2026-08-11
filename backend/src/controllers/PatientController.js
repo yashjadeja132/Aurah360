@@ -4,6 +4,8 @@ import PatientService from '../services/PatientService.js';
 import PatientDocumentService from '../services/PatientDocumentService.js';
 import PatientTimelineService from '../services/PatientTimelineService.js';
 import PatientMergeService from '../services/PatientMergeService.js';
+import AuditService from '../services/AuditService.js';
+import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { scopedListQuery } from '../helpers/scope.helper.js';
 
 /**
@@ -11,7 +13,8 @@ import { scopedListQuery } from '../helpers/scope.helper.js';
  * deliberately NOT narrowed to a DOCTOR's own primaryDoctorId: within a branch a doctor
  * routinely treats walk-ins and covers colleagues' patients, and hiding them would be a
  * clinical-safety regression, not a security win. Record reads (`getById`, documents,
- * timeline) are likewise left broad and audited — see the break-glass model (SEC-002).
+ * timeline) are likewise left broad, and `getById` — the full record view — is itself
+ * audited (SEC-004/§16.8) — see the break-glass model (SEC-002).
  */
 class PatientController {
   constructor() {
@@ -19,6 +22,7 @@ class PatientController {
     this.documentService = new PatientDocumentService();
     this.timelineService = new PatientTimelineService();
     this.mergeService = new PatientMergeService();
+    this.auditService = new AuditService();
   }
 
   list = asyncHandler(async (req, res) => {
@@ -34,6 +38,14 @@ class PatientController {
 
   getById = asyncHandler(async (req, res) => {
     const patient = await this.patientService.getById(req.params.id);
+    // SEC-004/§16.8 — opening the full patient record is a sensitive view, not just a write.
+    await this.auditService.record(AUDIT_ACTIONS.PATIENT_RECORD_VIEWED, {
+      actorId: req.auth?.userId,
+      metadata: { patientId: req.params.id },
+      resourceType: 'Patient',
+      resourceId: req.params.id,
+      req,
+    });
     return ApiResponse.success(res, { data: { patient } });
   });
 

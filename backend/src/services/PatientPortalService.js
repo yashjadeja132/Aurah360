@@ -16,6 +16,7 @@ import TreatmentPlanService from './TreatmentPlanService.js';
 import TreatmentSessionService from './TreatmentSessionService.js';
 import BillingService from './BillingService.js';
 import LoyaltyLedgerService from './LoyaltyLedgerService.js';
+import LoyaltyEarningRule from '../models/LoyaltyEarningRule.model.js';
 import ReferralService from './ReferralService.js';
 import config from '../config/index.js';
 import AuditService from './AuditService.js';
@@ -809,6 +810,40 @@ class PatientPortalService {
       limit: Number(limit) || 50,
       before: before || null,
     });
+  }
+
+  /**
+   * LOY-010 — "how to earn" list for the patient app, generated live from the currently-active
+   * earning rules instead of hard-coded text (mobile/src/screens/RewardsScreen.js). Only fields
+   * safe for a patient to see are returned: rule identity/name and the plain earn formula. No
+   * caps, branch overrides, eligibility internals, or approval metadata — those are clinic-
+   * internal configuration, not patient-facing content.
+   */
+  async activeEarnRules() {
+    const now = new Date();
+    const rules = await LoyaltyEarningRule.find({ isActive: true, deletedAt: null }).lean();
+
+    return rules
+      .map((rule) => {
+        const version = (rule.versions || [])
+          .filter((v) => v.effectiveFrom <= now && (!v.effectiveTo || v.effectiveTo > now))
+          .sort((a, b) => b.effectiveFrom - a.effectiveFrom)[0];
+        if (!version) return null;
+        // E9/E11-style consented-only rules are omitted here rather than shown with a caveat —
+        // the portal has no per-patient consent context at this call site, so "requires marketing
+        // consent" copy would be misleading to a patient who hasn't opted in.
+        if (version.requiresMarketingConsent) return null;
+
+        return {
+          ruleCode: rule.ruleCode,
+          eventType: rule.eventType,
+          name: rule.name,
+          formulaType: version.formulaType,
+          pointValue: version.pointValue,
+          perAmountInr: version.perAmountInr || null,
+        };
+      })
+      .filter(Boolean);
   }
 
   /**

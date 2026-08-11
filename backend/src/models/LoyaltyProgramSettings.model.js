@@ -47,7 +47,7 @@ const loyaltyProgramSettingsSchema = new mongoose.Schema(
      */
     redemptionIdentityConfirmation: {
       type: String,
-      enum: ['NONE', 'IN_PERSON', 'OTP'],
+      enum: REDEMPTION_IDENTITY_CONFIRMATION_LIST,
       // Defaults to NONE (legacy/no-gate behaviour) — this is a new opt-in control, not a
       // retroactive requirement. Defaulting to IN_PERSON silently broke every existing
       // redemption call site (smoke scripts, pre-existing tests, the money-safety concurrency
@@ -64,7 +64,7 @@ const loyaltyProgramSettingsSchema = new mongoose.Schema(
      */
     expiredRedemptionRestorePolicy: {
       type: String,
-      enum: ['RESTORE_SHORT_EXPIRY', 'FORFEIT'],
+      enum: EXPIRED_REDEMPTION_RESTORE_POLICY_LIST,
       default: 'RESTORE_SHORT_EXPIRY',
     },
 

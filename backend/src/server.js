@@ -10,6 +10,7 @@ import { startAppointmentReminderWorker } from './queues/appointmentReminderJobs
 import { missedFollowUpHandlerModule } from './queues/missedFollowUpJobs.js';
 import { loyaltyExpiryHandlerModule } from './queues/loyaltyExpiryJobs.js';
 import { loyaltyBirthdayHandlerModule } from './queues/loyaltyBirthdayJobs.js';
+import { loyaltyTierHandlerModule } from './queues/loyaltyTierJobs.js';
 import { startComposedWorker, assertScheduledJobsAreHandled } from './queues/composeWorker.js';
 import { QUEUE_NAMES } from './queues/connection.js';
 import { startNotificationWorker } from './queues/notificationJobs.js';
@@ -81,6 +82,7 @@ class Server {
         startComposedWorker(QUEUE_NAMES.LOYALTY, [
           loyaltyExpiryHandlerModule,
           loyaltyBirthdayHandlerModule,
+          loyaltyTierHandlerModule,
         ]);
         assertScheduledJobsAreHandled(QUEUE_NAMES.LOYALTY).catch(() => {});
       } catch (err) {

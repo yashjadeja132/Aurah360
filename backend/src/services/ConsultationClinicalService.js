@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import ApiError from '../libs/ApiError.js';
 import ConsultationRepository from '../repositories/ConsultationRepository.js';
 import {
@@ -268,7 +269,8 @@ class ConsultationClinicalService {
 
     const saved = await this.storage.save(file.buffer, {
       folder: `consultations/${consultationId}/photos`,
-      filename: `${Date.now()}-${file.originalname.replace(/[^\w.-]+/g, '_')}`,
+      // User-supplied filename never becomes the storage path (§16.7) — a random name does.
+      filename: `${Date.now()}-${crypto.randomUUID()}${extOf(file.originalname)}`,
       mimeType: file.mimetype,
     });
 
@@ -496,6 +498,12 @@ class ConsultationClinicalService {
     });
     return updated.toSafeObject();
   }
+}
+
+/** SEC-003 — extension of the original filename, kept only for a recognizable stored extension. */
+function extOf(filename = '') {
+  const match = /\.[a-zA-Z0-9]+$/.exec(filename);
+  return match ? match[0] : '';
 }
 
 export default ConsultationClinicalService;

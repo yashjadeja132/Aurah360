@@ -2,6 +2,8 @@ import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import ConsultationService from '../services/ConsultationService.js';
 import ConsultationClinicalService from '../services/ConsultationClinicalService.js';
+import AuditService from '../services/AuditService.js';
+import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import ApiError from '../libs/ApiError.js';
 import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js';
 
@@ -9,8 +11,9 @@ import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js'
  * SEC-030 — `listByDoctor` and `labOrderReviewQueue` are BROWSE lists and are row-scoped to the
  * caller's branch and, for a DOCTOR, to their own doctorId. Everything keyed to one consultation
  * or one patient (`getWorkspace`, `getById`, `listByPatient`, `patientSummary`, photos,
- * SOAP versions) is deliberately left broad and audited: a doctor covering a colleague
- * must be able to open the record in front of them (the model break-glass assumes).
+ * SOAP versions) is deliberately left broad: a doctor covering a colleague must be able to open
+ * the record in front of them (the model break-glass assumes). `getWorkspace`/`getById` — opening
+ * the full clinical record — ARE audited (SEC-004/§16.8), so that breadth stays reviewable.
  *
  * LAB ORDERS are the exception to that leniency and ARE row-scoped (`resolveRecordScope`): they
  * are addressed by an opaque id with no patient context in the URL, so leaving them broad meant
@@ -21,6 +24,7 @@ class ConsultationController {
   constructor() {
     this.consultationService = new ConsultationService();
     this.clinicalService = new ConsultationClinicalService();
+    this.auditService = new AuditService();
   }
 
   start = asyncHandler(async (req, res) => {
@@ -30,11 +34,25 @@ class ConsultationController {
 
   getWorkspace = asyncHandler(async (req, res) => {
     const data = await this.consultationService.getWorkspace(req.params.id);
+    await this.auditService.record(AUDIT_ACTIONS.CONSULTATION_VIEWED, {
+      actorId: req.auth?.userId,
+      metadata: { consultationId: req.params.id, via: 'workspace' },
+      resourceType: 'Consultation',
+      resourceId: req.params.id,
+      req,
+    });
     return ApiResponse.success(res, { data });
   });
 
   getById = asyncHandler(async (req, res) => {
     const consultation = await this.consultationService.getById(req.params.id);
+    await this.auditService.record(AUDIT_ACTIONS.CONSULTATION_VIEWED, {
+      actorId: req.auth?.userId,
+      metadata: { consultationId: req.params.id, via: 'getById' },
+      resourceType: 'Consultation',
+      resourceId: req.params.id,
+      req,
+    });
     return ApiResponse.success(res, { data: { consultation } });
   });
 

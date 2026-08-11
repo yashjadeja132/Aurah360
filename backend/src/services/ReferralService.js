@@ -191,7 +191,7 @@ class ReferralService {
    * documented no-op (empty rules list) and nothing is credited. That is a data/seed gap, not a
    * code gap — see ReferralService's module comment / final report.
    */
-  async #creditBothSides(referral, { branchId, occurredAt, invoiceId }) {
+  async #creditBothSides(referral, { branchId, occurredAt, invoiceId: _invoiceId }) {
     const effectiveBranchId = branchId || referral.branchId;
     if (!effectiveBranchId) return;
 

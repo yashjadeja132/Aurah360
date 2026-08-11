@@ -17,12 +17,13 @@ import { colors, radii } from '../theme/colors';
  * the staff-side receipt this session, so the backend side of this is already proven out — this
  * screen only had to be built and wired up on the client.
  *
- * "How to earn" intentionally renders from the generic `rewards.earnRules.<code>` i18n table
- * keyed by `ruleCode`, not a live "active rules" list — the patient-portal API has no endpoint
- * that returns the clinic's currently-active earning rules, so a fully rule-engine-generated
- * list is a backend gap (see audit report) and this is the closest safe approximation.
+ * "How to earn" renders from GET /patients/loyalty/earn-rules — the clinic's currently-active
+ * earning rules (LOY-010), keyed by `eventType` against the generic `rewards.earnRules.<code>`
+ * i18n table so copy stays translated/generic even though the underlying list is now live. The
+ * fixed event-type list below is only a fallback for the (unlikely) case that call fails, so the
+ * screen still shows something rather than an empty card.
  */
-const EARN_RULE_CODES = [
+const FALLBACK_EARN_RULE_CODES = [
   'VISIT_COMPLETED',
   'SPEND_BASED',
   'TREATMENT_SESSION_COMPLETED',
@@ -64,20 +65,26 @@ export default function RewardsScreen() {
   const { activeProfile, isViewingDependent } = useDependents();
   const [balance, setBalance] = useState(null);
   const [ledger, setLedger] = useState([]);
+  const [earnRules, setEarnRules] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [balanceResult, ledgerResult] = await Promise.all([
+      const [balanceResult, ledgerResult, earnRulesResult] = await Promise.all([
         isViewingDependent ? patientApi.dependentLoyaltyBalance(activeProfile.id) : patientApi.loyaltyBalance(),
         isViewingDependent ? patientApi.dependentLoyaltyLedger(activeProfile.id) : patientApi.loyaltyLedger(),
+        // Same rule set regardless of which profile is active — rules are clinic-wide, not
+        // per-patient — so this is not duplicated per dependent switch.
+        patientApi.loyaltyEarnRules().catch(() => null),
       ]);
       setBalance(balanceResult);
       setLedger(Array.isArray(ledgerResult) ? ledgerResult : ledgerResult?.items || []);
+      setEarnRules(Array.isArray(earnRulesResult) ? earnRulesResult : null);
     } catch {
       setBalance(null);
       setLedger([]);
+      setEarnRules(null);
     } finally {
       setLoading(false);
     }
@@ -152,9 +159,12 @@ export default function RewardsScreen() {
           <CardTitle>{t('rewards.howToEarn')}</CardTitle>
         </View>
         <View style={{ gap: 6 }}>
-          {EARN_RULE_CODES.map((code) => (
-            <Text key={code} style={styles.earnRow}>
-              • {t(`rewards.earnRules.${code}`)}
+          {(earnRules?.length
+            ? earnRules.map((rule) => rule.eventType)
+            : FALLBACK_EARN_RULE_CODES
+          ).map((code, index) => (
+            <Text key={`${code}-${index}`} style={styles.earnRow}>
+              • {t(`rewards.earnRules.${code}`, earnRules?.length ? earnRules[index]?.name : undefined)}
             </Text>
           ))}
         </View>

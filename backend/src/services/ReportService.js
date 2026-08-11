@@ -19,7 +19,6 @@ import ScheduledReport from '../models/ScheduledReport.model.js';
 import LoyaltyLedgerEntry from '../models/LoyaltyLedgerEntry.model.js';
 import LoyaltyBalanceCache from '../models/LoyaltyBalanceCache.model.js';
 import LoyaltyProgramSettings from '../models/LoyaltyProgramSettings.model.js';
-import LoyaltyAdjustmentRequest from '../models/LoyaltyAdjustmentRequest.model.js';
 import AuditLog from '../models/AuditLog.model.js';
 import { LOYALTY_ENTRY_TYPE, LOYALTY_EARNING_EVENT } from '../enums/loyalty.js';
 import { PERMISSIONS } from '../constants/permissions.js';

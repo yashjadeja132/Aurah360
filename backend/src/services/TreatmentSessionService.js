@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import ApiError from '../libs/ApiError.js';
 import {
@@ -1884,7 +1885,8 @@ class TreatmentSessionService {
     const type = String(photoType).toUpperCase() === 'AFTER' ? 'AFTER' : 'BEFORE';
     const saved = await this.storage.save(file.buffer, {
       folder: `treatment-sessions/${id}/photos`,
-      filename: `${Date.now()}-${file.originalname.replace(/[^\w.-]+/g, '_')}`,
+      // User-supplied filename never becomes the storage path (§16.7) — a random name does.
+      filename: `${Date.now()}-${crypto.randomUUID()}${extOf(file.originalname)}`,
       mimeType: file.mimetype,
     });
 
@@ -1990,6 +1992,12 @@ class TreatmentSessionService {
       recent: items,
     };
   }
+}
+
+/** SEC-003 — extension of the original filename, kept only for a recognizable stored extension. */
+function extOf(filename = '') {
+  const match = /\.[a-zA-Z0-9]+$/.exec(filename);
+  return match ? match[0] : '';
 }
 
 export default TreatmentSessionService;

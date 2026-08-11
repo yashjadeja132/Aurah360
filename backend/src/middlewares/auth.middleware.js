@@ -22,6 +22,19 @@ export const authenticate = async (req, _res, next) => {
     }
 
     const payload = tokenService.verifyAccessToken(token);
+
+    // §16.6 termination — "revoke sessions/tokens... immediately". A signature+expiry check alone
+    // lets an already-issued access token keep working for its full lifetime after a staff member
+    // is deactivated. Re-checking isActive/status per request closes that window; the query is a
+    // lean, indexed lookup on _id so the added cost is small relative to a full user hydration.
+    const user = await userRepository.findByIdNotDeleted(payload.sub, {
+      select: 'isActive status',
+      lean: true,
+    });
+    if (!user || !user.isActive || user.status !== USER_STATUS.ACTIVE) {
+      throw ApiError.unauthorized('User not found or inactive', 'USER_INACTIVE');
+    }
+
     req.auth = {
       userId: payload.sub,
       role: payload.role,

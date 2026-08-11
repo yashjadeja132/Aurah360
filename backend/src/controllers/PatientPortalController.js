@@ -329,6 +329,12 @@ class PatientPortalController {
     return ApiResponse.success(res, { data });
   });
 
+  /** LOY-010 — "how to earn" list, generated from the currently-active earning rules. */
+  loyaltyEarnRules = asyncHandler(async (req, res) => {
+    const data = await this.portal.activeEarnRules();
+    return ApiResponse.success(res, { data });
+  });
+
   referral = asyncHandler(async (req, res) => {
     const data = await this.portal.referralSummary(this.#pid(req));
     return ApiResponse.success(res, { data });

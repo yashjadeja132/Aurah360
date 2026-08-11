@@ -212,6 +212,12 @@ export const patientApi = {
     const { data } = await client.get('/loyalty/ledger', { params });
     return data.data;
   },
+  // LOY-010 — "how to earn" list generated from currently-active earning rules (rule-driven,
+  // not hard-coded text).
+  async loyaltyEarnRules() {
+    const { data } = await client.get('/loyalty/earn-rules');
+    return data.data;
+  },
   async dependentLoyaltyBalance(dependentId) {
     const { data } = await client.get(`/dependents/${dependentId}/loyalty/balance`);
     return data.data;

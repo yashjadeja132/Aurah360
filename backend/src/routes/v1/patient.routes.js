@@ -206,6 +206,7 @@ router.post('/feedback', validate({ body: feedbackSchema }), controller.submitFe
 
 router.get('/loyalty/balance', controller.loyaltyBalance);
 router.get('/loyalty/ledger', controller.loyaltyLedger);
+router.get('/loyalty/earn-rules', controller.loyaltyEarnRules);
 router.get('/referral', controller.referral);
 
 router.get('/timeline', controller.timeline);
