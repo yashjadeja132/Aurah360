@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { HandoffNotePanel } from '@/modules/handoff/components/HandoffNotePanel';
 import {
   useAppointmentDetail,
   useAppointmentMutations,
@@ -184,6 +185,16 @@ export default function AppointmentDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/*
+        Front-desk handoff note (spec §4) — objective notes for the doctor/clinical staff about
+        this visit (expectation/urgency/financial/etc.). The panel was fully built but only ever
+        wired into the Patient360 detail page; reception's actual moment for adding one is here,
+        on the appointment itself, so it needs to be reachable from this page too.
+      */}
+      {apt.patientId && (
+        <HandoffNotePanel patientId={apt.patientId} branchId={apt.branchId} />
+      )}
 
       {cancelOpen && (
         <Card>

@@ -237,7 +237,12 @@ class ReceptionService {
       appointment.id,
       {
         priority: payload.queuePriority,
-        receptionNotes: payload.receptionNotes || 'Walk-in',
+        // Spec §2 — the handoff note is optional on walk-in check-in; a blank field must stay
+        // blank (matches the sibling checkIn() path's `payload.receptionNotes || null` above),
+        // not silently become the literal string "Walk-in". The appointment itself already
+        // records `source: 'WALK_IN'` for that distinction — this field is purely the receptionist's
+        // free-text note, and an empty one means no note was given, not a fake note.
+        receptionNotes: payload.receptionNotes || null,
         updateContact: payload.updateContact,
         consent: payload.consent,
       },

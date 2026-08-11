@@ -77,7 +77,9 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
       startTime,
       endTime,
       queuePriority,
-      receptionNotes: handoffNote.trim() || 'Walk-in',
+      // Optional per spec §2 — leave genuinely blank rather than substituting a fake note;
+      // the backend records `source: 'WALK_IN'` on the appointment itself for that distinction.
+      receptionNotes: handoffNote.trim() || undefined,
     });
     onOpenChange(false);
   };

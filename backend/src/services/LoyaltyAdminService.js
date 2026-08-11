@@ -510,6 +510,23 @@ class LoyaltyAdminService {
       throw ApiError.badRequest('Only pending adjustment requests can be approved');
     }
 
+    // LOY-008 continued — a request only reaches this queue because it exceeded the
+    // REQUESTER's own limit; that says nothing about whether it also exceeds the APPROVER's own
+    // limit (e.g. a Manager approving a request larger than even a Manager may authorize). Mirror
+    // CashCloseService's owner-escalation gate: above the approver's own authority, only OWNER
+    // may clear it — a Manager holding the generic LOYALTY_ADJUST_APPROVE permission must
+    // escalate rather than approve it themselves.
+    if (req?.auth?.role !== ROLES.OWNER) {
+      const approverLimit = await this.#manualAdjustmentLimitFor(req?.auth?.role);
+      if (approverLimit !== null && request.points > approverLimit) {
+        throw ApiError.forbidden(
+          'This adjustment exceeds your own approval limit — Owner approval required',
+          null,
+          'LOYALTY_ADJUSTMENT_OWNER_APPROVAL_REQUIRED'
+        );
+      }
+    }
+
     const entries = this.#asEntryList(
       await this.ledgerService.manualAdjustment({
         branchId: request.branchId,

@@ -8,10 +8,13 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { ROLES } from '@/constants/rbac';
 import {
   useAdjustmentQueue,
   useApproveAdjustment,
   useRejectAdjustment,
+  useLoyaltySettings,
 } from '@/modules/loyalty/hooks/useLoyalty';
 
 const REASON_CATEGORIES = ['SERVICE_RECOVERY', 'CORRECTION', 'PROMOTION', 'OTHER'];
@@ -19,13 +22,24 @@ const REASON_CATEGORIES = ['SERVICE_RECOVERY', 'CORRECTION', 'PROMOTION', 'OTHER
 /** Manual credit/debit approval queue (was LoyaltyAdjustmentQueuePage). */
 export function LoyaltyApprovalsPanel() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const { data, isLoading } = useAdjustmentQueue({ status: 'PENDING_APPROVAL' });
+  const { data: settings } = useLoyaltySettings();
   const approve = useApproveAdjustment();
   const reject = useRejectAdjustment();
   const [action, setAction] = useState(null); // { type: 'approve'|'reject', item }
   const [reason, setReason] = useState('');
   const [reasonCategory, setReasonCategory] = useState('CORRECTION');
   const items = data?.items || [];
+
+  // Mirrors backend LoyaltyAdminService#approveAdjustment's owner-escalation gate: a request
+  // that's already above the REQUESTER's own limit says nothing about whether it's also above
+  // the APPROVER's own limit — if it is, only OWNER may clear it. Computed here so the button
+  // that would otherwise 403 is replaced with an honest "Escalated to Owner" state instead.
+  const isOwner = user?.role === ROLES.OWNER;
+  const approverLimit = settings?.manualAdjustmentPointLimitsByRole?.[user?.role];
+  const needsOwner = (item) =>
+    !isOwner && Number.isFinite(approverLimit) && item.points > approverLimit;
 
   const openAction = (type, item) => {
     setAction({ type, item });
@@ -77,9 +91,15 @@ export function LoyaltyApprovalsPanel() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => openAction('approve', item)}>
-                {t('loyalty.adjustments.approve', 'Approve')}
-              </Button>
+              {needsOwner(item) ? (
+                <span className="text-xs font-medium text-warning">
+                  {t('loyalty.adjustments.escalatedToOwner', 'Escalated to Owner')}
+                </span>
+              ) : (
+                <Button size="sm" onClick={() => openAction('approve', item)}>
+                  {t('loyalty.adjustments.approve', 'Approve')}
+                </Button>
+              )}
               <Button size="sm" variant="destructive" onClick={() => openAction('reject', item)}>
                 {t('loyalty.adjustments.reject', 'Reject')}
               </Button>
