@@ -99,7 +99,9 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
           <div className="space-y-2">
             <Label>{t('reception.checkIn.queuePriority')}</Label>
             <Select value={priority} onChange={(e) => setPriority(e.target.value)}>
-              {QUEUE_PRIORITY_OPTIONS.map((o) => (
+              {QUEUE_PRIORITY_OPTIONS
+                .filter((o) => o.value !== 'PREGNANT' || appointment.patient?.gender === 'FEMALE')
+                .map((o) => (
                 <option key={o.value} value={o.value}>
                   {t(`reception.priority.${o.value}`, o.label)}
                 </option>

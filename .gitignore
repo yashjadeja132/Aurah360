@@ -24,3 +24,5 @@ Thumbs.db
 *.tmp.mjs
 *-tmp.mjs
 probe-tmp.mjs
+backend/.env.atlas-backup-*
+backend/.env

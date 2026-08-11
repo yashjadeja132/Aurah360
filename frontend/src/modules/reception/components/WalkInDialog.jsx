@@ -42,6 +42,7 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
   const [intake, setIntake] = useState(null);
 
   const patients = patientsData?.items || [];
+  const selectedPatientGender = patients.find((p) => p.id === patientId)?.gender;
   const doctors = doctorsData?.items || [];
   const services = servicesData || [];
 
@@ -213,11 +214,14 @@ export function WalkInDialog({ open, onOpenChange, branchId }) {
           <div className="space-y-2">
             <Label>{t('reception.checkIn.queuePriority')}</Label>
             <Select value={queuePriority} onChange={(e) => setQueuePriority(e.target.value)}>
-              {QUEUE_PRIORITY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {t(`reception.priority.${o.value}`, o.label)}
-                </option>
-              ))}
+              {QUEUE_PRIORITY_OPTIONS
+                // "Pregnant" only makes sense for a female patient.
+                .filter((o) => o.value !== 'PREGNANT' || selectedPatientGender === 'FEMALE')
+                .map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {t(`reception.priority.${o.value}`, o.label)}
+                  </option>
+                ))}
             </Select>
           </div>
 

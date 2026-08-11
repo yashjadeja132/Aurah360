@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
@@ -11,12 +12,51 @@ import { patientFormSchema, toPatientPayload } from '../validation/patientSchema
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'UNKNOWN'];
 const MARITAL = ['SINGLE', 'MARRIED', 'DIVORCED', 'WIDOWED', 'OTHER'];
 
+// Common presets so staff pick instead of typing. "Other" reveals a text box.
+const OCCUPATIONS = ['Housewife', 'Student', 'Business', 'Service / Job', 'Software / IT', 'Doctor', 'Teacher', 'Farmer', 'Labour', 'Retired'];
+const YES_NO = ['No', 'Occasionally', 'Yes'];
+const ALLERGY_PRESETS = ['None known', 'Penicillin', 'Sulfa drugs', 'Aspirin / NSAIDs', 'Food allergy', 'Dust / pollen'];
+const CHRONIC_PRESETS = ['None', 'Diabetes', 'Hypertension (BP)', 'Thyroid', 'Asthma', 'PCOD / PCOS', 'Heart disease'];
+const PREGNANCY_PRESETS = ['Not pregnant', 'Pregnant', 'Breastfeeding', 'Trying to conceive'];
+
 function Field({ label, error, children }) {
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {children}
       {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Dropdown that also accepts a custom value. Staff pick a preset; choosing
+ * "Other…" reveals a text box. Stored as a plain string via react-hook-form,
+ * so it works for both preset and free-typed values with no schema change.
+ */
+function ComboField({ label, value, onChange, options, placeholder }) {
+  const isPreset = value === '' || options.includes(value);
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <Select
+        value={isPreset ? value : '__other__'}
+        onChange={(e) => onChange(e.target.value === '__other__' ? ' ' : e.target.value)}
+      >
+        <option value="">{placeholder || 'Select…'}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+        <option value="__other__">Other (type)…</option>
+      </Select>
+      {!isPreset && (
+        <Input
+          autoFocus
+          value={value.trim() === '' ? '' : value}
+          placeholder="Type here…"
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
     </div>
   );
 }
@@ -56,6 +96,14 @@ export function PatientForm({
   });
 
   const tags = watch('tags') || [];
+  const gender = watch('gender');
+  const isFemale = gender === 'FEMALE';
+  const combo = (name) => ({ value: watch(name) || '', onChange: (v) => setValue(name, v) });
+
+  // A male/other patient can't be pregnant — drop any value so it never saves.
+  useEffect(() => {
+    if (!isFemale) setValue('pregnancyStatus', '');
+  }, [isFemale, setValue]);
 
   const toggleTag = (name) => {
     if (tags.includes(name)) setValue('tags', tags.filter((tag) => tag !== name));
@@ -113,9 +161,7 @@ export function PatientForm({
           <Field label={t('patients.form.email', 'Email')} error={errors.email?.message}>
             <Input type="email" {...register('email')} />
           </Field>
-          <Field label={t('patients.form.occupation', 'Occupation')}>
-            <Input {...register('occupation')} />
-          </Field>
+          <ComboField label={t('patients.form.occupation', 'Occupation')} options={OCCUPATIONS} placeholder="Select occupation…" {...combo('occupation')} />
           <Field label={t('patients.form.nationality', 'Nationality')}>
             <Input {...register('nationality')} />
           </Field>
@@ -154,14 +200,17 @@ export function PatientForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={t('patients.form.height', 'Height (cm)')}><Input {...register('heightCm')} /></Field>
           <Field label={t('patients.form.weight', 'Weight (kg)')}><Input {...register('weightKg')} /></Field>
-          <Field label={t('patients.form.allergies', 'Allergies')}><Input {...register('allergies')} /></Field>
-          <Field label={t('patients.form.chronicDiseases', 'Chronic diseases')}><Input {...register('chronicDiseases')} /></Field>
+          <ComboField label={t('patients.form.allergies', 'Allergies')} options={ALLERGY_PRESETS} placeholder="Select / type…" {...combo('allergies')} />
+          <ComboField label={t('patients.form.chronicDiseases', 'Chronic diseases')} options={CHRONIC_PRESETS} placeholder="Select / type…" {...combo('chronicDiseases')} />
           <Field label={t('patients.form.pastMedicalHistory', 'Past medical history')}><Input {...register('pastMedicalHistory')} /></Field>
           <Field label={t('patients.form.pastSurgicalHistory', 'Past surgical history')}><Input {...register('pastSurgicalHistory')} /></Field>
           <Field label={t('patients.form.currentMedications', 'Current medications')}><Input {...register('currentMedications')} /></Field>
-          <Field label={t('patients.form.smoking', 'Smoking')}><Input {...register('smoking')} /></Field>
-          <Field label={t('patients.form.alcohol', 'Alcohol')}><Input {...register('alcohol')} /></Field>
-          <Field label={t('patients.form.pregnancyStatus', 'Pregnancy status')}><Input {...register('pregnancyStatus')} /></Field>
+          <ComboField label={t('patients.form.smoking', 'Smoking')} options={YES_NO} placeholder="Select…" {...combo('smoking')} />
+          <ComboField label={t('patients.form.alcohol', 'Alcohol')} options={YES_NO} placeholder="Select…" {...combo('alcohol')} />
+          {/* Pregnancy only applies to female patients — hidden otherwise. */}
+          {isFemale && (
+            <ComboField label={t('patients.form.pregnancyStatus', 'Pregnancy status')} options={PREGNANCY_PRESETS} placeholder="Select…" {...combo('pregnancyStatus')} />
+          )}
           <Field label={t('patients.form.generalNotes', 'General notes')}><Input {...register('generalNotes')} /></Field>
         </div>
       </section>

@@ -93,23 +93,32 @@ export function AiPrecheckPanel({
   const qc = useQueryClient();
   const [requestedAt, setRequestedAt] = useState(null);
   const pollRef = useRef(null);
+  const pollCount = useRef(0);
 
   const out = useMemo(() => normalise(aiPrecheck?.output), [aiPrecheck]);
   const isSuccess = aiPrecheck?.status === 'SUCCESS' && out;
   const waitingForRun =
     requestedAt && (!aiPrecheck || new Date(aiPrecheck.createdAt) < requestedAt);
 
-  // Poll the workspace while a run is in flight (reception-triggered or doctor-triggered).
+  // Poll the workspace while a run is in flight. Rate-limit-friendly: 15s interval,
+  // and the no-result idle poll gives up after ~3 minutes (a manual Analyse restarts it).
   useEffect(() => {
     const shouldPoll = waitingForRun || (!aiPrecheck && !readOnly);
     if (!shouldPoll) {
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
+      pollCount.current = 0;
       return undefined;
     }
     pollRef.current = setInterval(() => {
+      pollCount.current += 1;
+      if (!waitingForRun && pollCount.current > 12) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+        return;
+      }
       qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_WORKSPACE(consultationId) });
-    }, 8000);
+    }, 15000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
