@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { ColorDot } from '@/components/common/ColorDot';
 import { PERMISSIONS } from '@/constants/rbac';
 import { QueueStatusBadge, PriorityBadge, WaitingTimer } from './QueueBadges';
 import {
@@ -68,6 +69,7 @@ export function QueueBoard({ entries = [], doctors = [] }) {
               <span className="text-muted-foreground">({entry.patient?.mrn})</span>
             </p>
             <p className="text-sm text-muted-foreground">
+              <ColorDot id={entry.doctorId} className="mr-1" title={entry.doctor?.name} />
               {t('reception.doctorPrefix')} {entry.doctor?.name || '—'} · {t('reception.queue.estWait', { count: entry.estimatedWaitTime || 0 })} ·{' '}
               <WaitingTimer arrivalTime={entry.arrivalTime} />
             </p>
@@ -217,7 +219,8 @@ export function DoctorQueueCard({ doctorId, doctorName, entries = [] }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base font-semibold">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold">
+          <ColorDot id={doctorId} />
           {doctorName || t('reception.doctor')}
         </CardTitle>
         <PermissionGuard permissions={[PERMISSIONS.QUEUE_MANAGE, PERMISSIONS.QUEUE_ALL]}>

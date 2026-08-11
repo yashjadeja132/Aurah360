@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, CalendarDays } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +12,8 @@ import { useAppointmentList } from '@/modules/appointments/hooks/useAppointments
 import { STATUS_OPTIONS, APPOINTMENT_STATUS_LABELS } from '@/modules/appointments/constants';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
+import { useClinicId } from '@/stores/clinicStore';
+import { ColorDot } from '@/components/common/ColorDot';
 import { APP_ROUTES } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 
@@ -41,6 +43,10 @@ export default function AppointmentListPage() {
   const { data, isLoading, isError, error } = useAppointmentList(params);
   const { data: doctorsData } = useDoctorList({ limit: 50 });
   const { data: branchesData } = useBranchList({ limit: 50 });
+  const clinicId = useClinicId();
+  useEffect(() => {
+    setFilters((p) => (p.branchId === clinicId ? p : { ...p, branchId: clinicId, page: 1 }));
+  }, [clinicId]);
 
   return (
     <section className="space-y-6">

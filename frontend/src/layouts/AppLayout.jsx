@@ -34,6 +34,7 @@ import { LanguageSwitcher } from '@/components/common/LanguageSwitcher';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { NotificationBell } from '@/components/common/NotificationBell';
+import { ClinicSwitcher } from '@/components/common/ClinicSwitcher';
 
 /**
  * Role shorthands used by the nav model below.
@@ -248,6 +249,7 @@ export function AppLayout() {
           </div>
 
           <div className="flex items-center gap-2">
+            {ADMINS.includes(user?.role) && <ClinicSwitcher />}
             <LanguageSwitcher className="hidden sm:flex" />
             <NotificationBell />
             <div className="relative">

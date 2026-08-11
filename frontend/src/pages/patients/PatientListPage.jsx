@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PatientTable } from '@/modules/patients/components/PatientTable';
 import { usePatientList } from '@/modules/patients/hooks/usePatients';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
+import { useClinicId } from '@/stores/clinicStore';
 import { useMasterActive } from '@/modules/masters/hooks/useMasters';
 import { APP_ROUTES } from '@/constants/routes';
 import { PERMISSIONS, GENDER_OPTIONS } from '@/constants/rbac';
@@ -39,6 +40,10 @@ export default function PatientListPage() {
 
   const { data, isLoading, isError, error } = usePatientList(params);
   const { data: branchesData } = useBranchList({ limit: 50 });
+  const clinicId = useClinicId();
+  useEffect(() => {
+    setFilters((p) => (p.branchId === clinicId ? p : { ...p, branchId: clinicId, page: 1 }));
+  }, [clinicId]);
   const { data: leadSources = [] } = useMasterActive('lead-sources');
   const { data: tags = [] } = useMasterActive('patient-tags');
 
