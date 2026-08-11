@@ -147,6 +147,8 @@
     "noExpiring": "No points expiring soon",
     "tier": "Tier",
     "howToEarn": "How to earn points",
+    "howToRedeem": "How to redeem",
+    "redeemAtClinic": "Points can only be redeemed at the clinic billing desk during checkout — this app shows your balance and history but cannot redeem points for you.",
     "viewStatement": "View statement",
     "programDisabled": "The rewards program isn't active for your clinic yet.",
     "earnRules": {

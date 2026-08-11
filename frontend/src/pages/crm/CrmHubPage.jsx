@@ -13,6 +13,7 @@ import { CrmFollowUpsPanel } from '@/modules/crm/components/CrmFollowUpsPanel';
 import { CrmRecallPanel } from '@/modules/crm/components/CrmRecallPanel';
 import { CrmOffersPanel } from '@/modules/crm/components/CrmOffersPanel';
 import { CrmFeedbackPanel } from '@/modules/crm/components/CrmFeedbackPanel';
+import { NotificationDeliveryLogPanel } from '@/modules/notifications/components/NotificationDeliveryLogPanel';
 
 /**
  * Gates carried over from the routes each panel used to live behind: the lead
@@ -28,10 +29,24 @@ const OFFERS_PERMS = [
   PERMISSIONS.CRM_ALL,
 ];
 const FEEDBACK_PERMS = [PERMISSIONS.CRM_FEEDBACK_VIEW, PERMISSIONS.CRM_ALL];
+// Spec §3 "Reminders" — delivery status (sent/delivered/read/failed) + retry, reusing the
+// notifications module's own log panel rather than duplicating it inside CRM.
+const REMINDERS_PERMS = [
+  PERMISSIONS.NOTIFICATIONS_VIEW,
+  PERMISSIONS.NOTIFICATIONS_MANAGE,
+  PERMISSIONS.NOTIFICATIONS_ALL,
+  PERMISSIONS.CRM_ALL,
+];
 
 /** Union of every tab gate — what it takes to see the hub at all. */
 export const CRM_HUB_PERMISSIONS = [
-  ...new Set([...CORE_PERMS, ...RECALL_PERMS, ...OFFERS_PERMS, ...FEEDBACK_PERMS]),
+  ...new Set([
+    ...CORE_PERMS,
+    ...RECALL_PERMS,
+    ...OFFERS_PERMS,
+    ...FEEDBACK_PERMS,
+    ...REMINDERS_PERMS,
+  ]),
 ];
 
 /**
@@ -51,6 +66,7 @@ export default function CrmHubPage() {
   const canViewRecalls = hasAnyPermission(perms, RECALL_PERMS);
   const canViewOffers = hasAnyPermission(perms, OFFERS_PERMS);
   const canViewFeedback = hasAnyPermission(perms, FEEDBACK_PERMS);
+  const canViewReminders = hasAnyPermission(perms, REMINDERS_PERMS);
 
   const TABS = useMemo(
     () => [
@@ -63,10 +79,11 @@ export default function CrmHubPage() {
           ]
         : []),
       ...(canViewRecalls ? [{ id: 'recalls', label: t('crm.hub.tabs.recalls', 'Recalls') }] : []),
+      ...(canViewReminders ? [{ id: 'reminders', label: t('crm.hub.tabs.reminders', 'Reminders') }] : []),
       ...(canViewOffers ? [{ id: 'offers', label: t('crm.hub.tabs.offers', 'Offers') }] : []),
       ...(canViewFeedback ? [{ id: 'feedback', label: t('crm.hub.tabs.feedback', 'Feedback') }] : []),
     ],
-    [t, canViewCore, canViewRecalls, canViewOffers, canViewFeedback]
+    [t, canViewCore, canViewRecalls, canViewReminders, canViewOffers, canViewFeedback]
   );
 
   const requested = searchParams.get('tab');
@@ -134,6 +151,11 @@ export default function CrmHubPage() {
         {tab === 'recalls' && (
           <PermissionGuard permissions={RECALL_PERMS}>
             <CrmRecallPanel />
+          </PermissionGuard>
+        )}
+        {tab === 'reminders' && (
+          <PermissionGuard permissions={REMINDERS_PERMS}>
+            <NotificationDeliveryLogPanel />
           </PermissionGuard>
         )}
         {tab === 'offers' && (

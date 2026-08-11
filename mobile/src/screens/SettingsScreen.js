@@ -10,7 +10,19 @@ import { SUPPORTED_LANGUAGES, setLanguage } from '../i18n';
 import { colors, radii } from '../theme/colors';
 import { patientApi } from '../api/patientApi';
 
-const PRIVACY_REQUEST_TYPES = ['ACCESS', 'CORRECTION', 'ERASURE', 'PORTABILITY', 'GRIEVANCE'];
+// All 7 data-subject-rights request types the backend accepts (src/enums/privacy.js
+// PRIVACY_REQUEST_TYPE) — this list previously omitted CONSENT_WITHDRAWAL and
+// COMMUNICATION_OPT_OUT (the spec's "Consent withdrawal" and "Marketing opt-out"), which meant
+// the app could not submit two of the seven request types the backend already supports.
+const PRIVACY_REQUEST_TYPES = [
+  'ACCESS',
+  'CORRECTION',
+  'CONSENT_WITHDRAWAL',
+  'ERASURE',
+  'PORTABILITY',
+  'GRIEVANCE',
+  'COMMUNICATION_OPT_OUT',
+];
 
 /** App-wide configuration — language, app lock, privacy requests. Split out of Profile
  *  (which is now identity + dependents only) so "who I am" and "how the app behaves" don't

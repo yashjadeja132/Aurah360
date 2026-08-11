@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Users, Check, Settings as SettingsIcon, ChevronRight,
-  History, FileText, Bell, Gift,
+  History, FileText, Bell, Gift, Sparkle,
 } from 'lucide-react-native';
 import { Screen } from '../components/Screen';
 import { Card, CardTitle, IconBadge } from '../components/Card';
@@ -44,6 +44,7 @@ export default function ProfileScreen({ navigation }) {
   const menuItems = [
     { label: t('timeline.title'), screen: 'Timeline', icon: History, tone: 'primary' },
     { label: t('documents.title'), screen: 'Documents', icon: FileText, tone: 'info' },
+    { label: t('rewards.title'), screen: 'Rewards', icon: Sparkle, tone: 'accent' },
     { label: t('notifications.title'), screen: 'Notifications', icon: Bell, tone: 'accent', badge: unreadCount },
     { label: t('offers.title'), screen: 'Offers', icon: Gift, tone: 'success' },
     { label: t('settings.title'), screen: 'Settings', icon: SettingsIcon, tone: 'soft' },
