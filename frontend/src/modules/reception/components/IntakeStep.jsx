@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import api from '@/services/api';
 import { consultationsApi } from '@/modules/consultations/api/consultationsApi';
 import { billingApi } from '@/modules/billing/api/billingApi';
 import { receptionApi } from '../api/receptionApi';
@@ -34,6 +35,8 @@ export function IntakeStep({ intake, onDone }) {
   const [bodyRegion, setBodyRegion] = useState('');
   const [uploading, setUploading] = useState(false);
   const [photoCount, setPhotoCount] = useState(0);
+  const [photoConsent, setPhotoConsent] = useState(true);
+  const [consentRecorded, setConsentRecorded] = useState(false);
 
   const [amount, setAmount] = useState(feeDefault || 500);
   const [method, setMethod] = useState('CASH');
@@ -47,6 +50,19 @@ export function IntakeStep({ intake, onDone }) {
     if (!file || !consultationId) return;
     setUploading(true);
     try {
+      // The photo policy cross-checks the append-only consent log, so record the
+      // patient's photography consent (asked verbally at the desk) before the first shot.
+      if (!consentRecorded) {
+        await api.post('/consent/grant', {
+          patientId,
+          purpose: 'CLINICAL_PHOTOGRAPHY',
+          method: 'STAFF_ENTERED',
+        }).catch((err) => {
+          // An already-granted consent is fine; anything else surfaces on the upload call.
+          if (err?.response?.status !== 409) throw err;
+        });
+        setConsentRecorded(true);
+      }
       const fd = new FormData();
       fd.append('file', file);
       fd.append('photoType', photoType);
@@ -129,6 +145,14 @@ export function IntakeStep({ intake, onDone }) {
       {/* Photos — optional */}
       <div className="space-y-2 rounded-lg border border-border p-3">
         <Label>Photos of the affected area (optional)</Label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={photoConsent}
+            onChange={(e) => setPhotoConsent(e.target.checked)}
+          />
+          Patient agreed to clinical photos (asked verbally)
+        </label>
         <div className="flex flex-wrap items-end gap-2">
           <Input
             type="file"
@@ -147,7 +171,12 @@ export function IntakeStep({ intake, onDone }) {
             placeholder="Body area (e.g. forearm)"
             className="w-40"
           />
-          <Button type="button" size="sm" onClick={uploadPhoto} disabled={!file || uploading || !consultationId}>
+          <Button
+            type="button"
+            size="sm"
+            onClick={uploadPhoto}
+            disabled={!file || uploading || !consultationId || !photoConsent}
+          >
             {uploading ? 'Uploading…' : 'Add photo'}
           </Button>
         </div>
