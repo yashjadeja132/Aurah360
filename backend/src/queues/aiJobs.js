@@ -11,11 +11,11 @@ export const AI_JOBS = Object.freeze({
  * attempts: 1 — AiGatewayService resolves rather than throws on degraded outcomes, so a
  * BullMQ retry would only ever re-bill a genuine provider timeout against the AI budget.
  */
-export async function enqueueClinicalPrecheck(consultationId, actorId) {
+export async function enqueueClinicalPrecheck(consultationId, actorId, { force = false } = {}) {
   const job = await enqueueJob(
     QUEUE_NAMES.AI,
     AI_JOBS.CLINICAL_PRECHECK,
-    { consultationId: String(consultationId), actorId: actorId ? String(actorId) : null },
+    { consultationId: String(consultationId), actorId: actorId ? String(actorId) : null, force },
     { attempts: 1 }
   );
   if (!job) {
@@ -30,12 +30,14 @@ export async function enqueueClinicalPrecheck(consultationId, actorId) {
 export const aiPrecheckHandlerModule = {
   jobNames: [AI_JOBS.CLINICAL_PRECHECK],
   async handle(job) {
-    const { consultationId, actorId } = job.data || {};
+    const { consultationId, actorId, force } = job.data || {};
     if (!consultationId) return { skipped: 'no consultationId' };
     const { default: ClinicalPrecheckService } = await import(
       '../services/ai/ClinicalPrecheckService.js'
     );
-    const result = await new ClinicalPrecheckService().runForConsultation(consultationId, actorId);
+    const result = await new ClinicalPrecheckService().runForConsultation(consultationId, actorId, {
+      force: Boolean(force),
+    });
     return { status: result.status, degraded: result.degraded };
   },
 };

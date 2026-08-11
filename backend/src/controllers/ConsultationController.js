@@ -30,7 +30,7 @@ class ConsultationController {
 
   runPrecheck = asyncHandler(async (req, res) => {
     const { enqueueClinicalPrecheck } = await import('../queues/aiJobs.js');
-    await enqueueClinicalPrecheck(req.params.id, req.auth.userId);
+    await enqueueClinicalPrecheck(req.params.id, req.auth.userId, { force: true });
     return ApiResponse.success(res, { message: 'AI precheck queued', data: { queued: true } });
   });
 

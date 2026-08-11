@@ -377,14 +377,35 @@ class NotificationService {
 
   // —— Backward-compatible appointment hooks (used by Appointment modules) ——
 
+  /**
+   * Simplified-flow SMS policy: a patient who is booked for TODAY (walk-in, or booked
+   * at the desk while standing there) is already at/near the clinic — texting them a
+   * confirmation or reminder is noise and wasted DLT credits. Advance bookings
+   * (future date, phone/online, doctor-advised follow-up) keep the full SMS flow.
+   */
+  #isSameClinicDay(a, b) {
+    if (!a || !b) return false;
+    const fmt = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    return fmt(a) === fmt(b);
+  }
+
+  #isImmediateBooking(appointment) {
+    if ((appointment.source || '') === 'WALK_IN' || appointment.isWalkIn) return true;
+    const apptDate = appointment.appointmentDate || appointment.date;
+    return this.#isSameClinicDay(apptDate, new Date());
+  }
+
   async sendAppointmentCreated(appointment) {
     const variables = this.#appointmentVars(appointment);
+    const channels = this.#isImmediateBooking(appointment)
+      ? [NOTIFICATION_CHANNEL.IN_APP]
+      : DEFAULT_EVENT_CHANNELS.AppointmentCreated;
     return this.queueEvent({
       eventName: 'AppointmentCreated',
       variables,
       patientId: appointment.patientId || null,
       userId: null,
-      channels: DEFAULT_EVENT_CHANNELS.AppointmentCreated,
+      channels,
     });
   }
 
@@ -403,6 +424,14 @@ class NotificationService {
   }
 
   async sendAppointmentReminder(appointment, scheduledAt = null) {
+    // No reminders for walk-ins or same-day desk bookings — the patient is already here.
+    // Advance bookings (booked on an earlier day than the appointment) keep reminders.
+    const bookedSameDay =
+      appointment.createdAt &&
+      this.#isSameClinicDay(appointment.createdAt, appointment.appointmentDate || appointment.date);
+    if (this.#isImmediateBooking(appointment) && (bookedSameDay || !appointment.createdAt)) {
+      return null;
+    }
     return this.queueEvent({
       eventName: 'AppointmentReminder',
       variables: this.#appointmentVars(appointment),

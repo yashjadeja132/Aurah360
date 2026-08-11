@@ -48,8 +48,18 @@ function normalise(output) {
     redFlags: output.red_flags || [],
     basedOnPhotos: Boolean(output.based_on_photos),
     confidenceNote: output.confidence_note || '',
+    comparison:
+      output.comparison && output.comparison.status !== 'NOT_APPLICABLE'
+        ? output.comparison
+        : null,
   };
 }
+
+const COMPARISON_STYLE = {
+  IMPROVED: { variant: 'success', label: 'Improved since last visit' },
+  WORSE: { variant: 'destructive', label: 'Worse since last visit' },
+  UNCHANGED: { variant: 'secondary', label: 'Unchanged since last visit' },
+};
 
 function Tile({ icon: Icon, title, tone, children }) {
   return (
@@ -167,7 +177,20 @@ export function AiPrecheckPanel({
         )}
 
         {isSuccess ? (
-          <p className="px-1 text-sm font-medium">{out.summary}</p>
+          <div className="space-y-1 px-1">
+            <p className="text-sm font-medium">{out.summary}</p>
+            {out.comparison && (
+              <p className="flex items-start gap-1.5 text-xs">
+                <Badge
+                  variant={COMPARISON_STYLE[out.comparison.status]?.variant || 'secondary'}
+                  className="shrink-0 text-[10px]"
+                >
+                  {COMPARISON_STYLE[out.comparison.status]?.label || out.comparison.status}
+                </Badge>
+                <span className="text-muted-foreground">{out.comparison.note}</span>
+              </p>
+            )}
+          </div>
         ) : (
           <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
             {waitingForRun || (!aiPrecheck && photosCount + 1)

@@ -11,7 +11,8 @@
       "medicine_suggestions",
       "red_flags",
       "based_on_photos",
-      "confidence_note"
+      "confidence_note",
+      "comparison"
     ],
     "properties": {
       "summary": {
@@ -106,6 +107,28 @@
       },
       "confidence_note": {
         "type": "string"
+      },
+      "comparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "note"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "IMPROVED",
+              "WORSE",
+              "UNCHANGED",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
       }
     }
   }
