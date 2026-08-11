@@ -96,6 +96,8 @@ const branchSchema = new mongoose.Schema(
     logo: { type: String, default: null },
     workingHours: { type: String, default: '10:00 - 19:00' },
     holidayCalendar: { type: [holidaySchema], default: [] },
+    /** ORG-002 — amenity/equipment categories offered at this branch (e.g. "parking", "wheelchair_access", "lab", "pharmacy"). */
+    facilities: { type: [String], default: [] },
     settings: {
       type: branchSettingsSchema,
       default: () => ({
@@ -150,6 +152,7 @@ branchSchema.methods.toSafeObject = function toSafeObject() {
     logo: this.logo,
     workingHours: this.workingHours,
     holidayCalendar: this.holidayCalendar,
+    facilities: this.facilities || [],
     settings: this.settings,
     status: this.status,
     isActive: this.isActive,

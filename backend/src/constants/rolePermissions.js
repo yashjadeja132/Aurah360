@@ -480,6 +480,14 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.LOYALTY_CAMPAIGNS_MANAGE,
     PERMISSIONS.LOYALTY_REPORTS_VIEW,
   ],
+
+  /**
+   * PRD §03 — Auditor / Read-only: "Selected reports and audit evidence. No edit/export/download
+   * unless separately granted." Deliberately excludes REPORTS_EXPORT, REPORTS_ALL,
+   * AUDIT_METADATA_VIEW (unredacted PHI-bearing metadata, NFR-018-restricted to OWNER) and every
+   * write/edit/create permission. This role is view-only by construction.
+   */
+  [ROLES.AUDITOR]: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.AUDIT_VIEW],
 });
 
 export default ROLE_PERMISSIONS;

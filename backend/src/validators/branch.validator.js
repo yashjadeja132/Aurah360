@@ -56,6 +56,7 @@ export const createBranchSchema = z.object({
   currency: z.string().max(10).optional(),
   logo: z.string().optional().nullable(),
   workingHours: z.string().max(120).optional().nullable(),
+  facilities: z.array(z.string().max(60)).max(50).optional(),
   notes: z.string().max(1000).optional().nullable(),
   settings: branchSettingsSchema.optional(),
 });

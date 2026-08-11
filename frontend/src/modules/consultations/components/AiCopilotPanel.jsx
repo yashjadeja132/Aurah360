@@ -299,6 +299,9 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
     ].join('\n');
     emitInsert(INSERT_TARGETS.SOAP_SUBJECTIVE, { text: block });
     onInsert?.(INSERT_TARGETS.SOAP_SUBJECTIVE);
+    // AI-004 — the suggested-questions output must carry an accept/edit/reject audit trail same
+    // as every other copilot output type; the doctor's own recorded answers count as accepted use.
+    recordDisposition('ACCEPTED', { insertedQuestionAnswers: answeredPairs });
     toast.success(t('consultations.copilot.qaInserted', 'Q&A inserted into Subjective'));
   };
 
@@ -545,7 +548,23 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                 sectionRef={(el) => { sectionRefs.current.summary = el; }}
                 openSignal={focusSignals.summary}
               >
-                <p className="whitespace-pre-wrap text-sm text-muted-foreground">{output.summary}</p>
+                <div className="flex items-start gap-2">
+                  <p className="flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{output.summary}</p>
+                  {!readOnly && (
+                    <AcceptControl
+                      label={t('consultations.copilot.noteIt', 'Note it')}
+                      payload={{ text: output.summary }}
+                      onAccept={(finalPayload, wasEdited) =>
+                        acceptWithEdit(
+                          finalPayload,
+                          wasEdited,
+                          INSERT_TARGETS.SOAP_SUBJECTIVE,
+                          t('consultations.soap.subjective', 'Subjective')
+                        )
+                      }
+                    />
+                  )}
+                </div>
               </Section>
             )}
 

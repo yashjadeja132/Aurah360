@@ -18,6 +18,7 @@ const staffRoles = [
   ROLES.CASHIER,
   ROLES.PHARMACIST,
   ROLES.CRM_EXECUTIVE,
+  ROLES.AUDITOR,
 ];
 
 export const staffRoleEnum = z.enum(staffRoles);
@@ -88,6 +89,7 @@ export const listStaffQuerySchema = z.object({
     ROLES.CASHIER,
     ROLES.PHARMACIST,
     ROLES.CRM_EXECUTIVE,
+    ROLES.AUDITOR,
   ]).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
   isActive: z.enum(['true', 'false']).optional(),

@@ -3,6 +3,7 @@ import asyncHandler from '../libs/asyncHandler.js';
 import NotificationService from '../services/NotificationService.js';
 import { hasGlobalScope } from '../helpers/scope.helper.js';
 import config from '../config/index.js';
+import { getDeadLetterQueue } from '../queues/dlq.js';
 
 /**
  * SEC-030 — notifications have NO branch dimension.
@@ -167,6 +168,33 @@ class NotificationController {
       },
     };
     return ApiResponse.success(res, { data: { status } });
+  });
+
+  /**
+   * NTF-007 dead-letter visibility — BullMQ jobs that exhaust all `attempts` land in the
+   * `dead-letter` queue (see queues/dlq.js#attachDeadLetterHandler) but until now had no
+   * admin-facing surface: they only ever appeared in worker logs. This lists the raw DLQ jobs
+   * (failed job name, source queue, original job id, payload, failure reason, attempts made,
+   * failedAt) so an operator can see and triage permanently-failed jobs instead of them silently
+   * disappearing. Read-only; replay/purge is future work.
+   */
+  deadLetterList = asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const queue = getDeadLetterQueue();
+    const jobs = await queue.getJobs(['failed', 'waiting', 'delayed', 'active'], 0, limit - 1, false);
+    const data = jobs
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .map((job) => ({
+        dlqJobId: job.id,
+        sourceQueue: job.data?.sourceQueue || null,
+        jobName: job.data?.jobName || null,
+        originalJobId: job.data?.originalJobId || null,
+        failedReason: job.data?.failedReason || null,
+        attemptsMade: job.data?.attemptsMade ?? null,
+        failedAt: job.data?.failedAt || null,
+        payload: job.data?.data ?? null,
+      }));
+    return ApiResponse.success(res, { data, meta: { count: data.length, limit } });
   });
 }
 

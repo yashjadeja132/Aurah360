@@ -16,6 +16,7 @@ export const staffFormSchema = z.object({
     'CASHIER',
     'PHARMACIST',
     'CRM_EXECUTIVE',
+    'AUDITOR',
   ]),
   department: z.string().optional().nullable(),
   designation: z.string().optional().nullable(),

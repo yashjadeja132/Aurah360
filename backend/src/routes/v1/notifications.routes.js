@@ -36,6 +36,11 @@ router.get(
   requirePermission(...view, ...manage),
   controller.reports
 );
+router.get(
+  '/dead-letter',
+  requirePermission(...manage),
+  controller.deadLetterList
+);
 router.post(
   '/schedule',
   requirePermission(...manage),

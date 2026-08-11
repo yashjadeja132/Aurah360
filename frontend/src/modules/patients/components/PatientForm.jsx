@@ -268,6 +268,7 @@ export function PatientForm({
         {[
           ['privacyPolicy', t('patients.form.consentPrivacy', 'Privacy policy')],
           ['treatmentConsent', t('patients.form.consentTreatment', 'Treatment consent')],
+          ['communicationConsent', t('patients.form.consentCommunication', 'Communication consent')],
           ['photographyConsent', t('patients.form.consentPhotography', 'Photography consent')],
           ['marketingConsent', t('patients.form.consentMarketing', 'Marketing consent')],
         ].map(([name, label]) => (

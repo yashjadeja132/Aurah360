@@ -43,6 +43,7 @@ export const patientFormSchema = z.object({
   tags: z.array(z.string()).optional(),
   privacyPolicy: z.boolean().optional(),
   treatmentConsent: z.boolean().optional(),
+  communicationConsent: z.boolean().optional(),
   photographyConsent: z.boolean().optional(),
   marketingConsent: z.boolean().optional(),
   notes: z.string().optional().nullable(),
@@ -99,6 +100,7 @@ export function toPatientPayload(values) {
     consent: {
       privacyPolicy: Boolean(values.privacyPolicy),
       treatmentConsent: Boolean(values.treatmentConsent),
+      communicationConsent: Boolean(values.communicationConsent),
       photographyConsent: Boolean(values.photographyConsent),
       marketingConsent: Boolean(values.marketingConsent),
     },
@@ -152,6 +154,7 @@ export function fromPatient(patient) {
     tags: patient.tags || [],
     privacyPolicy: Boolean(patient.consent?.privacyPolicy),
     treatmentConsent: Boolean(patient.consent?.treatmentConsent),
+    communicationConsent: Boolean(patient.consent?.communicationConsent),
     photographyConsent: Boolean(patient.consent?.photographyConsent),
     marketingConsent: Boolean(patient.consent?.marketingConsent),
     notes: patient.notes || '',

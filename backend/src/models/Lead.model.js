@@ -6,6 +6,7 @@ import {
   LEAD_STATUS_LIST,
 } from '../enums/crm.js';
 import { GENDER_LIST } from '../enums/gender.js';
+import { PATIENT_SOURCE_CATEGORY_LIST } from '../enums/patient.js';
 
 const leadSchema = new mongoose.Schema(
   {
@@ -36,7 +37,34 @@ const leadSchema = new mongoose.Schema(
       index: true,
     },
     source: { type: String, default: null, trim: true, index: true },
+    /**
+     * §12.5/CRM-001 acquisition taxonomy — same fixed list as Patient.sourceCategory
+     * (enums/patient.js#PATIENT_SOURCE_CATEGORY_LIST) so a converted lead's source lines up with
+     * the patient record it becomes. `source` above stays as free-text for anything not covered
+     * (e.g. a specific Master-linked sub-source via `sourceId`); this is the typed category.
+     */
+    sourceCategory: {
+      type: String,
+      enum: [...PATIENT_SOURCE_CATEGORY_LIST, null],
+      default: null,
+      index: true,
+    },
+    /** First-touch acquisition category, preserved even if `sourceCategory` is later corrected. */
+    firstTouchSourceCategory: {
+      type: String,
+      enum: [...PATIENT_SOURCE_CATEGORY_LIST, null],
+      default: null,
+    },
     campaign: { type: String, default: null, trim: true },
+    adSet: { type: String, default: null, trim: true },
+    keyword: { type: String, default: null, trim: true },
+    referralCode: { type: String, default: null, trim: true, index: true },
+    referrerPatientId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Patient',
+      default: null,
+      index: true,
+    },
     branchId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Branch',
@@ -103,7 +131,13 @@ leadSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     city: this.city,
     sourceId: this.sourceId?.toString?.() || this.sourceId || null,
     source: this.source,
+    sourceCategory: this.sourceCategory,
+    firstTouchSourceCategory: this.firstTouchSourceCategory,
     campaign: this.campaign,
+    adSet: this.adSet,
+    keyword: this.keyword,
+    referralCode: this.referralCode,
+    referrerPatientId: this.referrerPatientId?.toString?.() || null,
     branchId: this.branchId?.toString?.() || this.branchId,
     assignedTo: this.assignedTo?.toString?.() || this.assignedTo || null,
     interestedServices: this.interestedServices || [],

@@ -52,12 +52,14 @@ const medicalSchema = z
 const consentSchema = z.object({
   privacyPolicy: z.boolean().optional(),
   treatmentConsent: z.boolean().optional(),
+  /** PAT-004 — separate from treatmentConsent/marketingConsent; see Patient.model.js. */
+  communicationConsent: z.boolean().optional(),
   photographyConsent: z.boolean().optional(),
   marketingConsent: z.boolean().optional(),
   eSignPlaceholder: z.string().max(500).optional().nullable(),
 });
 
-export const createPatientSchema = z.object({
+const basePatientSchema = z.object({
   firstName: z.string().min(1).max(80).trim(),
   middleName: z.string().max(80).optional().nullable().transform(emptyToNull),
   lastName: z.string().min(1).max(80).trim(),
@@ -103,6 +105,8 @@ export const createPatientSchema = z.object({
     emptyToNull,
     z.enum(PATIENT_SOURCE_CATEGORY_LIST).nullable().optional()
   ),
+  /** PAT-003 — controlled "Other" text; required only when sourceCategory === 'OTHER', see refine below. */
+  sourceOtherText: z.string().max(200).optional().nullable().transform(emptyToNull),
   campaign: z.string().max(200).optional().nullable().transform(emptyToNull),
   isDependent: z.coerce.boolean().optional(),
   guardianPatientId: z.preprocess(emptyToNull, objectId.nullable().optional()),
@@ -124,7 +128,28 @@ export const createPatientSchema = z.object({
   allowDuplicate: z.coerce.boolean().optional(),
 });
 
-export const updatePatientSchema = createPatientSchema.partial();
+/** PAT-003 — "Other" text required when OTHER is selected; ignored/cleared otherwise so it can
+ *  never linger from a previously-selected "Other" that was switched away from. */
+function requireOtherTextWhenSourceIsOther(data, ctx) {
+  if (data.sourceCategory === 'OTHER' && !data.sourceOtherText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['sourceOtherText'],
+      message: 'sourceOtherText is required when sourceCategory is OTHER',
+    });
+  } else if (data.sourceCategory !== 'OTHER' && data.sourceOtherText) {
+    data.sourceOtherText = null;
+  }
+}
+
+export const createPatientSchema = basePatientSchema.superRefine(requireOtherTextWhenSourceIsOther);
+
+export const updatePatientSchema = basePatientSchema.partial().superRefine((data, ctx) => {
+  // Only enforce on update when sourceCategory is actually part of THIS payload — a partial
+  // update touching unrelated fields must not be blocked by an "Other" text it never mentions.
+  if (data.sourceCategory === undefined) return;
+  requireOtherTextWhenSourceIsOther(data, ctx);
+});
 
 export const updateConsentSchema = consentSchema;
 

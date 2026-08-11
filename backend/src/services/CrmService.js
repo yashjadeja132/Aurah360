@@ -187,7 +187,13 @@ class CrmService {
       city: payload.city || null,
       sourceId,
       source,
+      sourceCategory: payload.sourceCategory || null,
+      firstTouchSourceCategory: payload.sourceCategory || null,
       campaign: payload.campaign || null,
+      adSet: payload.adSet || null,
+      keyword: payload.keyword || null,
+      referralCode: payload.referralCode || null,
+      referrerPatientId: payload.referrerPatientId || null,
       branchId: payload.branchId,
       assignedTo: payload.assignedTo || null,
       interestedServices: payload.interestedServices || [],
@@ -278,6 +284,10 @@ class CrmService {
       'age',
       'city',
       'campaign',
+      'adSet',
+      'keyword',
+      'referralCode',
+      'sourceCategory',
       'budget',
       'priority',
       'remarks',
@@ -431,6 +441,12 @@ class CrmService {
       email: payload.email || lead.email || null,
       primaryBranchId: payload.primaryBranchId || lead.branchId.toString(),
       leadSourceId: lead.sourceId?.toString?.() || lead.sourceId || null,
+      // Carry the lead's acquisition category/campaign attribution forward onto the new patient
+      // record. PatientService.create derives its own firstTouchSourceCategory from this
+      // sourceCategory value, so the lead's ORIGINAL source (not any later re-tag) should be used
+      // here — that is exactly what lead.firstTouchSourceCategory holds.
+      sourceCategory: lead.firstTouchSourceCategory || lead.sourceCategory || null,
+      campaign: lead.campaign || null,
       primaryDoctorId: payload.primaryDoctorId || null,
       address: { city: payload.city || lead.city || null },
       dateOfBirth: payload.dateOfBirth || null,

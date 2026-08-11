@@ -11,6 +11,7 @@ import {
   ACTIVE_QUEUE_STATUSES,
 } from '../enums/queue.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
+import { APPOINTMENT_STATUS } from '../enums/appointment.js';
 import { emitQueueEvent, SOCKET_EVENTS } from '../socket/index.js';
 
 const AVG_CONSULT_MINUTES = 15;
@@ -190,6 +191,14 @@ class QueueService {
     });
 
     await this.#refreshWaitTimes(appointment.doctorId, queueDate);
+
+    // APT-005 — the appointment record itself must reflect "waiting in branch queue", not just
+    // the separate QueueEntry.queueStatus; without this the appointment jumps straight from
+    // CHECKED_IN to IN_CONSULTATION and the PRD's WAITING stage is invisible on the record.
+    await this.appointmentRepository.updateById(appointment._id, {
+      status: APPOINTMENT_STATUS.WAITING,
+      updatedBy: actorId,
+    });
 
     await this.auditService.record(AUDIT_ACTIONS.QUEUE_ASSIGNED, {
       actorId,

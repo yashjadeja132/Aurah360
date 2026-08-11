@@ -7,6 +7,7 @@ import {
   LEAD_TASK_STATUS_LIST,
 } from '../enums/crm.js';
 import { GENDER_LIST } from '../enums/gender.js';
+import { PATIENT_SOURCE_CATEGORY_LIST } from '../enums/patient.js';
 
 const objectId = z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid id');
 
@@ -36,7 +37,12 @@ export const createLeadSchema = z.object({
   city: z.string().optional().nullable(),
   sourceId: objectId.optional().nullable(),
   source: z.string().optional().nullable(),
+  sourceCategory: z.enum(PATIENT_SOURCE_CATEGORY_LIST).optional().nullable(),
   campaign: z.string().optional().nullable(),
+  adSet: z.string().optional().nullable(),
+  keyword: z.string().optional().nullable(),
+  referralCode: z.string().optional().nullable(),
+  referrerPatientId: objectId.optional().nullable(),
   branchId: objectId,
   assignedTo: objectId.optional().nullable(),
   interestedServices: z.array(z.string()).optional(),

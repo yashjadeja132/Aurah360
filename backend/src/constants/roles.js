@@ -13,6 +13,7 @@ export const ROLES = Object.freeze({
   CASHIER: 'CASHIER',
   PHARMACIST: 'PHARMACIST',
   CRM_EXECUTIVE: 'CRM_EXECUTIVE',
+  AUDITOR: 'AUDITOR',
 });
 
 export const ROLE_LIST = Object.freeze(Object.values(ROLES));
@@ -28,6 +29,7 @@ export const ROLE_LABELS = Object.freeze({
   [ROLES.CASHIER]: 'Cashier',
   [ROLES.PHARMACIST]: 'Pharmacist',
   [ROLES.CRM_EXECUTIVE]: 'CRM Executive',
+  [ROLES.AUDITOR]: 'Auditor',
 });
 
 export default ROLES;

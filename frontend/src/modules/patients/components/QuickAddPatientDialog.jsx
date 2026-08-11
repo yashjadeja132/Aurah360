@@ -75,10 +75,12 @@ export function QuickAddPatientDialog({ open, onOpenChange, onCreated, defaultBr
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [branchId, setBranchId] = useState(initialBranchId);
   const [sourceCategory, setSourceCategory] = useState('');
+  const [sourceOtherText, setSourceOtherText] = useState('');
   const [referredBy, setReferredBy] = useState('');
   const [consent, setConsent] = useState({
     privacyPolicy: false,
     treatmentConsent: false,
+    communicationConsent: false,
     marketingConsent: false,
     photographyConsent: false,
   });
@@ -95,10 +97,12 @@ export function QuickAddPatientDialog({ open, onOpenChange, onCreated, defaultBr
     setDateOfBirth('');
     setBranchId(initialBranchId);
     setSourceCategory('');
+    setSourceOtherText('');
     setReferredBy('');
     setConsent({
       privacyPolicy: false,
       treatmentConsent: false,
+      communicationConsent: false,
       marketingConsent: false,
       photographyConsent: false,
     });
@@ -117,7 +121,8 @@ export function QuickAddPatientDialog({ open, onOpenChange, onCreated, defaultBr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultName, initialBranchId]);
 
-  const canSubmit = firstName.trim() && lastName.trim() && mobile.trim() && branchId;
+  const canSubmit = firstName.trim() && lastName.trim() && mobile.trim() && branchId
+    && (sourceCategory !== 'OTHER' || sourceOtherText.trim());
 
   const doCreate = async (allowDuplicate = false) => {
     try {
@@ -129,6 +134,7 @@ export function QuickAddPatientDialog({ open, onOpenChange, onCreated, defaultBr
         dateOfBirth: dateOfBirth || undefined,
         primaryBranchId: branchId,
         sourceCategory: sourceCategory || undefined,
+        sourceOtherText: sourceCategory === 'OTHER' ? sourceOtherText.trim() || undefined : undefined,
         referredBy: isReferral ? referredBy.trim() || undefined : undefined,
         consent,
         allowDuplicate,
@@ -249,6 +255,16 @@ export function QuickAddPatientDialog({ open, onOpenChange, onCreated, defaultBr
                   <option value="OTHER">{t('patients.source.OTHER', 'Other')}</option>
                 </Select>
               </div>
+              {sourceCategory === 'OTHER' && (
+                <div className="space-y-1 sm:col-span-2">
+                  <Label>{t('patients.form.sourceOtherText', 'Please specify source')}</Label>
+                  <Input
+                    value={sourceOtherText}
+                    onChange={(e) => setSourceOtherText(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
               {isReferral && (
                 <div className="space-y-1 sm:col-span-2">
                   <Label>{t('patients.form.referredBy', 'Referrer (patient/person) or referral code')}</Label>
@@ -273,6 +289,14 @@ export function QuickAddPatientDialog({ open, onOpenChange, onCreated, defaultBr
                     type="checkbox"
                     checked={consent.treatmentConsent}
                     onChange={(e) => setConsent((c) => ({ ...c, treatmentConsent: e.target.checked }))}
+                  />
+                  {t('patients.form.consentTreatment', 'Treatment consent')}
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={consent.communicationConsent}
+                    onChange={(e) => setConsent((c) => ({ ...c, communicationConsent: e.target.checked }))}
                   />
                   {t('patients.form.consentCommunication', 'Communication consent')}
                 </label>

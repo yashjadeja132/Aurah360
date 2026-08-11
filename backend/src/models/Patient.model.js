@@ -59,6 +59,13 @@ const consentSchema = new mongoose.Schema(
   {
     privacyPolicy: { type: Boolean, default: false },
     treatmentConsent: { type: Boolean, default: false },
+    /**
+     * PAT-004 — appointment reminders/follow-up outreach consent, kept distinct from
+     * `treatmentConsent` (consent to be treated) and `marketingConsent` (promotional outreach).
+     * Previously the UI's "Communication consent" checkbox was silently bound to
+     * `treatmentConsent`, so no separate communication-consent signal was ever stored.
+     */
+    communicationConsent: { type: Boolean, default: false },
     photographyConsent: { type: Boolean, default: false },
     marketingConsent: { type: Boolean, default: false },
     eSignPlaceholder: { type: String, default: null },
@@ -143,6 +150,11 @@ const patientSchema = new mongoose.Schema(
       enum: [...PATIENT_SOURCE_CATEGORY_LIST, null],
       default: null,
     },
+    /**
+     * PAT-003 — controlled free text captured ONLY when sourceCategory === 'OTHER' (enforced in
+     * patient.validator.js). Keeps the "Other" option from becoming an untracked catch-all.
+     */
+    sourceOtherText: { type: String, default: null, trim: true },
     campaign: { type: String, default: null, trim: true },
     firstTouchSourceCategory: { type: String, default: null },
     /** Guardian / dependent (PAT-005) — set when this patient is a minor or a dependent of another record. */
@@ -247,6 +259,7 @@ patientSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     leadSourceId: this.leadSourceId ? this.leadSourceId.toString() : null,
     referredBy: this.referredBy,
     sourceCategory: this.sourceCategory,
+    sourceOtherText: this.sourceOtherText,
     campaign: this.campaign,
     firstTouchSourceCategory: this.firstTouchSourceCategory,
     isDependent: this.isDependent,

@@ -198,6 +198,7 @@ export const ROLES = Object.freeze({
   CASHIER: 'CASHIER',
   PHARMACIST: 'PHARMACIST',
   CRM_EXECUTIVE: 'CRM_EXECUTIVE',
+  AUDITOR: 'AUDITOR',
 });
 
 export const ROLE_OPTIONS = Object.freeze([
@@ -210,6 +211,7 @@ export const ROLE_OPTIONS = Object.freeze([
   { value: 'CASHIER', label: 'Cashier' },
   { value: 'PHARMACIST', label: 'Pharmacist' },
   { value: 'CRM_EXECUTIVE', label: 'CRM Executive' },
+  { value: 'AUDITOR', label: 'Auditor' },
 ]);
 
 export const ROLE_LABELS = Object.freeze({
@@ -223,6 +225,7 @@ export const ROLE_LABELS = Object.freeze({
   CASHIER: 'Cashier',
   PHARMACIST: 'Pharmacist',
   CRM_EXECUTIVE: 'CRM Executive',
+  AUDITOR: 'Auditor',
 });
 
 export const GENDER_OPTIONS = Object.freeze([

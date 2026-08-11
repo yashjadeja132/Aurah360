@@ -46,6 +46,12 @@ class AppointmentLifecycleService {
       resourceId: id,
       req,
     });
+    eventBus.emitDomain('AppointmentConfirmed', {
+      appointmentId: id,
+      patientId: doc.patientId?.toString?.() || doc.patientId,
+      branchId: doc.branchId?.toString?.() || doc.branchId,
+      confirmedAt: new Date().toISOString(),
+    });
     return this.appointmentService.getById(id);
   }
 
@@ -79,6 +85,13 @@ class AppointmentLifecycleService {
       resourceType: 'Appointment',
       resourceId: id,
       req,
+    });
+    eventBus.emitDomain('AppointmentCancelled', {
+      appointmentId: id,
+      patientId: doc.patientId?.toString?.() || doc.patientId,
+      branchId: doc.branchId?.toString?.() || doc.branchId,
+      reasonCode: code,
+      cancelledAt: new Date().toISOString(),
     });
     return mapped;
   }
@@ -120,6 +133,13 @@ class AppointmentLifecycleService {
         // Best-effort — a recall worklist failure must never block the no-show itself.
       }
     }
+
+    eventBus.emitDomain('AppointmentNoShow', {
+      appointmentId: id,
+      patientId: doc.patientId?.toString?.() || doc.patientId,
+      branchId: doc.branchId?.toString?.() || doc.branchId,
+      noShowAt: new Date().toISOString(),
+    });
 
     return this.appointmentService.getById(id);
   }
@@ -227,6 +247,13 @@ class AppointmentLifecycleService {
         resourceType: 'Appointment',
         resourceId: created.id,
         req,
+      });
+      eventBus.emitDomain('AppointmentRescheduled', {
+        appointmentId: id,
+        newAppointmentId: created.id,
+        patientId: existing.patientId?.toString?.() || existing.patientId,
+        branchId: existing.branchId?.toString?.() || existing.branchId,
+        rescheduledAt: new Date().toISOString(),
       });
 
       return { previousId: id, appointment: created };

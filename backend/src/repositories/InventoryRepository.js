@@ -55,10 +55,23 @@ export class InventoryItemRepository extends BaseRepository {
   }
 }
 
-/** Stock transactions are append-only — no update/delete helpers. */
+/**
+ * INV-002 — stock transactions are an immutable ledger: append-only, no update/delete.
+ * BaseRepository otherwise exposes generic updateById/deleteById; overriding both here to
+ * throw turns "nothing calls them today" into "nothing CAN call them", closing the latent
+ * gap where a future caller could inherit and use the generic mutators unnoticed.
+ */
 export class StockTransactionRepository extends BaseRepository {
   constructor() {
     super(StockTransaction);
+  }
+
+  async updateById() {
+    throw new Error('StockTransaction is an immutable ledger — updates are not permitted. Create a new counter-entry instead.');
+  }
+
+  async deleteById() {
+    throw new Error('StockTransaction is an immutable ledger — deletes are not permitted. Create a new counter-entry instead.');
   }
 
   async listLedger({ inventoryItemId, branchId, type, limit = 100, skip = 0 } = {}) {
