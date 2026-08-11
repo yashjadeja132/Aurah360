@@ -77,15 +77,59 @@ export function usePurchaseOrders(params = {}) {
   });
 }
 
+/**
+ * INV-003 — `POST /inventory/adjust` now has two possible response shapes: a routine
+ * (below-threshold) adjustment still returns the completed `{ item, transaction }` payload
+ * exactly as before, but an "unusual" one returns `{ pendingApproval: true, request }` instead,
+ * with stock untouched until someone with INVENTORY_ADJUST_APPROVE decides it.
+ */
 export function useAdjustStock() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload) => inventoryApi.adjust(payload),
-    onSuccess: () => {
-      toast.success('Stock adjusted');
+    onSuccess: (res) => {
+      if (res?.data?.pendingApproval) {
+        toast.info('Submitted for approval — unusual adjustment needs sign-off before it applies');
+      } else {
+        toast.success('Stock adjusted');
+      }
       invalidateInv(qc);
+      qc.invalidateQueries({ queryKey: ['inventory', 'adjustments'] });
     },
     onError: (e) => toast.error(errMsg(e, 'Adjust failed')),
+  });
+}
+
+// --- Stock adjustment approval queue (INV-003) ---
+export function useAdjustmentRequests(params = {}) {
+  return useQuery({
+    queryKey: ['inventory', 'adjustments', params],
+    queryFn: async () => (await inventoryApi.listAdjustmentRequests(params)).data.requests || [],
+  });
+}
+
+export function useApproveAdjustmentRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => inventoryApi.approveAdjustmentRequest(id),
+    onSuccess: () => {
+      toast.success('Adjustment approved');
+      invalidateInv(qc);
+      qc.invalidateQueries({ queryKey: ['inventory', 'adjustments'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not approve')),
+  });
+}
+
+export function useRejectAdjustmentRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }) => inventoryApi.rejectAdjustmentRequest(id, reason),
+    onSuccess: () => {
+      toast.success('Adjustment rejected');
+      qc.invalidateQueries({ queryKey: ['inventory', 'adjustments'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not reject')),
   });
 }
 

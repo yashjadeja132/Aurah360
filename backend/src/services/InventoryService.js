@@ -18,7 +18,9 @@ import {
 } from '../enums/inventory.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import StockTransferRequest from '../models/StockTransferRequest.model.js';
+import StockAdjustmentRequest from '../models/StockAdjustmentRequest.model.js';
 import { getNextSequence } from '../models/Sequence.model.js';
+import { config } from '../config/index.js';
 
 /**
  * Generic inventory engine.
@@ -65,6 +67,30 @@ class InventoryService {
       throw ApiError.notFound('Transfer request not found');
     }
     return transfer;
+  }
+
+  /**
+   * A stock adjustment request belongs to exactly one branch (unlike a transfer, which has two
+   * parties) — same 404-not-403 SEC-030 convention as `#assertItemInScope`.
+   */
+  #assertAdjustmentInScope(request, branchId) {
+    if (!branchId || !request) return request;
+    if (String(request.branchId) !== String(branchId)) {
+      throw ApiError.notFound('Adjustment request not found');
+    }
+    return request;
+  }
+
+  /**
+   * INV-003 — "unusual adjustment needs approval" (spec). Either the absolute unit count or the
+   * absolute rupee value (quantity × unit cost) crossing its configured threshold routes the
+   * adjustment to the approval queue instead of writing to stock immediately.
+   */
+  #isUnusualAdjustment(qty, unitCost) {
+    const absQty = Math.abs(Number(qty) || 0);
+    if (absQty > config.inventory.adjustmentApprovalThresholdQuantity) return true;
+    const value = absQty * (Number(unitCost) || 0);
+    return value > config.inventory.adjustmentApprovalThresholdValueInr;
   }
 
   #round(n) {
@@ -474,6 +500,40 @@ class InventoryService {
     this.#assertItemInScope(item, branchId);
     const qty = Number(payload.quantity);
     if (!qty || qty === 0) throw ApiError.badRequest('quantity must be non-zero');
+
+    // INV-003 — routine adjustments are unregressed (immediate write, same as always); an
+    // "unusual" one (large unit count or large value) queues for approval instead, and stock is
+    // NOT touched here.
+    const existingBatch = payload.batchNumber
+      ? (item.batches || []).find((b) => b.batchNumber === payload.batchNumber)
+      : null;
+    const unitCost = existingBatch?.purchasePrice ?? item.purchasePrice ?? 0;
+    if (this.#isUnusualAdjustment(qty, unitCost)) {
+      const seq = await getNextSequence('stock_adjustment_number');
+      const request = await StockAdjustmentRequest.create({
+        adjustmentNumber: `ADJ-${String(seq).padStart(6, '0')}`,
+        inventoryItemId: item._id,
+        branchId: item.branchId,
+        batchNumber: payload.batchNumber || null,
+        quantityDelta: qty,
+        reason: payload.reason || 'Stock adjustment',
+        reasonCategory: payload.reasonCategory || 'OTHER',
+        notes: payload.notes || null,
+        requestedBy: actorId,
+      });
+
+      await this.auditService.record(AUDIT_ACTIONS.STOCK_ADJUSTMENT_REQUESTED, {
+        actorId,
+        metadata: {
+          adjustmentRequestId: request._id.toString(),
+          inventoryItemId: item._id.toString(),
+          quantity: qty,
+        },
+        req,
+      });
+
+      return { pendingApproval: true, request: request.toSafeObject() };
+    }
 
     const { item: updated, transaction } = await this.#applyMovement({
       item,
@@ -1107,6 +1167,97 @@ class InventoryService {
     if (!transfer) throw ApiError.notFound('Transfer request not found');
     this.#assertTransferInScope(transfer, branchId);
     return transfer.toSafeObject();
+  }
+
+  // --- Stock adjustment approval workflow (INV-003) ---------------------------------------------
+  // Unusual adjustments only: routine ones write to stock immediately from `adjust()` above and
+  // never create one of these. The immutable ledger entry is written here, only on approval.
+
+  async listAdjustmentRequests(query = {}) {
+    const filter = {};
+    if (query.branchId) filter.branchId = query.branchId;
+    if (query.status) filter.status = query.status;
+    const rows = await StockAdjustmentRequest.find(filter).sort({ createdAt: -1 }).exec();
+    return rows.map((r) => r.toSafeObject());
+  }
+
+  async getAdjustmentRequest(id, { branchId = null } = {}) {
+    const request = await StockAdjustmentRequest.findById(id);
+    if (!request) throw ApiError.notFound('Adjustment request not found');
+    this.#assertAdjustmentInScope(request, branchId);
+    return request.toSafeObject();
+  }
+
+  async approveAdjustmentRequest(id, actorId, req = null, { branchId = null } = {}) {
+    const request = await StockAdjustmentRequest.findById(id);
+    if (!request) throw ApiError.notFound('Adjustment request not found');
+    this.#assertAdjustmentInScope(request, branchId);
+    if (request.status !== 'PENDING_APPROVAL') {
+      throw ApiError.badRequest('Only a pending adjustment request can be approved');
+    }
+
+    const item = await this.itemRepo.findByIdNotDeleted(request.inventoryItemId);
+    if (!item) throw ApiError.notFound('Inventory item not found');
+
+    const { transaction } = await this.#applyMovement({
+      item,
+      type: STOCK_TX_TYPE.ADJUSTMENT,
+      quantityDelta: request.quantityDelta,
+      batchNumber: request.batchNumber || null,
+      reason: request.reason,
+      notes: request.notes,
+      referenceType: 'STOCK_ADJUSTMENT_REQUEST',
+      referenceId: request._id,
+      actorId,
+      allowCreateBatch: request.quantityDelta > 0,
+      req,
+    });
+
+    request.status = 'APPROVED';
+    request.decidedBy = actorId;
+    request.decidedAt = new Date();
+    request.transactionId = transaction._id;
+    await request.save();
+
+    const eventPayload = {
+      inventoryItemId: item._id.toString(),
+      quantity: request.quantityDelta,
+      transactionNumber: transaction.transactionNumber,
+      branchId: item.branchId.toString(),
+    };
+    eventBus.emitDomain(INVENTORY_EVENTS.STOCK_ADJUSTED, eventPayload);
+    emitQueueEvent(SOCKET_EVENTS.STOCK_ADJUSTED, eventPayload);
+
+    await this.auditService.record(AUDIT_ACTIONS.STOCK_ADJUSTMENT_APPROVED, {
+      actorId,
+      metadata: { adjustmentRequestId: id, tx: transaction.transactionNumber },
+      req,
+    });
+
+    return request.toSafeObject();
+  }
+
+  async rejectAdjustmentRequest(id, { reason } = {}, actorId, req = null, { branchId = null } = {}) {
+    const request = await StockAdjustmentRequest.findById(id);
+    if (!request) throw ApiError.notFound('Adjustment request not found');
+    this.#assertAdjustmentInScope(request, branchId);
+    if (request.status !== 'PENDING_APPROVAL') {
+      throw ApiError.badRequest('Only a pending adjustment request can be rejected');
+    }
+
+    request.status = 'REJECTED';
+    request.decidedBy = actorId;
+    request.decidedAt = new Date();
+    request.decisionNote = reason || null;
+    await request.save();
+
+    await this.auditService.record(AUDIT_ACTIONS.STOCK_ADJUSTMENT_REJECTED, {
+      actorId,
+      metadata: { adjustmentRequestId: id, reason: reason || null },
+      req,
+    });
+
+    return request.toSafeObject();
   }
 }
 

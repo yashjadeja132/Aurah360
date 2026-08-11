@@ -88,6 +88,11 @@ export const createPatientSchema = z.object({
   primaryDoctorId: z.preprocess(emptyToNull, objectId.nullable().optional()),
   leadSourceId: z.preprocess(emptyToNull, objectId.nullable().optional()),
   referredBy: z.string().max(200).optional().nullable(),
+  /** LOY Flow C — referring patient's code, resolved by ReferralService.registerReferral. */
+  referralCode: z.string().trim().max(20).optional().nullable(),
+  /** True when reception/staff typed the code in on the patient's behalf (audited); false/absent
+   *  for a patient supplying their own code (self-service, not audited). */
+  referralCreatedByStaff: z.boolean().optional(),
   /**
    * PAT-003 / PAT-005 — `validate()` replaces req.body with the PARSED object, so a field the
    * schema does not mention is not merely unvalidated, it is deleted. Patient.model.js has carried

@@ -6,6 +6,7 @@ import MasterRepository from '../repositories/MasterRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
 import PatientDuplicateService from './PatientDuplicateService.js';
 import AuditService from './AuditService.js';
+import ReferralService from './ReferralService.js';
 import { eventBus } from '../events/eventBus.js';
 import { generateMrn, generatePatientCode } from '../helpers/mrn.helper.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
@@ -22,6 +23,7 @@ class PatientService {
     this.timelineService = new PatientTimelineService();
     this.duplicateService = new PatientDuplicateService();
     this.auditService = new AuditService();
+    this.referralService = new ReferralService();
   }
 
   async #assertBranch(branchId) {
@@ -170,6 +172,20 @@ class PatientService {
       resourceId: patient._id.toString(),
       req,
     });
+
+    // LOY Flow C — pair this new patient as referee against the supplied referral code, if any.
+    // `referralCreatedBy` distinguishes staff-entered codes (reception form) from a patient
+    // supplying their own code (self-service) — audited only in the former case, see
+    // ReferralService.registerReferral.
+    if (payload.referralCode) {
+      await this.referralService.registerReferral({
+        refereePatientId: patient._id,
+        referralCode: payload.referralCode,
+        branchId: attributes.primaryBranchId,
+        createdBy: payload.referralCreatedByStaff ? actorId : null,
+        req,
+      });
+    }
 
     return this.#mapPatient(await this.patientRepository.findByIdPopulated(patient._id));
   }

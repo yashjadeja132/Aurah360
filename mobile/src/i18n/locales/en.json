@@ -165,6 +165,25 @@
       "PROFILE_COMPLETION": "Complete your profile"
     }
   },
+  "referral": {
+    "title": "Refer & earn",
+    "subtitle": "Invite friends, earn points together",
+    "yourCode": "Your referral code",
+    "share": "Share your link",
+    "shareMessage": "Join me at our clinic! Use my referral code {{code}} when you register: {{link}}",
+    "howItWorks": "When a friend registers with your code and completes their first paid visit, you both earn points.",
+    "yourReferrals": "Friends you've referred",
+    "noReferrals": "You haven't referred anyone yet",
+    "status": {
+      "PENDING": "Waiting for first visit",
+      "QUALIFIED": "Visit completed, points on the way",
+      "CREDITED": "Points earned",
+      "BLOCKED_SELF_REFERRAL": "Not eligible",
+      "BLOCKED_DUPLICATE_DEVICE": "Not eligible",
+      "BLOCKED_MONTHLY_CAP": "Monthly limit reached"
+    },
+    "someoneJoined": "Someone joined"
+  },
   "statement": {
     "title": "Points statement",
     "subtitle": "Every credit & debit to your points balance",

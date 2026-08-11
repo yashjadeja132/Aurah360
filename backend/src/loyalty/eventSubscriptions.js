@@ -2,10 +2,13 @@ import { eventBus } from '../events/eventBus.js';
 import logger from '../libs/logger.js';
 import LoyaltyEarningEngineService from '../services/LoyaltyEarningEngineService.js';
 import LoyaltyLedgerService from '../services/LoyaltyLedgerService.js';
+import ReferralService from '../services/ReferralService.js';
 import LoyaltyEarningRule from '../models/LoyaltyEarningRule.model.js';
 import Invoice from '../models/Invoice.model.js';
 import Patient from '../models/Patient.model.js';
+import Appointment from '../models/Appointment.model.js';
 import { LOYALTY_EARNING_EVENT, LOYALTY_SOURCE_REF_TYPE } from '../enums/loyalty.js';
+import { APPOINTMENT_STATUS } from '../enums/appointment.js';
 import { BILLING_EVENTS } from '../enums/billing.js';
 import { PATIENT_PORTAL_EVENTS } from '../enums/patientPortal.js';
 
@@ -30,12 +33,15 @@ const DEFAULT_FOLLOW_UP_GRACE_DAYS = 3;
  *    every reception profile edit; this listener itself decides whether the configured field
  *    set just became fully complete.
  *
+ * E5 REFERRAL_REFERRER/REFERRAL_REFEREE — now wired via ReferralService, NOT here directly.
+ * The Referral model (Referral.model.js) pairs referrer/referee (created by PatientService.create
+ * / CrmService.convert when a referralCode is supplied). Qualification ("referee's first
+ * completed+paid visit") piggybacks on this same INVOICE_PAID handler below —
+ * ReferralService.qualifyAndCreditIfPending() is called after the existing SPEND_BASED credit,
+ * and itself calls engine.resolveAndCredit() for both REFERRAL_REFERRER and REFERRAL_REFEREE,
+ * mirroring this file's exact pattern (see ReferralService.js#creditBothSides).
+ *
  * NOT wired here (documented, not silently skipped):
- *  - REFERRAL_REFERRER/REFERRAL_REFEREE (E5) — Patient.referredBy is a free-text field, not a
- *    patient reference, and CrmService's LeadConverted payload carries no referring-patient id.
- *    Pairing referrer/referee correctly requires a real referral-tracking model this task was
- *    not scoped to add; wiring would silently do the wrong thing, so it is left for the module
- *    that introduces proper referral tracking to call engine.resolveAndCredit() directly.
  *  - APP_REGISTRATION (E7) — patients are pre-registered by staff; there is no
  *    patient-self-registers-for-app flow/event in PatientAuthService to hook (only OTP login of
  *    an already-provisioned account).
@@ -43,6 +49,7 @@ const DEFAULT_FOLLOW_UP_GRACE_DAYS = 3;
  */
 const engine = new LoyaltyEarningEngineService();
 const ledger = new LoyaltyLedgerService();
+const referralService = new ReferralService();
 
 /**
  * LOY-001 `earnOnRedeemedPortion` — should the part of a bill settled with the patient's own
@@ -89,7 +96,7 @@ export function registerLoyaltyEventListeners() {
   // (and, once voided, left points behind that only the clawback path could chase).
   safeHandle(BILLING_EVENTS.INVOICE_PAID, async (payload) => {
     const invoice = await Invoice.findById(payload.invoiceId)
-      .select('branchId packageSnapshot total loyaltyRedemption')
+      .select('branchId packageSnapshot total loyaltyRedemption appointmentId')
       .lean();
     if (!invoice) return;
 
@@ -114,6 +121,23 @@ export function registerLoyaltyEventListeners() {
         sourceRefId: payload.invoiceId,
         idempotencyKey: `package-purchase:${payload.invoiceId}`,
       });
+    }
+
+    // E5 (LOY Flow C) — "referee's first qualifying visit COMPLETED + invoice PAID". This invoice
+    // is now paid; confirm the visit it belongs to is actually COMPLETED (not just billed) before
+    // qualifying a pending referral. No appointmentId on the invoice (e.g. a walk-in package sale
+    // with no linked appointment) means this signal cannot confirm "visit completed" — skipped,
+    // not silently qualified.
+    if (invoice.appointmentId) {
+      const appointment = await Appointment.findById(invoice.appointmentId).select('status').lean();
+      if (appointment?.status === APPOINTMENT_STATUS.COMPLETED) {
+        await referralService.qualifyAndCreditIfPending({
+          refereePatientId: payload.patientId,
+          invoiceId: payload.invoiceId,
+          branchId: invoice.branchId,
+          occurredAt: payload.emittedAt,
+        });
+      }
     }
   });
 

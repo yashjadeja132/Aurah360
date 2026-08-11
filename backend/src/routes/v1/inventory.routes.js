@@ -25,6 +25,8 @@ import {
   dispatchTransferSchema,
   receiveTransferSchema,
   transferIdParamSchema,
+  rejectAdjustmentSchema,
+  adjustmentIdParamSchema,
 } from '../../validators/inventory.validator.js';
 
 const router = Router();
@@ -132,6 +134,31 @@ router.post(
   validate({ params: transferIdParamSchema, body: receiveTransferSchema }),
   controller.receiveTransfer
 );
+// Stock adjustment approval queue (INV-003) — unusual adjustments only; see InventoryService#adjust.
+router.get(
+  '/adjustments',
+  requirePermission(...view),
+  controller.listAdjustmentRequests
+);
+router.get(
+  '/adjustments/:id',
+  requirePermission(...view),
+  validate({ params: adjustmentIdParamSchema }),
+  controller.getAdjustmentRequest
+);
+router.post(
+  '/adjustments/:id/approve',
+  requirePermission(PERMISSIONS.INVENTORY_ADJUST_APPROVE, PERMISSIONS.INVENTORY_ALL),
+  validate({ params: adjustmentIdParamSchema }),
+  controller.approveAdjustmentRequest
+);
+router.post(
+  '/adjustments/:id/reject',
+  requirePermission(PERMISSIONS.INVENTORY_ADJUST_APPROVE, PERMISSIONS.INVENTORY_ALL),
+  validate({ params: adjustmentIdParamSchema, body: rejectAdjustmentSchema }),
+  controller.rejectAdjustmentRequest
+);
+
 router.post(
   '/stock-count',
   requirePermission(...adjust),

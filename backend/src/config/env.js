@@ -64,6 +64,14 @@ const envSchema = z.object({
   /** Billing — a cash-close variance (₹, absolute value) beyond this amount can only be approved by OWNER, not a branch manager. */
   BILLING_CASH_CLOSE_VARIANCE_ESCALATION_THRESHOLD_AMOUNT: z.coerce.number().default(500),
 
+  /** Inventory — a stock adjustment moving more than this many units (absolute) is "unusual" and
+   * queues for INVENTORY_ADJUST_APPROVE instead of writing to stock immediately. */
+  INVENTORY_ADJUSTMENT_APPROVAL_THRESHOLD_QUANTITY: z.coerce.number().default(20),
+
+  /** Inventory — a stock adjustment whose value (quantity × unit cost, ₹, absolute) exceeds this
+   * also counts as "unusual" and queues for approval, even if the unit count alone is small. */
+  INVENTORY_ADJUSTMENT_APPROVAL_THRESHOLD_VALUE_INR: z.coerce.number().default(2000),
+
   /** AI clinical copilot gateway (Module 9) — provider-neutral; MOCK is safe default. */
   AI_PROVIDER: z.enum(['MOCK', 'OPENAI_COMPATIBLE', 'ANTHROPIC']).default('MOCK'),
   AI_API_KEY: z.string().optional().default(''),

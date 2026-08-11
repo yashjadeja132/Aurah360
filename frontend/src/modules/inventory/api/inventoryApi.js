@@ -72,6 +72,20 @@ export const inventoryApi = {
   receiveTransfer(id, payload) {
     return api.post(`/inventory/transfers/${id}/receive`, payload).then((r) => r.data);
   },
+
+  // --- Stock adjustment approval queue (INV-003) ---
+  listAdjustmentRequests(params) {
+    return api.get('/inventory/adjustments', { params }).then((r) => r.data);
+  },
+  getAdjustmentRequest(id) {
+    return api.get(`/inventory/adjustments/${id}`).then((r) => r.data);
+  },
+  approveAdjustmentRequest(id) {
+    return api.post(`/inventory/adjustments/${id}/approve`).then((r) => r.data);
+  },
+  rejectAdjustmentRequest(id, reason) {
+    return api.post(`/inventory/adjustments/${id}/reject`, { reason }).then((r) => r.data);
+  },
 };
 
 export const pharmacyApi = {

@@ -23,6 +23,10 @@ export const config = Object.freeze({
     refundApprovalThresholdAmount: env.BILLING_REFUND_APPROVAL_THRESHOLD_AMOUNT,
     cashCloseVarianceEscalationThresholdAmount: env.BILLING_CASH_CLOSE_VARIANCE_ESCALATION_THRESHOLD_AMOUNT,
   },
+  inventory: {
+    adjustmentApprovalThresholdQuantity: env.INVENTORY_ADJUSTMENT_APPROVAL_THRESHOLD_QUANTITY,
+    adjustmentApprovalThresholdValueInr: env.INVENTORY_ADJUSTMENT_APPROVAL_THRESHOLD_VALUE_INR,
+  },
   cors: {
     origins: env.corsOrigins,
   },

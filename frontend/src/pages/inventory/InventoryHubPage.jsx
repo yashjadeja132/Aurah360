@@ -10,6 +10,7 @@ import { InventoryOverviewPanel } from '@/modules/inventory/components/Inventory
 import { StockLedgerPanel } from '@/modules/inventory/components/StockLedgerPanel';
 import { InventoryExpiryPanel } from '@/modules/inventory/components/InventoryExpiryPanel';
 import { InventoryTransfersPanel } from '@/modules/inventory/components/InventoryTransfersPanel';
+import { StockAdjustmentApprovalPanel } from '@/modules/inventory/components/StockAdjustmentApprovalPanel';
 import { PurchaseOrdersPanel } from '@/modules/inventory/components/PurchaseOrdersPanel';
 import { SuppliersPanel } from '@/modules/inventory/components/SuppliersPanel';
 
@@ -62,6 +63,7 @@ export default function InventoryHubPage() {
             { id: 'ledger', label: t('inventory.hub.tabs.ledger', 'Stock ledger') },
             { id: 'expiry', label: t('inventory.hub.tabs.expiry', 'Expiry') },
             { id: 'transfers', label: t('inventory.hub.tabs.transfers', 'Transfers') },
+            { id: 'adjustments', label: t('inventory.hub.tabs.adjustments', 'Adjustments') },
           ]
         : []),
       ...(canViewPurchasing
@@ -136,6 +138,11 @@ export default function InventoryHubPage() {
         {tab === 'transfers' && (
           <PermissionGuard permissions={CORE_PERMS}>
             <InventoryTransfersPanel />
+          </PermissionGuard>
+        )}
+        {tab === 'adjustments' && (
+          <PermissionGuard permissions={CORE_PERMS}>
+            <StockAdjustmentApprovalPanel />
           </PermissionGuard>
         )}
         {tab === 'purchase-orders' && (

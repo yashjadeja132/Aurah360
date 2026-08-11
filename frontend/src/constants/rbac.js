@@ -158,6 +158,7 @@ export const PERMISSIONS = Object.freeze({
   INVENTORY_TRANSFER_REQUEST: 'inventory.transfer_request',
   INVENTORY_TRANSFER_APPROVE: 'inventory.transfer_approve',
   INVENTORY_TRANSFER_RECEIVE: 'inventory.transfer_receive',
+  INVENTORY_ADJUST_APPROVE: 'inventory.adjust_approve',
   CRM_RECALL: 'crm.recall',
   CRM_OFFERS_VIEW: 'crm.offers_view',
   CRM_OFFERS_MANAGE: 'crm.offers_manage',

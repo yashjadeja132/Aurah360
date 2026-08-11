@@ -329,6 +329,11 @@ class PatientPortalController {
     return ApiResponse.success(res, { data });
   });
 
+  referral = asyncHandler(async (req, res) => {
+    const data = await this.portal.referralSummary(this.#pid(req));
+    return ApiResponse.success(res, { data });
+  });
+
   dependentLoyaltyBalance = asyncHandler(async (req, res) => {
     const data = await this.portal.dependentLoyaltyBalance(this.#pid(req), req.params.dependentId);
     return ApiResponse.success(res, { data });

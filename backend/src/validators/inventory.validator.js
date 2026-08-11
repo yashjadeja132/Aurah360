@@ -65,6 +65,8 @@ export const adjustSchema = z.object({
   batchNumber: z.string().optional().nullable(),
   expiryDate: z.string().or(z.date()).optional().nullable(),
   reason: z.string().optional(),
+  // INV-003 — only consulted when the adjustment is "unusual" and queues for approval.
+  reasonCategory: z.enum(['DAMAGE', 'COUNT_CORRECTION', 'EXPIRY_WRITE_OFF', 'OTHER']).optional(),
   notes: z.string().optional().nullable(),
 });
 
@@ -104,6 +106,12 @@ export const receiveTransferSchema = z.object({
 });
 
 export const transferIdParamSchema = z.object({ id: objectId });
+
+export const rejectAdjustmentSchema = z.object({
+  reason: z.string().max(500).optional().nullable(),
+});
+
+export const adjustmentIdParamSchema = z.object({ id: objectId });
 
 export const stockCountSchema = z.object({
   inventoryItemId: objectId,

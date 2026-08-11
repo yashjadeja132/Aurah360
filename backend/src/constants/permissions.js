@@ -294,6 +294,10 @@ export const PERMISSIONS = Object.freeze({
   INVENTORY_TRANSFER_APPROVE: 'inventory.transfer_approve',
   INVENTORY_TRANSFER_RECEIVE: 'inventory.transfer_receive',
 
+  // Inventory adjustment approval (INV-003) — unusual adjustments queue for approval
+  // instead of writing straight to stock; this is the "verify reason → Approve" gate.
+  INVENTORY_ADJUST_APPROVE: 'inventory.adjust_approve',
+
   // CRM extensions — recall worklist, offers, NPS (CRM-001)
   CRM_RECALL: 'crm.recall',
   CRM_OFFERS_VIEW: 'crm.offers_view',
@@ -535,6 +539,7 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.INVENTORY_TRANSFER_REQUEST, module: 'inventory', description: 'Request a branch stock transfer' },
   { key: PERMISSIONS.INVENTORY_TRANSFER_APPROVE, module: 'inventory', description: 'Approve/dispatch a branch stock transfer' },
   { key: PERMISSIONS.INVENTORY_TRANSFER_RECEIVE, module: 'inventory', description: 'Receive a branch stock transfer' },
+  { key: PERMISSIONS.INVENTORY_ADJUST_APPROVE, module: 'inventory', description: 'Approve/reject unusual stock adjustments' },
 
   { key: PERMISSIONS.CRM_RECALL, module: 'crm', description: 'Work the missed-follow-up recall worklist' },
   { key: PERMISSIONS.CRM_OFFERS_VIEW, module: 'crm', description: 'View the offer board' },

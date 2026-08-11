@@ -74,6 +74,29 @@ export const CONSUMABLE_CATEGORIES = Object.freeze([
 /** Days ahead considered near-expiry */
 export const NEAR_EXPIRY_DAYS = 90;
 
+/** Reason category on a stock adjustment request (INV-003). */
+export const ADJUSTMENT_REASON_CATEGORY = Object.freeze({
+  DAMAGE: 'DAMAGE',
+  COUNT_CORRECTION: 'COUNT_CORRECTION',
+  EXPIRY_WRITE_OFF: 'EXPIRY_WRITE_OFF',
+  OTHER: 'OTHER',
+});
+
+export const ADJUSTMENT_REASON_CATEGORY_LIST = Object.freeze(
+  Object.values(ADJUSTMENT_REASON_CATEGORY)
+);
+
+/** Status of a StockAdjustmentRequest — mirrors the transfer workflow's state machine. */
+export const ADJUSTMENT_REQUEST_STATUS = Object.freeze({
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+});
+
+export const ADJUSTMENT_REQUEST_STATUS_LIST = Object.freeze(
+  Object.values(ADJUSTMENT_REQUEST_STATUS)
+);
+
 export const INVENTORY_EVENTS = Object.freeze({
   MEDICINE_DISPENSED: 'MedicineDispensed',
   STOCK_ADJUSTED: 'StockAdjusted',

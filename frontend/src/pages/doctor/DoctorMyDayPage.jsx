@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardList, FlaskConical, Stethoscope } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,7 +11,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { StatCard } from '@/components/common/StatCard';
 import { QueryState } from '@/components/common/QueryState';
 import { EmptyState } from '@/components/common/EmptyState';
-import { APP_ROUTES } from '@/constants/routes';
+import { APP_ROUTES, consultationWorkspacePath } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 import { hasAnyPermission } from '@/utils/permissions';
 import {
@@ -27,6 +28,7 @@ import {
   useRequestedApprovals,
   useReportReviewBacklogCount,
 } from '@/modules/doctorDay/hooks/useDoctorDay';
+import { useStartConsultation } from '@/modules/consultations/hooks/useConsultations';
 
 function formatDay(value) {
   if (!value) return '';
@@ -143,7 +145,9 @@ function AppointmentGroup({ title, rows, showDay, expandedId, onToggle, emptyTex
 export default function DoctorMyDayPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [expandedId, setExpandedId] = useState(null);
+  const [startingId, setStartingId] = useState(null);
 
   const dashboard = useMyDoctorDashboard();
   const doctorId = dashboard.data?.doctorId || null;
@@ -154,6 +158,25 @@ export default function DoctorMyDayPage() {
   const { columns, urgentCount } = useMyDayColumns(today);
   const requestedApprovals = useRequestedApprovals(doctorId);
   const reportBacklog = useReportReviewBacklogCount();
+  const startConsultation = useStartConsultation();
+
+  // Spec §3 — "My Day → Waiting → open patient → [Start consultation]" was previously only
+  // reachable by detouring through the separate Consultations/EMR page; Waiting-column cards
+  // themselves were inert. Wire the same start→workspace flow ConsultationListPage already uses.
+  const handleStartConsultation = async (appointment) => {
+    if (startingId) return;
+    setStartingId(appointment.id);
+    try {
+      const res = await startConsultation.mutateAsync({ appointmentId: appointment.id });
+      const id = res?.data?.consultation?.id;
+      if (id) navigate(consultationWorkspacePath(id));
+      else throw new Error('No consultation id returned');
+    } catch (err) {
+      toast.error(err?.response?.data?.message || t('doctorDay.startConsultationFailed', 'Could not start consultation'));
+    } finally {
+      setStartingId(null);
+    }
+  };
 
   const firstName = user?.firstName || user?.fullName?.split(' ')[0] || '';
   const canSeeEmr = hasAnyPermission(user?.permissions, [
@@ -280,7 +303,11 @@ export default function DoctorMyDayPage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               {t('doctorDay.today', 'Today')} <span className="font-normal">({today.length})</span>
             </h2>
-            <MyDayColumns columns={columns} />
+            <MyDayColumns
+              columns={columns}
+              onStartConsultation={handleStartConsultation}
+              startingId={startingId}
+            />
           </div>
           <AppointmentGroup
             title={t('doctorDay.comingUp', 'Coming up')}

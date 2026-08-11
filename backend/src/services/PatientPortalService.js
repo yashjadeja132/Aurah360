@@ -16,6 +16,8 @@ import TreatmentPlanService from './TreatmentPlanService.js';
 import TreatmentSessionService from './TreatmentSessionService.js';
 import BillingService from './BillingService.js';
 import LoyaltyLedgerService from './LoyaltyLedgerService.js';
+import ReferralService from './ReferralService.js';
+import config from '../config/index.js';
 import AuditService from './AuditService.js';
 import ApiError from '../libs/ApiError.js';
 import { assertOwnPatient } from '../middlewares/patientAuth.middleware.js';
@@ -59,6 +61,7 @@ class PatientPortalService {
     this.sessionService = new TreatmentSessionService();
     this.billingService = new BillingService();
     this.loyaltyLedgerService = new LoyaltyLedgerService();
+    this.referralService = new ReferralService();
     this.audit = new AuditService();
   }
 
@@ -806,6 +809,19 @@ class PatientPortalService {
       limit: Number(limit) || 50,
       before: before || null,
     });
+  }
+
+  /**
+   * LOY Flow C — "my referrals" for the patient portal. Returns the patient's own code/link and
+   * a generic status list for people they referred: first-name-or-null + status only, NEVER any
+   * clinical or financial detail about the referee (ReferralService.myReferrals already strips
+   * this at the query level).
+   */
+  async referralSummary(patientId) {
+    this.#assertId(patientId);
+    const { referralCode, referrals } = await this.referralService.myReferrals(patientId);
+    const shareUrl = referralCode ? `${config.patientApp.url}/refer/${referralCode}` : null;
+    return { referralCode, shareUrl, referrals };
   }
 
   /** Loyalty balance for a dependent, scoped after verifying guardian ownership. */

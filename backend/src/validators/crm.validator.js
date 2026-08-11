@@ -80,6 +80,8 @@ export const convertSchema = z.object({
   remarks: z.string().optional().nullable(),
   /** PAT-DUP — lead conversion creates a Patient, so it needs the same deliberate override. */
   allowDuplicate: z.coerce.boolean().optional(),
+  /** LOY Flow C — referring patient's code, entered by the counsellor on this lead's behalf. */
+  referralCode: z.string().trim().max(20).optional().nullable(),
 });
 
 export const createTaskSchema = z.object({

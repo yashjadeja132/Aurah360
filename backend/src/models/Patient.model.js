@@ -130,6 +130,13 @@ const patientSchema = new mongoose.Schema(
       default: null,
     },
     referredBy: { type: String, default: null },
+    /**
+     * LOY Flow C — this patient's own stable referral code (generated lazily on first use by
+     * ReferralService.codeForPatient, not at registration, so most patients who never share a
+     * code never get one written). Globally unique across all patients; `sparse` because the
+     * huge majority of rows have none.
+     */
+    referralCode: { type: String, default: null, uppercase: true, trim: true },
     /** Source/referral taxonomy (PAT-003, §5.1, §12.5) */
     sourceCategory: {
       type: String,
@@ -173,6 +180,8 @@ const patientSchema = new mongoose.Schema(
     collection: 'patients',
   }
 );
+
+patientSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 
 patientSchema.index({
   firstName: 'text',

@@ -220,6 +220,12 @@ export const patientApi = {
     const { data } = await client.get(`/dependents/${dependentId}/loyalty/ledger`, { params });
     return data.data;
   },
+  // LOY Flow C — patient's own referral code/link + generic status list of who they referred
+  // (first-name-or-null + status only, no clinical/financial detail — enforced server-side).
+  async referral() {
+    const { data } = await client.get('/referral');
+    return data.data;
+  },
 
   // --- Notifications / inbox -------------------------------------------------------------
   async notifications() {

@@ -647,7 +647,13 @@ class AppointmentService {
       req,
     });
 
-    if (decision !== APPROVAL_DECISION.REJECTED) {
+    // Spec: "Reject → {Reason} → patient notified" — REJECTED cancels the appointment, so the
+    // cancellation notification is the correct one, not the "created" template used for the
+    // other two decisions. This was previously skipped outright for REJECTED, leaving the
+    // patient with no notification of the rejection at all.
+    if (decision === APPROVAL_DECISION.REJECTED) {
+      await this.notificationService.sendAppointmentCancelled(mapped).catch(() => {});
+    } else {
       await this.notificationService.sendAppointmentCreated(mapped).catch(() => {});
     }
     return mapped;

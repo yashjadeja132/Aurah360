@@ -83,6 +83,11 @@ const loyaltyProgramSettingsSchema = new mongoose.Schema(
      */
     manualAdjustmentPointLimitsByRole: { type: Map, of: Number, default: undefined },
 
+    /** LOY Flow C anti-abuse — max Referral documents a single referrer may create (across all
+     *  their referees) within one calendar month. Enforced by ReferralService.registerReferral;
+     *  exceeding it sets the new Referral's status to BLOCKED_MONTHLY_CAP instead of PENDING. */
+    referralMonthlyCapPerPatient: { type: Number, default: 10, min: 1 },
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, collection: 'loyalty_program_settings' }
@@ -111,6 +116,7 @@ loyaltyProgramSettingsSchema.methods.toSafeObject = function toSafeObject(extra 
     expiredRedemptionRestorePolicy: this.expiredRedemptionRestorePolicy,
     tiersEnabled: this.tiersEnabled,
     ruleChangeApprovalThresholdPercent: this.ruleChangeApprovalThresholdPercent,
+    referralMonthlyCapPerPatient: this.referralMonthlyCapPerPatient,
     manualAdjustmentPointLimitsByRole: this.manualAdjustmentPointLimitsByRole
       ? Object.fromEntries(this.manualAdjustmentPointLimitsByRole)
       : {},

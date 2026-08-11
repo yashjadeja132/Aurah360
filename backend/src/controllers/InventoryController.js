@@ -152,6 +152,42 @@ class InventoryController {
     return ApiResponse.success(res, { message: 'Transfer retrieved', data: { transfer } });
   });
 
+  // Stock adjustment approval queue (INV-003)
+  listAdjustmentRequests = asyncHandler(async (req, res) => {
+    const requests = await this.inventory.listAdjustmentRequests(
+      await scopedListQuery(req, { branch: true })
+    );
+    return ApiResponse.success(res, { message: 'Adjustment requests retrieved', data: { requests } });
+  });
+
+  getAdjustmentRequest = asyncHandler(async (req, res) => {
+    const request = await this.inventory.getAdjustmentRequest(req.params.id, {
+      branchId: await this.#branchScope(req),
+    });
+    return ApiResponse.success(res, { message: 'Adjustment request retrieved', data: { request } });
+  });
+
+  approveAdjustmentRequest = asyncHandler(async (req, res) => {
+    const request = await this.inventory.approveAdjustmentRequest(
+      req.params.id,
+      req.auth.userId,
+      req,
+      { branchId: await this.#branchScope(req) }
+    );
+    return ApiResponse.success(res, { message: 'Adjustment approved', data: { request } });
+  });
+
+  rejectAdjustmentRequest = asyncHandler(async (req, res) => {
+    const request = await this.inventory.rejectAdjustmentRequest(
+      req.params.id,
+      req.body,
+      req.auth.userId,
+      req,
+      { branchId: await this.#branchScope(req) }
+    );
+    return ApiResponse.success(res, { message: 'Adjustment rejected', data: { request } });
+  });
+
   stockCount = asyncHandler(async (req, res) => {
     const data = await this.inventory.stockCount(req.body, req.auth.userId, req, {
       branchId: await this.#branchScope(req),

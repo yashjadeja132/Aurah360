@@ -6,6 +6,7 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import OffersScreen from '../screens/OffersScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import RewardsScreen from '../screens/RewardsScreen';
+import ReferralScreen from '../screens/ReferralScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TimelineScreen from '../screens/TimelineScreen';
 import PinSetupScreen from '../screens/PinSetupScreen';
@@ -42,6 +43,11 @@ export function MoreStack() {
         name="Rewards"
         component={RewardsScreen}
         options={{ headerTitle: headerTitleFor(t('rewards.title'), t('rewards.subtitle')) }}
+      />
+      <Stack.Screen
+        name="Referral"
+        component={ReferralScreen}
+        options={{ headerTitle: headerTitleFor(t('referral.title'), t('referral.subtitle')) }}
       />
       <Stack.Screen
         name="Timeline"

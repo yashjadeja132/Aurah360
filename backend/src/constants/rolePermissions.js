@@ -198,6 +198,7 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.BILLING_WRITE_OFF,
     PERMISSIONS.INVENTORY_TRANSFER_APPROVE,
     PERMISSIONS.INVENTORY_TRANSFER_RECEIVE,
+    PERMISSIONS.INVENTORY_ADJUST_APPROVE,
     PERMISSIONS.CRM_RECALL,
     PERMISSIONS.CRM_OFFERS_VIEW,
     PERMISSIONS.CRM_OFFERS_MANAGE,
@@ -402,7 +403,18 @@ export const ROLE_PERMISSIONS = Object.freeze({
 
   [ROLES.PHARMACIST]: [
     PERMISSIONS.PATIENTS_VIEW,
-    PERMISSIONS.INVENTORY_ALL,
+    // INV-003 — deliberately NOT the `inventory.*` wildcard: `requirePermission` treats a
+    // module wildcard as satisfying every permission in that module, including
+    // INVENTORY_ADJUST_APPROVE. A pharmacist requesting AND approving their own "unusual"
+    // stock adjustment would defeat the whole point of that approval queue (a real
+    // self-approval loophole confirmed by audit — the wildcard was granted before that
+    // permission existed, so nobody had reason to notice). Listing the specific permissions
+    // a pharmacist actually needs keeps everything else pharmacists could already do intact
+    // while leaving INVENTORY_ADJUST_APPROVE to Manager/Owner/Admin only.
+    PERMISSIONS.INVENTORY_VIEW,
+    PERMISSIONS.INVENTORY_CREATE,
+    PERMISSIONS.INVENTORY_EDIT,
+    PERMISSIONS.INVENTORY_ADJUST,
     PERMISSIONS.PHARMACY_ALL,
     PERMISSIONS.PHARMACY_SUBSTITUTE,
     PERMISSIONS.PURCHASE_ALL,

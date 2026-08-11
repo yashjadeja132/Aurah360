@@ -11,10 +11,31 @@ const COLUMN_DEFS = [
   { key: 'completed', label: ['doctorDay.columns.completed', 'Completed'] },
 ];
 
-function PatientCard({ appointment }) {
+function PatientCard({ appointment, onStart, starting }) {
   const { t } = useTranslation();
+  const clickable = Boolean(onStart);
   return (
-    <Card className={appointment.urgent ? 'border-destructive' : undefined}>
+    <Card
+      className={[
+        appointment.urgent ? 'border-destructive' : undefined,
+        clickable ? 'cursor-pointer transition-colors hover:bg-muted/40' : undefined,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? () => onStart(appointment) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onStart(appointment);
+              }
+            }
+          : undefined
+      }
+    >
       <CardContent className="space-y-1 p-3">
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-sm font-medium text-foreground">
@@ -38,6 +59,13 @@ function PatientCard({ appointment }) {
             </Badge>
           )}
         </div>
+        {clickable && (
+          <p className="pt-1 text-[11px] font-medium text-primary">
+            {starting
+              ? t('doctorDay.starting', 'Opening…')
+              : t('doctorDay.startConsultation', 'Start consultation →')}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -49,7 +77,7 @@ function PatientCard({ appointment }) {
  * see `elapsedMinutes` in useDoctorDay.js for why there's no truer per-transition value
  * without a schema change). Waiting patients past the urgent threshold are flagged.
  */
-export function MyDayColumns({ columns }) {
+export function MyDayColumns({ columns, onStartConsultation, startingId }) {
   const { t } = useTranslation();
 
   return (
@@ -63,7 +91,17 @@ export function MyDayColumns({ columns }) {
             </h3>
             <div className="space-y-2">
               {rows.length > 0 ? (
-                rows.map((a) => <PatientCard key={a.id} appointment={a} />)
+                rows.map((a) => (
+                  <PatientCard
+                    key={a.id}
+                    appointment={a}
+                    // Spec §3 — "My Day → Waiting → open patient → [Start consultation]": only the
+                    // Waiting column's cards are actionable this way; other columns are either
+                    // already past that point or not yet reachable.
+                    onStart={key === 'waiting' ? onStartConsultation : undefined}
+                    starting={startingId === a.id}
+                  />
+                ))
               ) : (
                 <Card>
                   <CardContent className="py-6 text-center text-xs text-muted-foreground">

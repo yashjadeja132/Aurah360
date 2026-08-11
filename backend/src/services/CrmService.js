@@ -436,6 +436,11 @@ class CrmService {
       dateOfBirth: payload.dateOfBirth || null,
       notes: payload.notes || `Converted from ${lead.leadNumber}`,
       allowDuplicate: payload.allowDuplicate === true,
+      // LOY Flow C — a counsellor converting a lead can enter the referring patient's code on
+      // the new patient's behalf; always staff-entered here, so it is always audited (see
+      // PatientService.create / ReferralService.registerReferral).
+      referralCode: payload.referralCode || null,
+      referralCreatedByStaff: true,
     };
 
     const patient = await this.patientService.create(patientPayload, actorId, req);
