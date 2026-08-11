@@ -287,6 +287,11 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.BILLING_EDIT,
     PERMISSIONS.BILLING_PAYMENT,
     PERMISSIONS.BILLING_PRINT,
+    // Simplified 4-role clinic (docs/SIMPLIFIED_FLOW.md): the CASHIER role is retired and
+    // the receptionist collects the fee at the desk, so invoice finalize + day cash close
+    // move here — otherwise no one at the clinic could complete a payment.
+    PERMISSIONS.BILLING_FINALIZE,
+    PERMISSIONS.BILLING_CASH_CLOSE,
     PERMISSIONS.MASTERS_VIEW,
     PERMISSIONS.DOCTORS_VIEW,
     PERMISSIONS.DOCTOR_SCHEDULE_VIEW,

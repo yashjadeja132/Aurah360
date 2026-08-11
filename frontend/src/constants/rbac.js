@@ -189,16 +189,13 @@ export const ROLES = Object.freeze({
   CRM_EXECUTIVE: 'CRM_EXECUTIVE',
 });
 
+// Simplified 4-role clinic (docs/SIMPLIFIED_FLOW.md). The other role codes still
+// exist in the backend for old data, but new staff can only be one of these.
 export const ROLE_OPTIONS = Object.freeze([
   { value: 'ADMIN', label: 'Admin' },
-  { value: 'BRANCH_MANAGER', label: 'Branch Manager' },
   { value: 'DOCTOR', label: 'Doctor' },
   { value: 'RECEPTIONIST', label: 'Receptionist' },
-  { value: 'NURSE', label: 'Nurse' },
-  { value: 'TECHNICIAN', label: 'Technician' },
-  { value: 'CASHIER', label: 'Cashier' },
-  { value: 'PHARMACIST', label: 'Pharmacist' },
-  { value: 'CRM_EXECUTIVE', label: 'CRM Executive' },
+  { value: 'PHARMACIST', label: 'Pharmacy' },
 ]);
 
 export const ROLE_LABELS = Object.freeze({
