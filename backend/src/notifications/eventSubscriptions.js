@@ -84,6 +84,49 @@ async function handleLoyaltyAdjustmentPendingApproval(service, payload = {}) {
   });
 }
 
+/**
+ * LOY edge rule — a refund/void clawback that can't fully recover spend-points earned on the
+ * invoice is left as a pending-clawback shortfall (see LoyaltyLedgerService#clawback). Nobody
+ * polls that state, so the same approver roles used for adjustment approvals are alerted here.
+ */
+async function handleLoyaltyClawbackPending(service, payload = {}) {
+  const { patientId, shortfall, sourceRefType, sourceRefId, branchId } = payload;
+  if (!shortfall) return;
+
+  const query = { role: { $in: LOYALTY_APPROVER_ROLES }, isActive: true, deletedAt: null };
+  if (branchId) query.branch = branchId;
+  const approvers = await User.find(query).select('_id').lean();
+
+  const subject = 'Loyalty clawback could not be fully recovered';
+  const message =
+    `A refund/void clawback on ${sourceRefType || 'an invoice'} ${sourceRefId || ''} could not ` +
+    `recover ${shortfall} loyalty point(s) — the patient's balance was insufficient. Manual review required.`;
+
+  for (const user of approvers) {
+    await service.queueEvent({
+      eventName: LOYALTY_EVENTS.CLAWBACK_PENDING,
+      userId: user._id.toString(),
+      channels: [NOTIFICATION_CHANNEL.IN_APP],
+      variables: {
+        subject,
+        message,
+        summary: subject,
+        patientId: patientId || null,
+        shortfall,
+        sourceRefType: sourceRefType || null,
+        sourceRefId: sourceRefId || null,
+      },
+    });
+  }
+
+  logger.info('Loyalty clawback shortfall alert dispatched', {
+    sourceRefType,
+    sourceRefId,
+    shortfall,
+    recipients: approvers.length,
+  });
+}
+
 export function registerNotificationEventListeners() {
   const service = new NotificationService();
 
@@ -93,6 +136,17 @@ export function registerNotificationEventListeners() {
     } catch (err) {
       logger.warn('Notification event handler failed', {
         eventName: LOYALTY_EVENTS.ADJUSTMENT_PENDING_APPROVAL,
+        message: err.message,
+      });
+    }
+  });
+
+  eventBus.on(LOYALTY_EVENTS.CLAWBACK_PENDING, async (payload) => {
+    try {
+      await handleLoyaltyClawbackPending(service, payload);
+    } catch (err) {
+      logger.warn('Notification event handler failed', {
+        eventName: LOYALTY_EVENTS.CLAWBACK_PENDING,
         message: err.message,
       });
     }
