@@ -12,6 +12,7 @@ import {
 } from '../enums/queue.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { emitQueueEvent, SOCKET_EVENTS } from '../socket/index.js';
+import { eventBus } from '../events/eventBus.js';
 
 const AVG_CONSULT_MINUTES = 15;
 
@@ -252,6 +253,16 @@ class QueueService {
       actorId,
       metadata: { queueEntryId: id, tokenNumber: entry.tokenNumber },
       req,
+    });
+
+    // Token Called SMS (DLT template): the patient may be in the waiting area or
+    // outside — the SMS is what actually reaches them. Name is filled from the
+    // patient record by NotificationService.
+    eventBus.emitDomain('QueueTokenCalled', {
+      queueEntryId: id,
+      patientId: entry.patientId?.toString?.() || entry.patientId,
+      tokenNumber: entry.tokenNumber,
+      branchId: entry.branchId?.toString?.() || entry.branchId,
     });
 
     const mapped = await this.#emit(SOCKET_EVENTS.PATIENT_CALLED, entry);

@@ -133,6 +133,12 @@ class NotificationService {
     if (patientId) {
       patient = await Patient.findById(patientId).exec();
     }
+    // DLT SMS templates greet by name; most emitters only carry ids, so fill the
+    // name from the patient record when the event did not provide one.
+    if (patient && !variables.patientName) {
+      variables.patientName =
+        [patient.firstName, patient.lastName].filter(Boolean).join(' ') || 'Patient';
+    }
 
     const created = [];
     for (const channel of channelList) {
@@ -389,6 +395,7 @@ class NotificationService {
         ...this.#appointmentVars(appointment),
         summary: 'Appointment cancelled',
         message: 'Your appointment {{appointmentNumber}} was cancelled.',
+        dltTemplate: 'APPOINTMENT_CANCELLED',
       },
       patientId: appointment.patientId || null,
       channels: [NOTIFICATION_CHANNEL.IN_APP, NOTIFICATION_CHANNEL.SMS],
@@ -411,6 +418,7 @@ class NotificationService {
       variables: {
         ...this.#appointmentVars(appointment),
         summary: 'Appointment rescheduled',
+        dltTemplate: 'APPOINTMENT_RESCHEDULED',
       },
       patientId: appointment.patientId || null,
     });
@@ -421,6 +429,7 @@ class NotificationService {
       appointmentNumber: appointment.appointmentNumber || '',
       appointmentId: appointment.id || appointment._id?.toString?.() || '',
       patientName: appointment.patient?.fullName || appointment.patientName || 'Patient',
+      doctorName: appointment.doctor?.fullName || appointment.doctorName || 'Aurah 360',
       date: appointment.date || appointment.appointmentDate || '',
       time: appointment.startTime || appointment.time || '',
       summary: `Appointment ${appointment.appointmentNumber || ''} confirmed`,

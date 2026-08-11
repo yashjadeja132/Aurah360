@@ -9,6 +9,7 @@ import { APPOINTMENT_STATUS, APPOINTMENT_SOURCE } from '../enums/appointment.js'
 import { QUEUE_PRIORITY, QUEUE_STATUS } from '../enums/queue.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { timeToMinutes } from '../helpers/schedule.engine.js';
+import { eventBus } from '../events/eventBus.js';
 
 /**
  * Reception front-desk workflow — check-in & walk-in.
@@ -161,6 +162,16 @@ class ReceptionService {
         isLate,
       },
       req,
+    });
+
+    // Check-In Success SMS (DLT template) + in-app entry — fire-and-forget via the
+    // notification listener; a delivery failure never blocks the check-in.
+    eventBus.emitDomain('PatientCheckedIn', {
+      appointmentId,
+      patientId: patient._id.toString(),
+      patientName: [patient.firstName, patient.lastName].filter(Boolean).join(' '),
+      tokenNumber: queueEntry.tokenNumber,
+      branchId: queueEntry.branchId?.toString?.() || queueEntry.branchId,
     });
 
     const updatedAppointment = await this.appointmentService.getById(appointmentId);

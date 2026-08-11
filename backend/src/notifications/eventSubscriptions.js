@@ -13,7 +13,10 @@ import logger from '../libs/logger.js';
 const SUBSCRIBED_EVENTS = [
   'AppointmentCreated',
   'AppointmentConfirmed',
+  'AppointmentCompleted',
   'PatientCheckedIn',
+  'QueueTokenCalled',
+  'PatientRegistered',
   'ConsultationSigned',
   'PrescriptionFinalized',
   'TreatmentPlanAccepted',
@@ -35,6 +38,7 @@ function pickVariables(eventName, payload = {}) {
     leadNumber: payload.leadNumber || '',
     sessionNumber: payload.sessionNumber || '',
     patientName: payload.patientName || '',
+    tokenNumber: payload.tokenNumber ?? '',
     mrn: payload.mrn || '',
   };
 }

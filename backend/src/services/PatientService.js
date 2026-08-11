@@ -6,6 +6,7 @@ import MasterRepository from '../repositories/MasterRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
 import PatientDuplicateService from './PatientDuplicateService.js';
 import AuditService from './AuditService.js';
+import { eventBus } from '../events/eventBus.js';
 import { generateMrn, generatePatientCode } from '../helpers/mrn.helper.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { TIMELINE_EVENT } from '../enums/patient.js';
@@ -168,6 +169,13 @@ class PatientService {
       resourceType: 'Patient',
       resourceId: patient._id.toString(),
       req,
+    });
+
+    // Registration Success SMS (DLT template) — fire-and-forget.
+    eventBus.emitDomain('PatientRegistered', {
+      patientId: patient._id.toString(),
+      patientName: [patient.firstName, patient.lastName].filter(Boolean).join(' '),
+      mrn,
     });
 
     return this.#mapPatient(await this.patientRepository.findByIdPopulated(patient._id));

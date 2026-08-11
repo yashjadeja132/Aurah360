@@ -3,6 +3,8 @@
  * Real WhatsApp/SMS/Email integrations replace only these adapters.
  */
 
+import { BULKSENDERS_TEMPLATES, EVENT_DLT_MAP } from './bulksendersTemplates.js';
+
 export class EmailProvider {
   async send(/* { to, subject, body, meta } */) {
     throw new Error('EmailProvider.send must be implemented');
@@ -268,25 +270,48 @@ export class BulkSendersSmsProvider extends SmsProvider {
     this.peId = peId;
   }
 
-  /** Registered template: "Dear {#alp#}, your OTP is {#num#}. Valid for {#alp#} minutes. ..." */
-  #buildOtpMessage({ greeting = 'Customer', otpCode, validityMinutes }) {
-    return (
-      `Dear ${greeting}, your OTP is ${otpCode}. Valid for ${validityMinutes} minutes. ` +
-      `Do not share it. Website - https://aurah360.com/ - Aurah 360`
-    );
+  /**
+   * Resolves the registered DLT template for this send. Priority:
+   * 1. `variables.dltTemplate` — an explicit key into BULKSENDERS_TEMPLATES;
+   * 2. `EVENT_DLT_MAP[meta.eventName]` — the notification pipeline's event name;
+   * 3. the legacy OTP meta shape ({ otpCode, validityMinutes }) used by PatientAuthService.
+   * No match → refuse: free text can never reach the DLT gateway (NTF-003, §12.4).
+   */
+  #resolveTemplate(meta) {
+    const variables = meta.variables || {};
+    const key =
+      (variables.dltTemplate && BULKSENDERS_TEMPLATES[variables.dltTemplate] && variables.dltTemplate) ||
+      EVENT_DLT_MAP[meta.eventName] ||
+      (meta.otpCode != null ? 'OTP' : null);
+    return key ? { key, template: BULKSENDERS_TEMPLATES[key] } : null;
   }
 
   async send({ to, meta = {} }) {
-    if (!this.apiKey || !this.senderId || !this.templateId || !this.peId) {
+    if (!this.apiKey || !this.senderId || !this.peId) {
       throw new Error(
-        'BulkSenders SMS is not configured (SMS_BULKSENDERS_API_KEY / SENDER_ID / TEMPLATE_ID / PE_ID)'
+        'BulkSenders SMS is not configured (SMS_BULKSENDERS_API_KEY / SENDER_ID / PE_ID)'
       );
     }
-    if (meta.otpCode == null || meta.validityMinutes == null) {
-      throw new Error('BulkSendersSmsProvider requires meta.otpCode and meta.validityMinutes');
+
+    const resolved = this.#resolveTemplate(meta);
+    if (!resolved) {
+      throw new Error(
+        `BulkSendersSmsProvider has no registered DLT template for event "${meta.eventName || 'unknown'}" — refusing to send free-text SMS`
+      );
     }
 
-    const message = this.#buildOtpMessage(meta);
+    // Legacy OTP callers pass otpCode/validityMinutes at the meta root; template builders
+    // read from a single variables bag, so fold those in.
+    const variables = {
+      ...(meta.templateParams || {}),
+      ...(meta.variables || {}),
+    };
+    if (meta.otpCode != null && variables.otpCode == null) variables.otpCode = meta.otpCode;
+    if (meta.validityMinutes != null && variables.validityMinutes == null) {
+      variables.validityMinutes = meta.validityMinutes;
+    }
+
+    const message = resolved.template.build(variables);
     const params = new URLSearchParams({
       key: this.apiKey,
       campaign: this.campaign || '',
@@ -295,7 +320,7 @@ export class BulkSendersSmsProvider extends SmsProvider {
       contacts: to,
       senderid: this.senderId,
       msg: message,
-      template_id: this.templateId,
+      template_id: resolved.template.id,
       pe_id: this.peId,
     });
 
@@ -313,7 +338,7 @@ export class BulkSendersSmsProvider extends SmsProvider {
     // reports back, so it has to land in messageId for the delivery log to correlate.
     const messageId = text.slice(text.indexOf('/') + 1) || null;
 
-    return { success: true, provider: 'bulksenders-sms', messageId, to, raw: text };
+    return { success: true, provider: 'bulksenders-sms', messageId, to, template: resolved.key, raw: text };
   }
 }
 
