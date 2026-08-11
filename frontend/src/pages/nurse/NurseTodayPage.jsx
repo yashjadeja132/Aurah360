@@ -14,7 +14,7 @@ import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { useBranchQueue, useQueueSummary } from '@/modules/reception/hooks/useReception';
 import { useQueueSocket } from '@/modules/reception/hooks/useQueueSocket';
 import { useAuth } from '@/contexts/AuthContext';
-import { APP_ROUTES, patientDetailPath } from '@/constants/routes';
+import { APP_ROUTES, patientDetailPath, nurseIntakePath } from '@/constants/routes';
 import { ROLES } from '@/constants/rbac';
 
 // Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. QueueController's SEC-030
@@ -164,13 +164,26 @@ export default function NurseTodayPage() {
                 </p>
               </div>
 
-              {patientId && (
-                <Button asChild size="sm" variant="outline">
-                  <Link to={patientDetailPath(patientId)}>
-                    {t('nurse.today.openPatient', 'Open patient')}
-                  </Link>
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {/* §2 Pre-consult intake — same per-patient action group as "Open patient",
+                    extending the existing navigation rather than a parallel path. Needs the
+                    appointment (not just the patient) since intake attaches to a consultation
+                    keyed by appointmentId. */}
+                {entry.appointmentId && (
+                  <Button asChild size="sm">
+                    <Link to={nurseIntakePath(entry.appointmentId)}>
+                      {t('nurse.today.startIntake', 'Start intake')}
+                    </Link>
+                  </Button>
+                )}
+                {patientId && (
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={patientDetailPath(patientId)}>
+                      {t('nurse.today.openPatient', 'Open patient')}
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </li>
           );
         })}

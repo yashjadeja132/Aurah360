@@ -7,6 +7,9 @@ import {
   FOLLOW_UP_UNIT_LIST,
   FOLLOW_UP_PRIORITY_LIST,
   CONTENT_CLASSIFICATION_LIST,
+  INTAKE_CATEGORY_LIST,
+  SKIN_TYPE_LIST,
+  DURATION_UNIT_LIST,
 } from '../enums/consultation.js';
 import { PATIENT_VISIBILITY_LIST } from '../enums/patient.js';
 
@@ -92,6 +95,37 @@ export const examinationSchema = z.object({
   scalpExamination: z.string().max(10000).optional(),
   laserAssessment: z.string().max(10000).optional(),
   clinicalFindings: z.string().max(10000).optional(),
+});
+
+/** §2 Pre-consult intake — PUT is a partial merge (mirrors vitalsSchema/examinationSchema: every
+ * field optional, service merges onto the existing row) so autosave can fire on every keystroke. */
+export const intakeSchema = z.object({
+  category: z.enum(INTAKE_CATEGORY_LIST).optional(),
+  chiefComplaint: z.string().max(1000).optional().nullable(),
+  durationValue: z.coerce.number().min(0).max(1000).optional().nullable(),
+  durationUnit: z.enum(DURATION_UNIT_LIST).optional().nullable(),
+  bodyArea: z.string().max(300).optional().nullable(),
+  allergies: z.string().max(2000).optional().nullable(),
+  allergiesReviewed: z.boolean().optional(),
+  currentMedications: z.string().max(2000).optional().nullable(),
+  currentMedicationsReviewed: z.boolean().optional(),
+  conditions: z.string().max(2000).optional().nullable(),
+  conditionsReviewed: z.boolean().optional(),
+  pastTreatment: z.string().max(2000).optional().nullable(),
+  pastTreatmentReviewed: z.boolean().optional(),
+  skinHistory: z
+    .object({
+      skinType: z.enum(SKIN_TYPE_LIST).optional().nullable(),
+      photosensitivity: z.boolean().optional().nullable(),
+      photosensitivityNotes: z.string().max(1000).optional().nullable(),
+      scarKeloidTendency: z.boolean().optional().nullable(),
+      isotretinoinHistory: z.boolean().optional().nullable(),
+      isotretinoinNotes: z.string().max(1000).optional().nullable(),
+      pregnancyLactation: z.boolean().optional().nullable(),
+      priorReactions: z.string().max(2000).optional().nullable(),
+      contraindications: z.string().max(2000).optional().nullable(),
+    })
+    .optional(),
 });
 
 export const photoMetaSchema = z.object({

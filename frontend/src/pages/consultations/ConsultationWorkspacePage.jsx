@@ -22,6 +22,7 @@ import { useInsertTarget } from '@/modules/consultations/hooks/useInsertTarget';
 import { INSERT_TARGETS, appendText, resetInsertQueue } from '@/modules/consultations/insertBus';
 import { SoapEditor } from '@/modules/consultations/components/SoapEditor';
 import { VitalsForm } from '@/modules/consultations/components/VitalsForm';
+import { IntakeForm } from '@/modules/consultations/components/IntakeForm';
 import { ExaminationForm } from '@/modules/consultations/components/DiagnosisExamForms';
 import { ClinicalPhotosPanel } from '@/modules/consultations/components/ClinicalPhotosPanel';
 import { LabOrdersPanel } from '@/modules/consultations/components/LabOrdersPanel';
@@ -194,7 +195,7 @@ function computeAgeFromDob(dateOfBirth) {
  * matter which of the ten sections the doctor is on. Kept to a single dense badge row rather than
  * a card, matching the `Badge`-pill language used elsewhere in this module (StatusBadges.jsx).
  */
-function PatientContextHeader({ consultation, patientId }) {
+function PatientContextHeader({ consultation, patientId, intake }) {
   const { t } = useTranslation();
   const patient = consultation?.patient;
   const age = computeAgeFromDob(patient?.dateOfBirth);
@@ -259,6 +260,20 @@ function PatientContextHeader({ consultation, patientId }) {
       >
         {t('consultations.workspace.consent', 'Consent')}: {consentLabel}
       </Badge>
+      {/* §2 guard — surfaced from workspace.intake.isComplete/mandatoryIncomplete so the doctor
+          sees it before/while opening the encounter, not just on the intake tab itself. `intake`
+          being entirely absent (nurse never started one) is intentionally NOT flagged as
+          incomplete here — that's a workflow gap for reception/scheduling to close, not something
+          a doctor mid-encounter can action from this badge. */}
+      {intake && !intake.isComplete && (
+        <Badge
+          variant="destructive"
+          className="px-2 py-0.5 text-[11px] font-medium"
+          title={(intake.mandatoryIncomplete || []).join(', ')}
+        >
+          {t('consultations.workspace.intakeIncomplete', 'Intake incomplete')}
+        </Badge>
+      )}
     </div>
   );
 }
@@ -463,7 +478,7 @@ export default function ConsultationWorkspacePage() {
         </div>
       </div>
 
-      <PatientContextHeader consultation={consultation} patientId={patientId} />
+      <PatientContextHeader consultation={consultation} patientId={patientId} intake={data.intake} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* PRIMARY half — the copilot is always on screen, never behind a tab. */}
@@ -490,6 +505,9 @@ export default function ConsultationWorkspacePage() {
             </Panel>
             <Panel active={tab === 'timeline'}>
               <TimelinePanel summary={summaryQuery.data} loading={summaryQuery.isLoading} />
+            </Panel>
+            <Panel active={tab === 'intake'}>
+              <IntakeForm consultationId={id} readOnly={readOnly} />
             </Panel>
             <Panel active={tab === 'soap'}>
               <SoapEditor

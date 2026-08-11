@@ -14,6 +14,7 @@ import {
 
   DoctorMyDayPage,
   NurseTodayPage,
+  NurseIntakePage,
   StaffListPage,
   StaffCreatePage,
   StaffDetailPage,
@@ -446,6 +447,12 @@ export const router = createBrowserRouter([
             // full queue board; there is no dedicated nurse permission for it.
             path: APP_ROUTES.NURSE_TODAY,
             element: <QueuePermission><NurseTodayPage /></QueuePermission>,
+          },
+          {
+            // §2 Pre-consult intake — gated the same as the consultation workspace
+            // (CONSULTATION_VIEW/ALL); NURSE holds CONSULTATION_VIEW/EDIT/CREATE.
+            path: APP_ROUTES.NURSE_INTAKE,
+            element: <ConsultationPermission><NurseIntakePage /></ConsultationPermission>,
           },
           {
             path: APP_ROUTES.STAFF,

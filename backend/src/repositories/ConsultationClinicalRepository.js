@@ -3,6 +3,7 @@ import ConsultationSoap from '../models/ConsultationSoap.model.js';
 import ConsultationVitals from '../models/ConsultationVitals.model.js';
 import ConsultationDiagnosis from '../models/ConsultationDiagnosis.model.js';
 import ConsultationExamination from '../models/ConsultationExamination.model.js';
+import ConsultationIntake from '../models/ConsultationIntake.model.js';
 import ClinicalPhoto from '../models/ClinicalPhoto.model.js';
 import ConsultationTemplate from '../models/ConsultationTemplate.model.js';
 import { paginateModel } from '../helpers/paginate.helper.js';
@@ -40,6 +41,16 @@ class ConsultationDiagnosisRepository extends BaseRepository {
 class ConsultationExaminationRepository extends BaseRepository {
   constructor() {
     super(ConsultationExamination);
+  }
+
+  async findByConsultation(consultationId) {
+    return this.model.findOne({ consultationId, deletedAt: null }).exec();
+  }
+}
+
+class ConsultationIntakeRepository extends BaseRepository {
+  constructor() {
+    super(ConsultationIntake);
   }
 
   async findByConsultation(consultationId) {
@@ -110,6 +121,7 @@ export {
   ConsultationVitalsRepository,
   ConsultationDiagnosisRepository,
   ConsultationExaminationRepository,
+  ConsultationIntakeRepository,
   ClinicalPhotoRepository,
   ConsultationTemplateRepository,
 };

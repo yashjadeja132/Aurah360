@@ -196,6 +196,20 @@ class ConsultationController {
     return ApiResponse.success(res, { message: 'Diagnosis saved', data: { diagnosis } });
   });
 
+  getIntake = asyncHandler(async (req, res) => {
+    const data = await this.clinicalService.getIntake(req.params.id);
+    return ApiResponse.success(res, { data });
+  });
+
+  saveIntake = asyncHandler(async (req, res) => {
+    const intake = await this.clinicalService.saveIntake(
+      req.params.id,
+      req.body,
+      req.auth.userId
+    );
+    return ApiResponse.success(res, { message: 'Intake saved', data: { intake } });
+  });
+
   saveExamination = asyncHandler(async (req, res) => {
     const examination = await this.clinicalService.saveExamination(
       req.params.id,

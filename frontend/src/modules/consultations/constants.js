@@ -71,6 +71,7 @@ export const CONTEXT_SECTIONS = Object.freeze([
  * (see SoapEditor.jsx) instead.
  */
 export const RECORD_SECTIONS = Object.freeze([
+  { id: 'intake', label: 'Intake' },
   { id: 'soap', label: 'SOAP' },
   { id: 'vitals', label: 'Vitals' },
   { id: 'exam', label: 'Examination' },
@@ -87,6 +88,39 @@ export const CONTENT_CLASSIFICATION_OPTIONS = Object.freeze([
   { value: 'STAFF_ONLY', label: 'Staff-only' },
   { value: 'INTERNAL_CLINICAL', label: 'Internal clinical' },
   { value: 'PATIENT_FACING', label: 'Patient-facing' },
+]);
+
+/**
+ * §2 Pre-consult intake — "specialty template auto-selected" is this fixed category list, not
+ * `ConsultationTemplate` (see backend/src/models/ConsultationIntake.model.js header for the full
+ * decision note: those are free-text SOAP/exam authoring templates with no structured field list
+ * to key a specialty off of). Every category shares the same mandatory field set today — this is
+ * a label/default only, not yet a per-category form variant.
+ */
+export const INTAKE_CATEGORY_OPTIONS = Object.freeze([
+  { value: 'GENERAL', label: 'General visit' },
+  { value: 'NEW_DERMATOLOGY_PATIENT', label: 'New dermatology patient' },
+  { value: 'ACNE', label: 'Acne' },
+  { value: 'HAIR_LOSS', label: 'Hair loss' },
+  { value: 'LASER', label: 'Laser' },
+  { value: 'SKIN', label: 'Skin' },
+]);
+
+export const DURATION_UNIT_OPTIONS = Object.freeze([
+  { value: 'DAYS', label: 'Days' },
+  { value: 'WEEKS', label: 'Weeks' },
+  { value: 'MONTHS', label: 'Months' },
+  { value: 'YEARS', label: 'Years' },
+]);
+
+/** Fitzpatrick I–VI. */
+export const SKIN_TYPE_OPTIONS = Object.freeze([
+  { value: 'TYPE_I', label: 'Type I' },
+  { value: 'TYPE_II', label: 'Type II' },
+  { value: 'TYPE_III', label: 'Type III' },
+  { value: 'TYPE_IV', label: 'Type IV' },
+  { value: 'TYPE_V', label: 'Type V' },
+  { value: 'TYPE_VI', label: 'Type VI' },
 ]);
 
 /** @deprecated Retained for callers outside the workspace; use RECORD_SECTIONS. */

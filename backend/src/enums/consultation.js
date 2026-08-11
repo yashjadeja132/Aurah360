@@ -82,6 +82,46 @@ export const CONTENT_CLASSIFICATION = Object.freeze({
 
 export const CONTENT_CLASSIFICATION_LIST = Object.freeze(Object.values(CONTENT_CLASSIFICATION));
 
+/**
+ * §2 Pre-consult intake — "specialty template auto-selected" is implemented as a fixed intake
+ * CATEGORY the nurse confirms/changes on the intake screen (not a `ConsultationTemplate` row:
+ * those are per-doctor free-text SOAP/diagnosis/examination authoring templates with no
+ * structured field list, so they don't model "which mandatory intake fields apply" — see
+ * ConsultationIntake.model.js header for the full decision note). GENERAL is the safe default
+ * when nothing on the appointment hints at a specialty.
+ */
+export const INTAKE_CATEGORY = Object.freeze({
+  GENERAL: 'GENERAL',
+  NEW_DERMATOLOGY_PATIENT: 'NEW_DERMATOLOGY_PATIENT',
+  ACNE: 'ACNE',
+  HAIR_LOSS: 'HAIR_LOSS',
+  LASER: 'LASER',
+  SKIN: 'SKIN',
+});
+
+export const INTAKE_CATEGORY_LIST = Object.freeze(Object.values(INTAKE_CATEGORY));
+
+/** Fitzpatrick skin phototype I–VI — standard dermatology intake vocabulary. */
+export const SKIN_TYPE = Object.freeze({
+  TYPE_I: 'TYPE_I',
+  TYPE_II: 'TYPE_II',
+  TYPE_III: 'TYPE_III',
+  TYPE_IV: 'TYPE_IV',
+  TYPE_V: 'TYPE_V',
+  TYPE_VI: 'TYPE_VI',
+});
+
+export const SKIN_TYPE_LIST = Object.freeze(Object.values(SKIN_TYPE));
+
+export const DURATION_UNIT = Object.freeze({
+  DAYS: 'DAYS',
+  WEEKS: 'WEEKS',
+  MONTHS: 'MONTHS',
+  YEARS: 'YEARS',
+});
+
+export const DURATION_UNIT_LIST = Object.freeze(Object.values(DURATION_UNIT));
+
 export default {
   CONSULTATION_STATUS,
   PHOTO_TYPE,
@@ -93,4 +133,10 @@ export default {
   FOLLOW_UP_PRIORITY_LIST,
   EDITABLE_CONSULTATION_STATUSES,
   CONTENT_CLASSIFICATION,
+  INTAKE_CATEGORY,
+  INTAKE_CATEGORY_LIST,
+  SKIN_TYPE,
+  SKIN_TYPE_LIST,
+  DURATION_UNIT,
+  DURATION_UNIT_LIST,
 };

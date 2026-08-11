@@ -5,9 +5,11 @@ import {
   ConsultationVitalsRepository,
   ConsultationDiagnosisRepository,
   ConsultationExaminationRepository,
+  ConsultationIntakeRepository,
   ClinicalPhotoRepository,
   ConsultationTemplateRepository,
 } from '../repositories/ConsultationClinicalRepository.js';
+import PatientRepository from '../repositories/PatientRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
 import AuditService from './AuditService.js';
 import ClinicalPhotoPolicyService from './ClinicalPhotoPolicyService.js';
@@ -26,6 +28,8 @@ class ConsultationClinicalService {
     this.vitalsRepository = new ConsultationVitalsRepository();
     this.diagnosisRepository = new ConsultationDiagnosisRepository();
     this.examinationRepository = new ConsultationExaminationRepository();
+    this.intakeRepository = new ConsultationIntakeRepository();
+    this.patientRepository = new PatientRepository();
     this.photoRepository = new ClinicalPhotoRepository();
     this.templateRepository = new ConsultationTemplateRepository();
     this.timelineService = new PatientTimelineService();
@@ -167,6 +171,58 @@ class ConsultationClinicalService {
       exam = await this.examinationRepository.updateById(exam._id, data);
     }
     return exam.toSafeObject();
+  }
+
+  /**
+   * §2 Pre-consult intake — the "confirm/complete" surface a nurse fills before the doctor opens
+   * the encounter. Returns the intake row PLUS the patient's known medical data so the frontend
+   * can pre-fill allergies/current medications/conditions without forcing re-entry (spec
+   * requirement) while still letting the nurse edit/confirm them for this specific visit.
+   */
+  async getIntake(consultationId) {
+    const consultation = await this.consultationRepository.findByIdNotDeleted(consultationId);
+    if (!consultation) throw ApiError.notFound('Consultation not found');
+    const intake = await this.intakeRepository.findByConsultation(consultationId);
+    const patient = await this.patientRepository.findByIdNotDeleted(consultation.patientId);
+    return {
+      intake: intake ? intake.toSafeObject() : null,
+      patientMedical: patient
+        ? {
+            allergies: patient.medical?.allergies ?? null,
+            noKnownDrugAllergies: Boolean(patient.medical?.noKnownDrugAllergies),
+            currentMedications: patient.medical?.currentMedications ?? null,
+            chronicDiseases: patient.medical?.chronicDiseases ?? null,
+            pastMedicalHistory: patient.medical?.pastMedicalHistory ?? null,
+            pastSurgicalHistory: patient.medical?.pastSurgicalHistory ?? null,
+            pregnancyStatus: patient.medical?.pregnancyStatus ?? null,
+          }
+        : null,
+    };
+  }
+
+  /** Autosave-style partial merge — every field optional, mirrors saveVitals/saveExamination. */
+  async saveIntake(consultationId, payload, actorId) {
+    await this.#getEditable(consultationId);
+    let intake = await this.intakeRepository.findByConsultation(consultationId);
+    const skinHistory = payload.skinHistory
+      ? { ...(intake?.skinHistory?.toObject?.() || intake?.skinHistory || {}), ...payload.skinHistory }
+      : undefined;
+    const data = {
+      ...payload,
+      ...(skinHistory ? { skinHistory } : {}),
+      // Hook (pre-save / pre-findOneAndUpdate on the model) nulls this back out if the computed
+      // mandatory set isn't actually empty, so it's safe to always propose the acting nurse here.
+      completedBy: actorId,
+      updatedBy: actorId,
+    };
+
+    if (!intake) {
+      intake = await this.intakeRepository.create({ consultationId, ...data });
+    } else {
+      intake = await this.intakeRepository.updateById(intake._id, data);
+    }
+
+    return intake.toSafeObject();
   }
 
   async uploadPhoto(

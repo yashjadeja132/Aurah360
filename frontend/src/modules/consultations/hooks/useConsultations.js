@@ -346,6 +346,48 @@ export function useUpdateLabOrderFromQueue() {
   });
 }
 
+/** §2 Pre-consult intake — row + the patient's known medical data for pre-fill. */
+export function useIntake(consultationId) {
+  return useQuery({
+    queryKey: QUERY_KEYS.CONSULTATION_INTAKE(consultationId),
+    queryFn: async () => {
+      const res = await consultationsApi.getIntake(consultationId);
+      return res.data;
+    },
+    enabled: Boolean(consultationId),
+  });
+}
+
+/**
+ * Debounced intake autosave — same shape as useSoapAutosave (silent, draft indicator only via
+ * onStatus), but also invalidates the workspace query so the doctor-side "intake incomplete"
+ * badge (sourced from workspace.intake.mandatoryIncomplete) stays current.
+ */
+export function useIntakeAutosave(consultationId, { enabled = true, delayMs = 1200 } = {}) {
+  const timer = useRef(null);
+  const qc = useQueryClient();
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const save = (payload, onStatus) => {
+    if (!enabled || !consultationId) return;
+    clearTimeout(timer.current);
+    onStatus?.('saving');
+    timer.current = setTimeout(async () => {
+      try {
+        await consultationsApi.saveIntake(consultationId, payload);
+        onStatus?.('saved');
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_INTAKE(consultationId) });
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_WORKSPACE(consultationId) });
+      } catch {
+        onStatus?.('error');
+      }
+    }, delayMs);
+  };
+
+  return { save };
+}
+
 /**
  * Debounced SOAP autosave — silent except draft indicator via onStatus.
  */

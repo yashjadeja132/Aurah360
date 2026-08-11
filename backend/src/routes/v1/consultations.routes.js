@@ -15,6 +15,7 @@ import {
   vitalsSchema,
   diagnosisSchema,
   examinationSchema,
+  intakeSchema,
   photoMetaSchema,
   releasePhotoSchema,
   templateCreateSchema,
@@ -264,6 +265,23 @@ router.put(
   requirePermission(PERMISSIONS.CONSULTATION_DIAGNOSE, PERMISSIONS.CONSULTATION_ALL),
   validate({ params: consultationIdParamSchema, body: diagnosisSchema }),
   controller.saveDiagnosis
+);
+
+// §2 Pre-consult intake — CONSULTATION_EDIT (same gate as vitals) is the nurse-appropriate
+// permission: NURSE already holds it precisely so they can "record vitals, intake notes ... on
+// the same screen" without CONSULTATION_DIAGNOSE (see rolePermissions.js NURSE block comment).
+router.get(
+  '/:id/intake',
+  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
+  validate({ params: consultationIdParamSchema }),
+  controller.getIntake
+);
+
+router.put(
+  '/:id/intake',
+  requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
+  validate({ params: consultationIdParamSchema, body: intakeSchema }),
+  controller.saveIntake
 );
 
 router.put(

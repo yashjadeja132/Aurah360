@@ -346,6 +346,12 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.APPOINTMENTS_VIEW,
     PERMISSIONS.CLINICAL_VIEW,
     PERMISSIONS.CLINICAL_EDIT,
+    // §2 Pre-consult intake — the nurse's intake screen writes to a Consultation row keyed by
+    // appointmentId, same as the doctor's "Start from appointment". ConsultationService.start()
+    // is idempotent per appointment (returns the existing workspace if one is already there), so
+    // granting CREATE here doesn't let a nurse open a second, competing session — it lets intake
+    // happen before the doctor's own start click, which is the whole point of "pre-consult".
+    PERMISSIONS.CONSULTATION_CREATE,
     PERMISSIONS.CONSULTATION_VIEW,
     PERMISSIONS.CONSULTATION_EDIT,
     PERMISSIONS.PRESCRIPTION_VIEW,

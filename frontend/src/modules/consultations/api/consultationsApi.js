@@ -44,6 +44,13 @@ export const consultationsApi = {
   saveVitals(id, payload) {
     return api.put(`/consultations/${id}/vitals`, payload).then((res) => res.data);
   },
+  /** §2 Pre-consult intake. */
+  getIntake(id) {
+    return api.get(`/consultations/${id}/intake`).then((res) => res.data);
+  },
+  saveIntake(id, payload) {
+    return api.put(`/consultations/${id}/intake`, payload).then((res) => res.data);
+  },
   saveDiagnosis(id, payload) {
     return api.put(`/consultations/${id}/diagnosis`, payload).then((res) => res.data);
   },

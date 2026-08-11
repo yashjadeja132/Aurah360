@@ -8,6 +8,7 @@ export const OwnerLandingPage = lazy(() => import('@/pages/dashboard/OwnerLandin
 export const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
 export const DoctorMyDayPage = lazy(() => import('@/pages/doctor/DoctorMyDayPage'));
 export const NurseTodayPage = lazy(() => import('@/pages/nurse/NurseTodayPage'));
+export const NurseIntakePage = lazy(() => import('@/pages/nurse/NurseIntakePage'));
 export const StaffListPage = lazy(() => import('@/pages/users/StaffListPage'));
 export const StaffCreatePage = lazy(() => import('@/pages/users/StaffCreatePage'));
 export const StaffDetailPage = lazy(() => import('@/pages/users/StaffDetailPage'));

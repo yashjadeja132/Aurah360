@@ -43,6 +43,7 @@ export const QUERY_KEYS = Object.freeze({
   FOLLOW_UP_QUEUE: (params) => ['consultations', 'follow-ups', params],
   CONSULTATION_PATIENT_LIST: (patientId) => ['consultations', 'patient', patientId],
   CONSULTATION_PHOTOS: (id) => ['consultations', 'photos', id],
+  CONSULTATION_INTAKE: (id) => ['consultations', 'intake', id],
   PRESCRIPTION_DETAIL: (id) => ['prescriptions', 'detail', id],
   PRESCRIPTION_PATIENT_LIST: (patientId) => ['prescriptions', 'patient', patientId],
   PRESCRIPTION_DOCTOR_LIST: (doctorId, params) => ['prescriptions', 'doctor', doctorId, params],

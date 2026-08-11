@@ -10,6 +10,7 @@ import {
   ConsultationVitalsRepository,
   ConsultationDiagnosisRepository,
   ConsultationExaminationRepository,
+  ConsultationIntakeRepository,
   ClinicalPhotoRepository,
 } from '../repositories/ConsultationClinicalRepository.js';
 import PatientTimelineService from './PatientTimelineService.js';
@@ -59,6 +60,7 @@ class ConsultationService {
     this.vitalsRepository = new ConsultationVitalsRepository();
     this.diagnosisRepository = new ConsultationDiagnosisRepository();
     this.examinationRepository = new ConsultationExaminationRepository();
+    this.intakeRepository = new ConsultationIntakeRepository();
     this.photoRepository = new ClinicalPhotoRepository();
     this.timelineService = new PatientTimelineService();
     this.auditService = new AuditService();
@@ -244,6 +246,7 @@ class ConsultationService {
     const vitals = await this.vitalsRepository.findByConsultation(id);
     const diagnosis = await this.diagnosisRepository.findByConsultation(id);
     const examination = await this.examinationRepository.findByConsultation(id);
+    const intake = await this.intakeRepository.findByConsultation(id);
     const photos = await this.photoRepository.findByConsultation(id);
 
     return {
@@ -252,6 +255,9 @@ class ConsultationService {
       vitals: vitals ? vitals.toSafeObject() : null,
       diagnosis: diagnosis ? diagnosis.toSafeObject() : null,
       examination: examination ? examination.toSafeObject() : null,
+      // §2 guard — surfaced on the workspace so the doctor's consultation view can show an
+      // "intake incomplete" badge before/while opening the encounter, without a second fetch.
+      intake: intake ? intake.toSafeObject() : null,
       photos: photos.map((p) => p.toSafeObject()),
     };
   }

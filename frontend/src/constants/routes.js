@@ -4,6 +4,10 @@ export const APP_ROUTES = Object.freeze({
   OWNER_LANDING: '/owner',
   DOCTOR_MY_DAY: '/my-day',
   NURSE_TODAY: '/nurse/today',
+  // §2 Pre-consult intake — keyed by appointmentId (not a consultationId, which may not exist yet;
+  // the page starts/finds the consultation itself, same idempotent start() the doctor's own
+  // "Start from appointment" uses).
+  NURSE_INTAKE: '/nurse/intake/:appointmentId',
   STAFF: '/staff',
   STAFF_CREATE: '/staff/new',
   STAFF_DETAIL: '/staff/:id',
@@ -142,6 +146,7 @@ export const appointmentEditPath = (id) => `/appointments/${id}/edit`;
 export const appointmentPatientHistoryPath = (patientId) =>
   `/appointments/patient/${patientId}/history`;
 export const consultationWorkspacePath = (id) => `/consultations/${id}`;
+export const nurseIntakePath = (appointmentId) => `/nurse/intake/${appointmentId}`;
 export const prescriptionEditPath = (id) => `/prescriptions/${id}`;
 export const prescriptionPrintPath = (id) => `/prescriptions/${id}/print`;
 export const treatmentPlanEditPath = (id) => `/treatment-plans/${id}`;
