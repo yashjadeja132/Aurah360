@@ -9,6 +9,8 @@ import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { ROLES } from '../constants/roles.js';
 import { PAGINATION } from '../constants/index.js';
 import { isStepUpVerified } from '../middlewares/stepUp.middleware.js';
+import RecallEntry from '../models/RecallEntry.model.js';
+import LeadFollowUp from '../models/LeadFollowUp.model.js';
 
 class UserService {
   constructor() {
@@ -242,11 +244,110 @@ class UserService {
     return updated.toSafeObject();
   }
 
-  async deactivateStaff(userId, actorId, req = null, { branchId = null } = {}) {
+  /**
+   * §Admin offboarding — "queues/tasks reassigned" (aurah_flow_admin.md). The only realistically
+   * owned-by-a-deactivated-staff-member work items in this codebase are the call-desk recall
+   * worklist (`RecallEntry.assignedTo`) and CRM lead follow-up tasks (`LeadFollowUp.assignedTo`);
+   * both directly reference `User`. "Open" is scoped to work not yet resolved — a completed
+   * recall or a past follow-up log is authored history and must be preserved untouched, not
+   * relabelled onto a new owner.
+   */
+  async #findOpenWork(userId) {
+    const [recallEntries, leadFollowUps] = await Promise.all([
+      RecallEntry.find({
+        assignedTo: userId,
+        status: { $in: ['PENDING', 'CALL_LATER'] },
+      })
+        .select('_id patientId dueDate priority status')
+        .lean(),
+      LeadFollowUp.find({
+        assignedTo: userId,
+        nextFollowUp: { $ne: null, $gte: new Date() },
+      })
+        .select('_id leadId nextFollowUp type')
+        .lean(),
+    ]);
+
+    return { recallEntries, leadFollowUps };
+  }
+
+  /**
+   * Commits the reassignment computed by `#findOpenWork`. Only touches the open subset (see
+   * above) — resolved recall entries and past follow-up logs keep their original `assignedTo`
+   * as authored history.
+   */
+  async reassignOpenWork(userId, reassignToUserId, actorId, req = null, openWork = null) {
+    const work = openWork || (await this.#findOpenWork(userId));
+    const recallIds = work.recallEntries.map((r) => r._id);
+    const followUpIds = work.leadFollowUps.map((f) => f._id);
+
+    if (recallIds.length) {
+      await RecallEntry.updateMany(
+        { _id: { $in: recallIds } },
+        { $set: { assignedTo: reassignToUserId } }
+      );
+    }
+    if (followUpIds.length) {
+      await LeadFollowUp.updateMany(
+        { _id: { $in: followUpIds } },
+        { $set: { assignedTo: reassignToUserId } }
+      );
+    }
+
+    if (recallIds.length || followUpIds.length) {
+      await this.auditService.record(AUDIT_ACTIONS.USER_OPEN_WORK_REASSIGNED, {
+        actorId,
+        targetUserId: userId,
+        metadata: {
+          fromUserId: userId.toString(),
+          toUserId: reassignToUserId.toString(),
+          recallEntriesReassigned: recallIds.length,
+          recallEntryIds: recallIds.map((id) => id.toString()),
+          leadFollowUpsReassigned: followUpIds.length,
+          leadFollowUpIds: followUpIds.map((id) => id.toString()),
+        },
+        req,
+      });
+    }
+
+    return {
+      recallEntriesReassigned: recallIds.length,
+      leadFollowUpsReassigned: followUpIds.length,
+    };
+  }
+
+  async deactivateStaff(
+    userId,
+    actorId,
+    req = null,
+    { branchId = null, reassignToUserId = null } = {}
+  ) {
     const user = await this.#findScopedStaff(userId, branchId);
     if (user.role === ROLES.OWNER) throw ApiError.forbidden('Owner cannot be deactivated');
     if (userId.toString() === actorId.toString()) {
       throw ApiError.badRequest('You cannot deactivate your own account');
+    }
+
+    const openWork = await this.#findOpenWork(userId);
+    const hasOpenWork = openWork.recallEntries.length > 0 || openWork.leadFollowUps.length > 0;
+
+    if (hasOpenWork && !reassignToUserId) {
+      throw new ApiError(
+        409,
+        'This staff member holds open queue/task work. Choose who it should be reassigned to before deactivating.',
+        { code: 'OPEN_WORK_REASSIGNMENT_REQUIRED', errors: { openWork } }
+      );
+    }
+
+    if (hasOpenWork) {
+      if (reassignToUserId.toString() === userId.toString()) {
+        throw ApiError.badRequest('Cannot reassign open work to the user being deactivated');
+      }
+      const target = await this.userRepository.findById(reassignToUserId);
+      if (!target || target.deletedAt || !target.isActive) {
+        throw ApiError.badRequest('reassignToUserId must be an active staff member');
+      }
+      await this.reassignOpenWork(userId, reassignToUserId, actorId, req, openWork);
     }
 
     const updated = await this.userRepository.updateById(userId, {
@@ -266,11 +367,38 @@ class UserService {
     return updated.toSafeObject();
   }
 
-  async softDeleteStaff(userId, actorId, req = null, { branchId = null } = {}) {
+  async softDeleteStaff(
+    userId,
+    actorId,
+    req = null,
+    { branchId = null, reassignToUserId = null } = {}
+  ) {
     const user = await this.#findScopedStaff(userId, branchId);
     if (user.role === ROLES.OWNER) throw ApiError.forbidden('Owner cannot be deleted');
     if (userId.toString() === actorId.toString()) {
       throw ApiError.badRequest('You cannot delete your own account');
+    }
+
+    const openWork = await this.#findOpenWork(userId);
+    const hasOpenWork = openWork.recallEntries.length > 0 || openWork.leadFollowUps.length > 0;
+
+    if (hasOpenWork && !reassignToUserId) {
+      throw new ApiError(
+        409,
+        'This staff member holds open queue/task work. Choose who it should be reassigned to before deleting.',
+        { code: 'OPEN_WORK_REASSIGNMENT_REQUIRED', errors: { openWork } }
+      );
+    }
+
+    if (hasOpenWork) {
+      if (reassignToUserId.toString() === userId.toString()) {
+        throw ApiError.badRequest('Cannot reassign open work to the user being deleted');
+      }
+      const target = await this.userRepository.findById(reassignToUserId);
+      if (!target || target.deletedAt || !target.isActive) {
+        throw ApiError.badRequest('reassignToUserId must be an active staff member');
+      }
+      await this.reassignOpenWork(userId, reassignToUserId, actorId, req, openWork);
     }
 
     const updated = await this.userRepository.updateById(userId, {

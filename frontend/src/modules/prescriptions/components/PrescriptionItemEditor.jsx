@@ -159,6 +159,35 @@ export function PrescriptionItemEditor({ items, onChange, readOnly }) {
               />
             </Field>
           </div>
+
+          {/* Spec §3.3 — "{Substitution note if allowed}". Prescriber-authored; distinct from the
+              pharmacy's own dispense-time substitution mechanism. */}
+          <div className="space-y-1">
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={Boolean(item.substitutionAllowed)}
+                disabled={readOnly}
+                onChange={(e) =>
+                  updateItem(index, { substitutionAllowed: e.target.checked })
+                }
+              />
+              {t('prescriptions.itemEditor.substitutionAllowed', 'Substitution allowed')}
+            </label>
+            {item.substitutionAllowed && (
+              <Field label={t('prescriptions.itemEditor.substitutionNote', 'Substitution note')}>
+                <Input
+                  value={item.substitutionNote || ''}
+                  disabled={readOnly}
+                  onChange={(e) => updateItem(index, { substitutionNote: e.target.value })}
+                  placeholder={t(
+                    'prescriptions.itemEditor.substitutionNotePlaceholder',
+                    'e.g. Generic of same salt/strength permitted'
+                  )}
+                />
+              </Field>
+            )}
+          </div>
         </div>
       ))}
 

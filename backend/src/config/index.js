@@ -144,6 +144,9 @@ export const config = Object.freeze({
     documentDays: env.DEFAULT_DOCUMENT_RETENTION_DAYS,
     photoDays: env.DEFAULT_PHOTO_RETENTION_DAYS,
   },
+  reports: {
+    downloadExpiryHours: env.REPORT_DOWNLOAD_EXPIRY_HOURS,
+  },
   patientApp: {
     url: env.PATIENT_APP_URL,
   },

@@ -27,6 +27,8 @@ import {
   transferIdParamSchema,
   rejectAdjustmentSchema,
   adjustmentIdParamSchema,
+  markDamagedSchema,
+  returnToVendorSchema,
 } from '../../validators/inventory.validator.js';
 
 const router = Router();
@@ -172,6 +174,18 @@ router.post(
   controller.returnStock
 );
 router.post(
+  '/mark-damaged',
+  requirePermission(...adjust),
+  validate({ body: markDamagedSchema }),
+  controller.markDamaged
+);
+router.post(
+  '/return-to-vendor',
+  requirePermission(...adjust, ...purchase),
+  validate({ body: returnToVendorSchema }),
+  controller.returnToVendor
+);
+router.post(
   '/consume',
   requirePermission(...adjust, PERMISSIONS.TREATMENT_SESSION_EDIT, PERMISSIONS.TREATMENT_SESSION_ALL),
   validate({ body: consumeSchema }),
@@ -189,6 +203,15 @@ router.get(
   requirePermission(...view),
   validate({ params: reportTypeParamSchema }),
   controller.report
+);
+// INV-REPORT-EXPORT — mirrors the generic Reports module's `GET /reports/export/:type`
+// (requirePermission(REPORTS_EXPORT/REPORTS_ALL) pattern); gated on REPORTS_EXPORT or the
+// INVENTORY_ALL wildcard since this is inventory's own report set, not the generic module's.
+router.get(
+  '/reports/:type/export',
+  requirePermission(PERMISSIONS.REPORTS_EXPORT, PERMISSIONS.INVENTORY_ALL),
+  validate({ params: reportTypeParamSchema }),
+  controller.reportExport
 );
 
 // Suppliers

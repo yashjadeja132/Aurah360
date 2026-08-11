@@ -104,6 +104,21 @@ export const resetPasswordSchema = z.object({
   newPassword: passwordSchema,
 });
 
+/**
+ * §Admin offboarding — "queues/tasks reassigned" (aurah_flow_admin.md). Deactivate/delete is
+ * blocked with 409 OPEN_WORK_REASSIGNMENT_REQUIRED when the target user holds open recall/CRM
+ * follow-up work; the admin must pick a fallback owner to reassign it to before the action
+ * commits. Optional because most staff (e.g. a nurse with no CRM ownership) have nothing to
+ * reassign, so the body is empty on the common path.
+ */
+export const deactivateStaffSchema = z.object({
+  reassignToUserId: z
+    .string()
+    .regex(/^[a-f\d]{24}$/i, 'Invalid id')
+    .optional()
+    .nullable(),
+});
+
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: passwordSchema,

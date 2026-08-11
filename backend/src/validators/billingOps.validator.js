@@ -25,4 +25,10 @@ export const createFeeScheduleSchema = z.object({
 
 export const idParamSchema = z.object({ id: objectId });
 
-export default { submitCashCloseSchema, createFeeScheduleSchema, idParamSchema };
+export const openCashSessionSchema = z.object({
+  branchId: objectId.optional(),
+  sessionDate: z.coerce.date().optional(),
+  openingFloat: z.coerce.number().min(0),
+});
+
+export default { submitCashCloseSchema, createFeeScheduleSchema, idParamSchema, openCashSessionSchema };

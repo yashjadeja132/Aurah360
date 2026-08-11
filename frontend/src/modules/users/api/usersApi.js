@@ -17,11 +17,15 @@ export const usersApi = {
   activate(id) {
     return api.post(`/users/${id}/activate`).then((res) => res.data);
   },
-  deactivate(id) {
-    return api.post(`/users/${id}/deactivate`).then((res) => res.data);
+  deactivate(id, reassignToUserId) {
+    return api
+      .post(`/users/${id}/deactivate`, reassignToUserId ? { reassignToUserId } : {})
+      .then((res) => res.data);
   },
-  remove(id) {
-    return api.delete(`/users/${id}`).then((res) => res.data);
+  remove(id, reassignToUserId) {
+    return api
+      .delete(`/users/${id}`, reassignToUserId ? { data: { reassignToUserId } } : undefined)
+      .then((res) => res.data);
   },
   resetPassword(id, newPassword) {
     return api.post(`/users/${id}/reset-password`, { newPassword }).then((res) => res.data);

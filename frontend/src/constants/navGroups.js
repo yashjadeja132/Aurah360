@@ -121,6 +121,7 @@ export const navGroups = [
     label: 'Administration',
     items: [
       { to: APP_ROUTES.STAFF, labelKey: 'nav.staff', label: 'Staff', icon: Users, permissions: [PERMISSIONS.USERS_VIEW, PERMISSIONS.USERS_ALL] },
+      { to: APP_ROUTES.STAFF_ROSTER, labelKey: 'nav.staffRoster', label: 'Staff/Rosters', icon: ClipboardList, roles: MANAGERS, permissions: [PERMISSIONS.USERS_VIEW, PERMISSIONS.USERS_ALL] },
       { to: APP_ROUTES.DOCTORS, labelKey: 'nav.doctors', label: 'Doctors', icon: Stethoscope, permissions: [PERMISSIONS.DOCTORS_VIEW, PERMISSIONS.DOCTORS_ALL] },
       { to: APP_ROUTES.SETTINGS_RESOURCES, labelKey: 'nav.resources', label: 'Resources', icon: DoorOpen, permissions: [PERMISSIONS.RESOURCES_VIEW, PERMISSIONS.RESOURCES_ALL] },
       { to: APP_ROUTES.SETTINGS_PRIVACY, labelKey: 'nav.privacy', label: 'Privacy & access', icon: ShieldCheck, permissions: [PERMISSIONS.PRIVACY_REQUEST_VIEW, PERMISSIONS.PRIVACY_REQUEST_ALL, PERMISSIONS.BREAK_GLASS] },

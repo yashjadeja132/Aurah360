@@ -28,6 +28,16 @@ const prescriptionItemSchema = new mongoose.Schema(
     beforeFood: { type: Boolean, default: false },
     afterFood: { type: Boolean, default: false },
     remarks: { type: String, default: null },
+    /**
+     * Spec §3.3 — "{Substitution note if allowed}". This is the PRESCRIBER's own generic/brand
+     * substitution instruction written on the Rx line itself, distinct from
+     * PharmacyService's dispense-time substitution mechanism (which records what the pharmacy
+     * actually swapped at dispense). `substitutionNote` only has meaning when
+     * `substitutionAllowed` is true — it isn't enforced back to null when the box is unchecked
+     * so a doctor can uncheck-then-recheck without losing the note they already wrote.
+     */
+    substitutionAllowed: { type: Boolean, default: false },
+    substitutionNote: { type: String, default: null },
   },
   { _id: true }
 );
@@ -147,6 +157,8 @@ prescriptionSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
       beforeFood: item.beforeFood,
       afterFood: item.afterFood,
       remarks: item.remarks,
+      substitutionAllowed: item.substitutionAllowed,
+      substitutionNote: item.substitutionNote,
     })),
     safetyOverrides: (this.safetyOverrides || []).map((o) => ({
       id: o._id?.toString?.() || undefined,

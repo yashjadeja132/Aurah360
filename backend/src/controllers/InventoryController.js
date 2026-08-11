@@ -202,6 +202,32 @@ class InventoryController {
     return ApiResponse.success(res, { message: 'Stock returned', data });
   });
 
+  markDamaged = asyncHandler(async (req, res) => {
+    const { inventoryItemId, batchNumber, reason, quantity } = req.body;
+    const data = await this.inventory.markDamaged(
+      inventoryItemId,
+      batchNumber,
+      reason,
+      quantity,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Batch marked damaged', data });
+  });
+
+  returnToVendor = asyncHandler(async (req, res) => {
+    const { inventoryItemId, batchNumber, supplierId, quantity } = req.body;
+    const data = await this.inventory.returnToVendor(
+      inventoryItemId,
+      batchNumber,
+      supplierId,
+      quantity,
+      req.auth.userId,
+      req
+    );
+    return ApiResponse.success(res, { message: 'Returned to vendor', data });
+  });
+
   consume = asyncHandler(async (req, res) => {
     const data = await this.inventory.consumeForTreatment({
       ...req.body,
@@ -227,6 +253,18 @@ class InventoryController {
       await scopedListQuery(req, { branch: true })
     );
     return ApiResponse.success(res, { data });
+  });
+
+  reportExport = asyncHandler(async (req, res) => {
+    const format = req.query.format || 'csv';
+    const result = await this.inventory.exportReport(
+      req.params.type,
+      format,
+      await scopedListQuery(req, { branch: true })
+    );
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    return res.status(200).send(result.body);
   });
 
   // Suppliers — organisation-wide by design (no branchId on the model); see the class docblock.

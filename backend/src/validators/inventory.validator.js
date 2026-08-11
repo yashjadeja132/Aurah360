@@ -182,6 +182,12 @@ export const createGrnSchema = z.object({
   branchId: objectId,
   purchaseOrderId: objectId.optional().nullable(),
   notes: z.string().optional().nullable(),
+  // GRN-GAP-4 — spec requires a posted GRN to record tax, landed cost and a payment
+  // reference at the header level; all optional since not every receipt carries them yet
+  // (e.g. a GRN raised before the supplier invoice/payment is settled).
+  tax: z.number().min(0).optional().nullable(),
+  landedCost: z.number().min(0).optional().nullable(),
+  paymentReference: z.string().optional().nullable(),
   items: z
     .array(
       z.object({
@@ -189,13 +195,32 @@ export const createGrnSchema = z.object({
         purchaseOrderItemId: objectId.optional().nullable(),
         name: z.string().min(1),
         batchNumber: z.string().min(1),
+        // Optional — not every product prints a manufacture date (some OTC/consumables don't).
+        manufactureDate: z.string().or(z.date()).optional().nullable(),
         expiryDate: z.string().or(z.date()),
         quantity: z.number().positive(),
         unitCost: z.number().min(0).optional(),
         mrp: z.number().min(0).optional(),
+        // Optional per-line bin/shelf location within the branch's storeroom.
+        bin: z.string().optional().nullable(),
       })
     )
     .min(1),
+});
+
+// PHARM-GAP-5 — Expiry screen "act: return to vendor / mark damage" (spec §5).
+export const markDamagedSchema = z.object({
+  inventoryItemId: objectId,
+  batchNumber: z.string().min(1),
+  reason: z.string().optional(),
+  quantity: z.number().positive().optional(),
+});
+
+export const returnToVendorSchema = z.object({
+  inventoryItemId: objectId,
+  batchNumber: z.string().min(1),
+  supplierId: objectId,
+  quantity: z.number().positive(),
 });
 
 export const startDispenseSchema = z.object({

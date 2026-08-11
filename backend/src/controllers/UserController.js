@@ -69,13 +69,19 @@ class UserController {
 
   deactivate = asyncHandler(async (req, res) => {
     const scope = await resolveRecordScope(req, { branch: true, doctor: false });
-    const user = await this.userService.deactivateStaff(req.params.id, req.auth.userId, req, scope);
+    const user = await this.userService.deactivateStaff(req.params.id, req.auth.userId, req, {
+      ...scope,
+      reassignToUserId: req.body?.reassignToUserId || null,
+    });
     return ApiResponse.success(res, { message: 'Staff deactivated', data: { user } });
   });
 
   softDelete = asyncHandler(async (req, res) => {
     const scope = await resolveRecordScope(req, { branch: true, doctor: false });
-    const user = await this.userService.softDeleteStaff(req.params.id, req.auth.userId, req, scope);
+    const user = await this.userService.softDeleteStaff(req.params.id, req.auth.userId, req, {
+      ...scope,
+      reassignToUserId: req.body?.reassignToUserId || null,
+    });
     return ApiResponse.success(res, { message: 'Staff deleted', data: { user } });
   });
 

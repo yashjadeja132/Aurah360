@@ -6,6 +6,7 @@ import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StaffTable } from '@/modules/users/components/StaffTable';
 import { StaffFilters } from '@/modules/users/components/StaffFilters';
+import { OpenWorkReassignDialog } from '@/modules/users/components/OpenWorkReassignDialog';
 import { Pagination } from '@/components/common/Pagination';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { useStaffList, useStaffActions } from '@/modules/users/hooks/useStaff';
@@ -32,6 +33,7 @@ export default function StaffListPage() {
 
   const { data, isLoading, isError, error } = useStaffList(queryParams);
   const actions = useStaffActions();
+  const [reassignState, setReassignState] = useState(null); // { user, openWork } | null
 
   const handleActivate = async (user) => {
     try {
@@ -44,12 +46,36 @@ export default function StaffListPage() {
 
   const handleDeactivate = async (user) => {
     try {
-      await actions.deactivate.mutateAsync(user.id);
+      await actions.deactivate.mutateAsync({ id: user.id });
       toast.success(t('users.list.deactivateSuccess', { name: user.fullName }));
+    } catch (err) {
+      // §Admin offboarding — deactivation blocked because the staff member still owns open
+      // recall/CRM follow-up work; collect a reassignment target before retrying.
+      if (err.response?.data?.code === 'OPEN_WORK_REASSIGNMENT_REQUIRED') {
+        setReassignState({ user, openWork: err.response.data.errors?.openWork });
+        return;
+      }
+      toast.error(err.response?.data?.message || t('users.list.deactivateFailed'));
+    }
+  };
+
+  const handleConfirmReassign = async (reassignToUserId) => {
+    if (!reassignState) return;
+    try {
+      await actions.deactivate.mutateAsync({ id: reassignState.user.id, reassignToUserId });
+      toast.success(t('users.list.deactivateSuccess', { name: reassignState.user.fullName }));
+      setReassignState(null);
     } catch (err) {
       toast.error(err.response?.data?.message || t('users.list.deactivateFailed'));
     }
   };
+
+  // Full active-staff pool for the reassignment picker — independent of the (paginated,
+  // filtered) list query above, so a candidate on another page/filter is still selectable.
+  const { data: candidatePool } = useStaffList({ page: 1, limit: 200, isActive: 'true' });
+  const reassignCandidates = reassignState
+    ? (candidatePool?.items || []).filter((u) => u.id !== reassignState.user.id)
+    : [];
 
   return (
     <section className="space-y-6">
@@ -88,6 +114,15 @@ export default function StaffListPage() {
       <Pagination
         meta={data?.meta}
         onPageChange={(page) => setFilters((prev) => ({ ...prev, page }))}
+      />
+
+      <OpenWorkReassignDialog
+        open={Boolean(reassignState)}
+        onOpenChange={(next) => !next && setReassignState(null)}
+        openWork={reassignState?.openWork}
+        candidates={reassignCandidates}
+        isSubmitting={actions.deactivate.isPending}
+        onConfirm={handleConfirmReassign}
       />
     </section>
   );

@@ -12,6 +12,7 @@ import { AwaitingBillingPanel } from '@/modules/billing/components/AwaitingBilli
 import { DuePaymentsPanel } from '@/modules/billing/components/DuePaymentsPanel';
 import { DiscountApprovalPanel } from '@/modules/billing/components/DiscountApprovalPanel';
 import { useCashierDay } from '@/modules/billing/hooks/useCashierDay';
+import { useCashSession, useOpenCashSession } from '@/modules/billing/hooks/useBillingOps';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { formatMoney, PAYMENT_METHOD_OPTIONS } from '@/modules/billing/constants';
 import { APP_ROUTES } from '@/constants/routes';
@@ -43,6 +44,21 @@ export default function CashierDashboardPage() {
   const { awaitingBilling, dues, duesAtDesk, approvals, collection, cashSession } = useCashierDay({
     branchId: effectiveBranch || undefined,
   });
+
+  // "Open cash for the day" (Operations → Cash → [Open cash] → {opening float} → [Confirm]).
+  const { data: openSession } = useCashSession({ branchId: effectiveBranch || undefined });
+  const openCashSession = useOpenCashSession();
+  const [openingFloat, setOpeningFloat] = useState('');
+  const [showOpenCash, setShowOpenCash] = useState(false);
+
+  const handleOpenCash = async () => {
+    await openCashSession.mutateAsync({
+      branchId: effectiveBranch || undefined,
+      openingFloat: Number(openingFloat) || 0,
+    });
+    setShowOpenCash(false);
+    setOpeningFloat('');
+  };
 
   const CASH_SESSION_LABEL = {
     OPEN: t('billing.cashier.cashSessionOpen', 'Open — not closed yet'),
@@ -81,11 +97,44 @@ export default function CashierDashboardPage() {
               ))}
             </Select>
           )}
+          {openSession?.status === 'OPEN' ? (
+            <Badge variant="secondary">
+              {t('billing.cashier.tillOpen', 'Till open · float {{amount}}', {
+                amount: formatMoney(openSession.openingFloat),
+              })}
+            </Badge>
+          ) : (
+            <Button variant="outline" onClick={() => setShowOpenCash((v) => !v)}>
+              {t('billing.cashier.openCash', 'Open cash')}
+            </Button>
+          )}
           <Button asChild variant="outline">
             <Link to={APP_ROUTES.BILLING}>{t('billing.cashier.openBilling', 'Open billing')}</Link>
           </Button>
         </div>
       </div>
+
+      {showOpenCash && (
+        <Card>
+          <CardContent className="flex flex-wrap items-end gap-3 pt-6">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">
+                {t('billing.cashier.openingFloat', 'Opening float amount')}
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingFloat}
+                onChange={(e) => setOpeningFloat(e.target.value)}
+                className="h-10 w-40 rounded-md border px-3 text-sm"
+              />
+            </div>
+            <Button onClick={handleOpenCash} disabled={openCashSession.isPending}>
+              {t('billing.cashier.confirm', 'Confirm')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Tile

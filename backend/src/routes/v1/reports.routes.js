@@ -86,6 +86,13 @@ router.get(
   controller.getRun
 );
 
+router.get(
+  '/runs/:id/download',
+  requirePermission(...view),
+  validate({ params: idParamSchema }),
+  controller.downloadRun
+);
+
 router.get('/scheduled', requirePermission(...view), controller.listScheduled);
 router.post(
   '/scheduled/run-due',

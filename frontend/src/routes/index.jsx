@@ -55,6 +55,7 @@ import {
   PatientAppointmentHistoryPage,
   ReceptionDashboardPage,
   QueueDashboardPage,
+  QueueDisplayPage,
   ConsultationListPage,
   ConsultationWorkspacePage,
   ReportReviewQueuePage,
@@ -136,6 +137,7 @@ import {
 
 
   BranchCommandPage,
+  StaffRosterPage,
 
 
   NotFoundPage,
@@ -621,11 +623,31 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Branch Manager "Staff/Rosters" board — same users.view gate as the Staff list.
+            path: APP_ROUTES.STAFF_ROSTER,
+            element: (
+              <PermissionGuard permissions={[PERMISSIONS.USERS_VIEW, PERMISSIONS.USERS_ALL]} fallback="redirect">
+                <StaffRosterPage />
+              </PermissionGuard>
+            ),
+          },
+          {
             path: APP_ROUTES.RECEPTION,
             element: (
               <ReceptionPermission>
                 <ReceptionDashboardPage />
               </ReceptionPermission>
+            ),
+          },
+          {
+            // Registered above APP_ROUTES.QUEUE so '/queue/display' matches this, not the
+            // parameter-free dashboard route. Still behind the normal queue.view gate — see
+            // QueueDisplayPage's header comment for why this isn't an unauthenticated kiosk route.
+            path: APP_ROUTES.QUEUE_DISPLAY,
+            element: (
+              <QueuePermission>
+                <QueueDisplayPage />
+              </QueuePermission>
             ),
           },
           {

@@ -89,6 +89,55 @@ async function handleLoyaltyAdjustmentPendingApproval(service, payload = {}) {
  * invoice is left as a pending-clawback shortfall (see LoyaltyLedgerService#clawback). Nobody
  * polls that state, so the same approver roles used for adjustment approvals are alerted here.
  */
+/**
+ * SEC-002/PRV — break-glass access ("reason + recent MFA + short expiry + privacy alert" per
+ * spec) previously emitted `BreakGlassUsed` with zero listeners. There is no PRIVACY_OFFICER
+ * role in constants/roles.js today, so Owner/Admin — the only roles able to view the
+ * break-glass grant log — are alerted, mirroring the loyalty-approval fan-out above.
+ */
+const BREAK_GLASS_ALERT_ROLES = Object.freeze([ROLES.OWNER, ROLES.ADMIN]);
+
+async function handleBreakGlassUsed(service, payload = {}) {
+  const { breakGlassId, userId, patientId, reason } = payload;
+  if (!breakGlassId) return;
+
+  const recipients = await User.find({
+    role: { $in: BREAK_GLASS_ALERT_ROLES },
+    isActive: true,
+    deletedAt: null,
+  })
+    .select('_id')
+    .lean();
+
+  const subject = 'Break-glass access used';
+  const message =
+    `A staff member used break-glass emergency access${patientId ? ' on a patient record' : ''}. ` +
+    `Reason given: "${reason || 'none provided'}".`;
+
+  for (const user of recipients) {
+    if (user._id.toString() === String(userId)) continue; // don't alert the actor about their own action
+    await service.queueEvent({
+      eventName: 'BreakGlassUsed',
+      userId: user._id.toString(),
+      channels: [NOTIFICATION_CHANNEL.IN_APP],
+      variables: {
+        subject,
+        message,
+        summary: subject,
+        breakGlassId,
+        patientId: patientId || null,
+        reason: reason || null,
+        usedByUserId: userId || null,
+      },
+    });
+  }
+
+  logger.info('Break-glass privacy alert dispatched', {
+    breakGlassId,
+    recipients: recipients.length,
+  });
+}
+
 async function handleLoyaltyClawbackPending(service, payload = {}) {
   const { patientId, shortfall, sourceRefType, sourceRefId, branchId } = payload;
   if (!shortfall) return;
@@ -147,6 +196,17 @@ export function registerNotificationEventListeners() {
     } catch (err) {
       logger.warn('Notification event handler failed', {
         eventName: LOYALTY_EVENTS.CLAWBACK_PENDING,
+        message: err.message,
+      });
+    }
+  });
+
+  eventBus.on('BreakGlassUsed', async (payload) => {
+    try {
+      await handleBreakGlassUsed(service, payload);
+    } catch (err) {
+      logger.warn('Notification event handler failed', {
+        eventName: 'BreakGlassUsed',
         message: err.message,
       });
     }

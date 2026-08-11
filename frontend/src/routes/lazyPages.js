@@ -51,6 +51,7 @@ export const PatientAppointmentHistoryPage = lazy(
 );
 export const ReceptionDashboardPage = lazy(() => import('@/pages/reception/ReceptionDashboardPage'));
 export const QueueDashboardPage = lazy(() => import('@/pages/reception/QueueDashboardPage'));
+export const QueueDisplayPage = lazy(() => import('@/pages/reception/QueueDisplayPage'));
 export const ConsultationListPage = lazy(() => import('@/pages/consultations/ConsultationListPage'));
 export const ConsultationWorkspacePage = lazy(
   () => import('@/pages/consultations/ConsultationWorkspacePage')
@@ -148,3 +149,4 @@ export const PharmacyHubPage = lazy(() => import('@/pages/pharmacy/PharmacyHubPa
 export const CommunicationHubPage = lazy(() => import('@/pages/notifications/CommunicationHubPage'));
 export const ReceptionDeskPage = lazy(() => import('@/pages/reception/ReceptionDeskPage'));
 export const BranchCommandPage = lazy(() => import('@/pages/branchManager/BranchCommandPage'));
+export const StaffRosterPage = lazy(() => import('@/pages/branchManager/StaffRosterPage'));

@@ -31,6 +31,7 @@ import { QueueLoadPanel } from '@/modules/branchManager/components/QueueLoadPane
 import { StockAlertsPanel } from '@/modules/branchManager/components/StockAlertsPanel';
 import { ApprovalsInboxPanel } from '@/modules/branchManager/components/ApprovalsInboxPanel';
 import { useBranchDay } from '@/modules/branchManager/hooks/useBranchDay';
+import { useCashSession, useOpenCashSession } from '@/modules/billing/hooks/useBillingOps';
 
 const METHOD_LABEL = Object.fromEntries(PAYMENT_METHOD_OPTIONS.map((m) => [m.value, m.label]));
 
@@ -80,6 +81,17 @@ export default function BranchCommandPage() {
   const day = useBranchDay({ branchId });
   const discountsRef = useRef(null);
 
+  // "Open cash for the day" (Operations → Cash → [Open cash] → {opening float} → [Confirm]).
+  const { data: openSession } = useCashSession({ branchId: branchId || undefined });
+  const openCashSession = useOpenCashSession();
+  const [openingFloat, setOpeningFloat] = useState('');
+  const [showOpenCash, setShowOpenCash] = useState(false);
+  const handleOpenCash = async () => {
+    await openCashSession.mutateAsync({ branchId, openingFloat: Number(openingFloat) || 0 });
+    setShowOpenCash(false);
+    setOpeningFloat('');
+  };
+
   const branchName =
     sortedBranches.find((b) => String(b.id) === String(branchId))?.displayName ||
     sortedBranches.find((b) => String(b.id) === String(branchId))?.name ||
@@ -119,12 +131,49 @@ export default function BranchCommandPage() {
                 {branchName || t('branchDay.yourBranch', 'Your branch')}
               </Badge>
             )}
+            <PermissionGuard
+              permissions={[PERMISSIONS.BILLING_CASH_CLOSE_APPROVE, PERMISSIONS.BILLING_ALL]}
+            >
+              {openSession?.status === 'OPEN' ? (
+                <Badge variant="outline" className="px-3 py-1.5 text-sm">
+                  {t('branchDay.tillOpen', 'Till open · float {{amount}}', {
+                    amount: formatMoney(openSession.openingFloat),
+                  })}
+                </Badge>
+              ) : (
+                <Button variant="outline" onClick={() => setShowOpenCash((v) => !v)}>
+                  {t('branchDay.openCash', 'Open cash')}
+                </Button>
+              )}
+            </PermissionGuard>
             <Button asChild variant="outline">
               <Link to={APP_ROUTES.REPORTS}>{t('branchDay.openReports', 'Reports')}</Link>
             </Button>
           </div>
         }
       />
+
+      {showOpenCash && (
+        <Card>
+          <CardContent className="flex flex-wrap items-end gap-3 pt-6">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">
+                {t('branchDay.openingFloat', 'Opening float amount')}
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingFloat}
+                onChange={(e) => setOpeningFloat(e.target.value)}
+                className="h-10 w-40 rounded-md border px-3 text-sm"
+              />
+            </div>
+            <Button onClick={handleOpenCash} disabled={openCashSession.isPending}>
+              {t('branchDay.confirm', 'Confirm')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {day.isDisabled ? (
         <EmptyState

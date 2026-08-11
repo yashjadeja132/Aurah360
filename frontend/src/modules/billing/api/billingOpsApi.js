@@ -1,6 +1,12 @@
 import api from '@/services/api';
 
 export const billingOpsApi = {
+  openCashSession(payload) {
+    return api.post('/billing-ops/cash/open', payload).then((res) => res.data);
+  },
+  getCashSession(params) {
+    return api.get('/billing-ops/cash/session', { params }).then((res) => res.data);
+  },
   submitCashClose(payload) {
     return api.post('/billing-ops/cash-close', payload).then((res) => res.data);
   },

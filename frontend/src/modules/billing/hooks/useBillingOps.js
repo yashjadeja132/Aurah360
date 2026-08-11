@@ -6,6 +6,29 @@ function errMsg(e, fallback) {
   return e?.response?.data?.message || fallback;
 }
 
+export function useCashSession(params = {}) {
+  return useQuery({
+    queryKey: ['billing-ops', 'cash-session', params],
+    queryFn: async () => {
+      const res = await billingOpsApi.getCashSession(params);
+      return res.data.session;
+    },
+    enabled: Boolean(params.branchId),
+  });
+}
+
+export function useOpenCashSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => billingOpsApi.openCashSession(payload),
+    onSuccess: () => {
+      toast.success('Cash session opened');
+      qc.invalidateQueries({ queryKey: ['billing-ops', 'cash-session'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not open cash session')),
+  });
+}
+
 export function useCashCloses(params = {}) {
   return useQuery({
     queryKey: ['billing-ops', 'cash-close', params],

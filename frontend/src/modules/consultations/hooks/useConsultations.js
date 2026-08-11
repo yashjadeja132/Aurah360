@@ -390,12 +390,25 @@ export function useIntakeAutosave(consultationId, { enabled = true, delayMs = 12
 
 /**
  * Debounced SOAP autosave — silent except draft indicator via onStatus.
+ *
+ * Fix 3 — optimistic concurrency: `versionRef` tracks the `currentVersion` this client last saw
+ * for the note. Every save sends it as `baseVersion`; the server 409s (SOAP_VERSION_CONFLICT) if
+ * its stored version has since moved (a concurrent save from another tab/session), and that
+ * surfaces here as onStatus('conflict') rather than being swallowed as a generic 'error' — no
+ * auto-merge/auto-overwrite happens on either side.
  */
 export function useSoapAutosave(consultationId, { enabled = true, delayMs = 1200 } = {}) {
   const timer = useRef(null);
+  const versionRef = useRef(null);
   const qc = useQueryClient();
 
   useEffect(() => () => clearTimeout(timer.current), []);
+
+  /** Called by the caller once it knows the server's current version (initial load, or after
+   * applying a template/copy-previous that itself came from a fresh read). */
+  const setKnownVersion = (version) => {
+    versionRef.current = version ?? null;
+  };
 
   const save = (payload, onStatus) => {
     if (!enabled || !consultationId) return;
@@ -403,14 +416,24 @@ export function useSoapAutosave(consultationId, { enabled = true, delayMs = 1200
     onStatus?.('saving');
     timer.current = setTimeout(async () => {
       try {
-        await consultationsApi.autosaveSoap(consultationId, payload);
+        const res = await consultationsApi.autosaveSoap(consultationId, {
+          ...payload,
+          ...(versionRef.current != null ? { baseVersion: versionRef.current } : {}),
+        });
+        if (res?.data?.soap?.currentVersion != null) {
+          versionRef.current = res.data.soap.currentVersion;
+        }
         onStatus?.('saved');
         qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_SOAP_VERSIONS(consultationId) });
-      } catch {
-        onStatus?.('error');
+      } catch (e) {
+        if (e?.response?.status === 409) {
+          onStatus?.('conflict');
+        } else {
+          onStatus?.('error');
+        }
       }
     }, delayMs);
   };
 
-  return { save };
+  return { save, setKnownVersion };
 }

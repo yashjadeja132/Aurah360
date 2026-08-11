@@ -37,6 +37,7 @@ import aiRoutes from './ai.routes.js';
 import privacyRoutes from './privacy.routes.js';
 import loyaltyRoutes from './loyalty.routes.js';
 import auditRoutes from './audit.routes.js';
+import staffRosterRoutes from './staffRoster.routes.js';
 
 const router = Router();
 
@@ -72,6 +73,7 @@ router.use('/patient-imports', patientImportRoutes);
 router.use('/files', filesRoutes);
 router.use('/treatment-safety', treatmentSafetyRoutes);
 router.use('/billing-ops', billingOpsRoutes);
+router.use('/staff-roster', staffRosterRoutes);
 router.use('/webhooks', notificationWebhooksRoutes);
 router.use('/crm-extensions', crmExtensionsRoutes);
 router.use('/ai', aiRoutes);

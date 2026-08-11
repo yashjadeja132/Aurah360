@@ -13,6 +13,10 @@ export const STOCK_TX_TYPE = Object.freeze({
   TRANSFER: 'TRANSFER',
   CONSUMPTION: 'CONSUMPTION',
   OPENING_STOCK: 'OPENING_STOCK',
+  // PHARM-GAP-5 — spec §5 "return to vendor / mark damage / block from dispensing" needs its
+  // own dedicated ledger entry types, distinct from the generic customer/expiry RETURN.
+  DAMAGE: 'DAMAGE',
+  VENDOR_RETURN: 'VENDOR_RETURN',
 });
 
 export const STOCK_TX_TYPE_LIST = Object.freeze(Object.values(STOCK_TX_TYPE));

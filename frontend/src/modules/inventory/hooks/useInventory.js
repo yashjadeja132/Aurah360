@@ -100,6 +100,31 @@ export function useAdjustStock() {
   });
 }
 
+// PHARM-GAP-5 — Expiry screen "mark damage" / "return to vendor" actions.
+export function useMarkDamaged() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => inventoryApi.markDamaged(payload),
+    onSuccess: () => {
+      toast.success('Batch marked damaged');
+      invalidateInv(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Mark damaged failed')),
+  });
+}
+
+export function useReturnToVendor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => inventoryApi.returnToVendor(payload),
+    onSuccess: () => {
+      toast.success('Returned to vendor');
+      invalidateInv(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Return to vendor failed')),
+  });
+}
+
 // --- Stock adjustment approval queue (INV-003) ---
 export function useAdjustmentRequests(params = {}) {
   return useQuery({

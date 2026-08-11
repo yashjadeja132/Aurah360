@@ -1,6 +1,7 @@
 import ApiError from '../libs/ApiError.js';
 import CashClose from '../models/CashClose.model.js';
 import AuditService from './AuditService.js';
+import CashSessionService from './CashSessionService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { CASH_CLOSE_STATUS } from '../enums/billing.js';
 import { ROLES } from '../constants/roles.js';
@@ -10,6 +11,7 @@ import config from '../config/index.js';
 class CashCloseService {
   constructor() {
     this.auditService = new AuditService();
+    this.cashSessionService = new CashSessionService();
   }
 
   #round(n) {
@@ -24,6 +26,19 @@ class CashCloseService {
    */
   async submit(rawPayload, actorId, req = null, scopedBranchId = null) {
     const payload = scopedBranchId ? { ...rawPayload, branchId: scopedBranchId } : rawPayload;
+
+    // If a cash session was opened for this branch/day, its opening float is authoritative —
+    // a client-supplied `openingCash` at close time is only accepted as a manual fallback for
+    // branches that never bothered opening a session (backward compatible with the pre-session
+    // close flow).
+    const todaySession = await this.cashSessionService.getTodaySession(
+      payload.branchId,
+      payload.closeDate
+    );
+    if (todaySession) {
+      payload.openingCash = todaySession.openingFloat;
+    }
+
     const expectedCash = this.#round(
       (Number(payload.openingCash) || 0) +
         (Number(payload.cashCollected) || 0) -
@@ -67,6 +82,10 @@ class CashCloseService {
       metadata: { branchId: payload.branchId, closeDate: payload.closeDate, variance },
       req,
     });
+
+    if (todaySession) {
+      await this.cashSessionService.linkCashClose(payload.branchId, payload.closeDate, close._id);
+    }
 
     return close.toSafeObject();
   }

@@ -46,4 +46,6 @@ export const emptyItem = () => ({
   beforeFood: false,
   afterFood: false,
   remarks: '',
+  substitutionAllowed: false,
+  substitutionNote: '',
 });

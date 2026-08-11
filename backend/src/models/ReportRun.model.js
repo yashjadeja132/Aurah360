@@ -34,6 +34,10 @@ const reportRunSchema = new mongoose.Schema(
     failedReason: { type: String, default: null },
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
+    // "Large reports run async with expiry-limited download" (spec) — set alongside
+    // `completedAt` (see ReportService#processReportRun), config.reports.downloadExpiryHours
+    // after completion. Null while queued/running/failed — there is nothing to expire yet.
+    expiresAt: { type: Date, default: null, index: true },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true, collection: 'report_runs' }

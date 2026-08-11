@@ -33,6 +33,17 @@ export function useBranchQueue(branchId, date) {
   });
 }
 
+/** Lobby/TV display board — masked payload, see queueApi#publicBranchQueue. Polls as a
+ * fallback in addition to the socket-driven invalidation from useQueueSocket. */
+export function usePublicBranchQueue(branchId, date) {
+  return useQuery({
+    queryKey: [...QUERY_KEYS.QUEUE_BRANCH(branchId, date), 'public'],
+    queryFn: () => queueApi.publicBranchQueue({ branchId, date }),
+    enabled: Boolean(branchId),
+    refetchInterval: 15000,
+  });
+}
+
 export function useDoctorQueue(doctorId, date) {
   return useQuery({
     queryKey: QUERY_KEYS.QUEUE_DOCTOR(doctorId, date),

@@ -31,6 +31,7 @@ import AuditService from './AuditService.js';
 import AnalyticsService from './AnalyticsService.js';
 import { exportReport } from './ExportService.js';
 import ApiError from '../libs/ApiError.js';
+import config from '../config/index.js';
 import {
   DASHBOARD_TYPE,
   REPORT_TYPE,
@@ -812,6 +813,11 @@ class ReportService {
       run.resultSummary = { columns: report.columns.map((c) => c.key), sample: report.rows.slice(0, 5) };
       run.exportPayload = exported.body;
       run.completedAt = new Date();
+      // Spec: "large reports run async with expiry-limited download" — starts ticking from
+      // completion, not from the queue time, so a slow-running job doesn't eat into it.
+      run.expiresAt = new Date(
+        run.completedAt.getTime() + config.reports.downloadExpiryHours * 60 * 60 * 1000
+      );
       run.failedReason = null;
       await run.save();
       return { runId, status: run.status, rowCount: run.rowCount };
@@ -857,7 +863,55 @@ class ReportService {
       startedAt: run.startedAt,
       completedAt: run.completedAt,
       createdAt: run.createdAt,
-      hasExport: Boolean(run.exportPayload),
+      expiresAt: run.expiresAt,
+      isExpired: Boolean(run.expiresAt && run.expiresAt < new Date()),
+      hasExport: Boolean(run.exportPayload) && !(run.expiresAt && run.expiresAt < new Date()),
+    };
+  }
+
+  /**
+   * Streams the completed async run's export body. Same requester-scoping as `getReportRun`
+   * (SEC-001) plus the expiry check the spec calls for — once `expiresAt` has passed the
+   * payload is refused with 410 Gone rather than served, so a link that leaked stays useless
+   * and nobody accumulates an ever-growing pile of live download links.
+   */
+  async downloadReportRun(id, requester = null) {
+    const run = await ReportRun.findOne({ _id: id, deletedAt: null }).exec();
+    if (!run) throw ApiError.notFound('Report run not found');
+
+    if (requester && !hasGlobalScope(requester)) {
+      const owner = run.requestedBy ? run.requestedBy.toString() : null;
+      if (!owner || owner !== String(requester.userId)) {
+        throw ApiError.notFound('Report run not found');
+      }
+    }
+
+    if (run.status !== REPORT_RUN_STATUS.COMPLETED || !run.exportPayload) {
+      throw ApiError.badRequest('Report is not ready for download');
+    }
+
+    if (run.expiresAt && run.expiresAt < new Date()) {
+      throw new ApiError(410, 'This report download has expired. Re-run the report to get a fresh copy.', {
+        code: 'REPORT_DOWNLOAD_EXPIRED',
+      });
+    }
+
+    // Content-type/filename only — the body itself is the already-generated `exportPayload`,
+    // not something to regenerate here (that would silently discard it in favour of an
+    // empty-rows re-render).
+    const fmt = String(run.format || EXPORT_FORMAT.CSV).toLowerCase();
+    const contentType =
+      fmt === EXPORT_FORMAT.EXCEL
+        ? 'application/vnd.ms-excel'
+        : fmt === EXPORT_FORMAT.PDF
+          ? 'application/json'
+          : 'text/csv; charset=utf-8';
+    const extension = fmt === EXPORT_FORMAT.EXCEL ? 'xls' : fmt === EXPORT_FORMAT.PDF ? 'pdf.json' : 'csv';
+
+    return {
+      body: run.exportPayload,
+      contentType,
+      filename: `${run.reportType}.${extension}`,
     };
   }
 

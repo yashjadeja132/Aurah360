@@ -152,6 +152,9 @@ const envSchema = z.object({
   STEP_UP_TTL_MINUTES: z.coerce.number().default(10),
   BREAK_GLASS_TTL_MINUTES: z.coerce.number().default(30),
 
+  /** Reports — "large reports run async with expiry-limited download" (spec). */
+  REPORT_DOWNLOAD_EXPIRY_HOURS: z.coerce.number().default(24),
+
   /** Retention / privacy defaults (PRV-003) */
   AUDIT_LOG_RETENTION_DAYS: z.coerce.number().default(2555), // ~7 years
   DEFAULT_DOCUMENT_RETENTION_DAYS: z.coerce.number().default(3650),

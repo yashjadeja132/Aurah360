@@ -7,6 +7,11 @@ export const queueApi = {
   branchQueue(params) {
     return api.get('/queue/branch', { params }).then((res) => res.data);
   },
+  /** PRD §6.5 — lobby/TV display board. Same endpoint, `view=PUBLIC` picks the server-side
+   * masked serialiser (token + initials + doctor + status only, see QueueService#mapPublic). */
+  publicBranchQueue(params) {
+    return api.get('/queue/branch', { params: { ...params, view: 'PUBLIC' } }).then((res) => res.data);
+  },
   doctorQueue(params) {
     return api.get('/queue/doctor', { params }).then((res) => res.data);
   },

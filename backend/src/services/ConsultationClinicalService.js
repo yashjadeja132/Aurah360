@@ -58,6 +58,22 @@ class ConsultationClinicalService {
   async autosaveSoap(consultationId, payload, actorId, req = null) {
     await this.#getEditable(consultationId);
     let soap = await this.soapRepository.findByConsultation(consultationId);
+
+    /**
+     * Optimistic-concurrency check — `baseVersion` is the `currentVersion` the client last saw.
+     * A mismatch means someone else's autosave (another tab, another session) landed in between
+     * this client's last read and this save, so blindly incrementing over it would silently drop
+     * that edit. Only enforced when the client actually sent a baseVersion AND a row already
+     * exists to compare against — the very first save from a client with nothing loaded yet, or
+     * the very first row for this consultation, has nothing to conflict with.
+     */
+    if (soap && payload.baseVersion != null && soap.currentVersion !== payload.baseVersion) {
+      throw ApiError.conflict(
+        'This note was changed elsewhere. Reload to see the latest version before continuing.',
+        'SOAP_VERSION_CONFLICT'
+      );
+    }
+
     if (!soap) {
       soap = await this.soapRepository.create({
         consultationId,

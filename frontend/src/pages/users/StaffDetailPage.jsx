@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
-import { useStaffDetail, useStaffActions } from '@/modules/users/hooks/useStaff';
+import { useStaffDetail, useStaffActions, useStaffList } from '@/modules/users/hooks/useStaff';
+import { OpenWorkReassignDialog } from '@/modules/users/components/OpenWorkReassignDialog';
 import { ROLE_LABELS, PERMISSIONS } from '@/constants/rbac';
 import { APP_ROUTES, staffEditPath } from '@/constants/routes';
 
@@ -21,6 +22,9 @@ export default function StaffDetailPage() {
   const actions = useStaffActions();
   const [resetOpen, setResetOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [openWork, setOpenWork] = useState(null); // set when 409 OPEN_WORK_REASSIGNMENT_REQUIRED
+  const { data: candidatePool } = useStaffList({ page: 1, limit: 200, isActive: 'true' });
+  const reassignCandidates = (candidatePool?.items || []).filter((u) => u.id !== id);
 
   const handleReset = async () => {
     try {
@@ -36,8 +40,24 @@ export default function StaffDetailPage() {
   const handleSoftDelete = async () => {
     if (!window.confirm(t('users.detail.confirmDelete'))) return;
     try {
-      await actions.remove.mutateAsync(id);
+      await actions.remove.mutateAsync({ id });
       toast.success(t('users.detail.deleteSuccess'));
+    } catch (err) {
+      // §Admin offboarding — deletion blocked because open recall/CRM follow-up work is still
+      // owned by this user; collect a reassignment target before retrying.
+      if (err.response?.data?.code === 'OPEN_WORK_REASSIGNMENT_REQUIRED') {
+        setOpenWork(err.response.data.errors?.openWork);
+        return;
+      }
+      toast.error(err.response?.data?.message || t('users.detail.deleteFailed'));
+    }
+  };
+
+  const handleConfirmReassignAndDelete = async (reassignToUserId) => {
+    try {
+      await actions.remove.mutateAsync({ id, reassignToUserId });
+      toast.success(t('users.detail.deleteSuccess'));
+      setOpenWork(null);
     } catch (err) {
       toast.error(err.response?.data?.message || t('users.detail.deleteFailed'));
     }
@@ -136,6 +156,15 @@ export default function StaffDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <OpenWorkReassignDialog
+        open={Boolean(openWork)}
+        onOpenChange={(next) => !next && setOpenWork(null)}
+        openWork={openWork}
+        candidates={reassignCandidates}
+        isSubmitting={actions.remove.isPending}
+        onConfirm={handleConfirmReassignAndDelete}
+      />
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import CashCloseService from '../services/CashCloseService.js';
+import CashSessionService from '../services/CashSessionService.js';
 import FeeScheduleService from '../services/FeeScheduleService.js';
 import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js';
 
@@ -18,8 +19,25 @@ import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js'
 class BillingOpsController {
   constructor() {
     this.cashCloseService = new CashCloseService();
+    this.cashSessionService = new CashSessionService();
     this.feeScheduleService = new FeeScheduleService();
   }
+
+  /** "Open cash for the day" — Operations → Cash → [Open cash] → {opening float} → [Confirm]. */
+  openCashSession = asyncHandler(async (req, res) => {
+    const { branchId } = await resolveRecordScope(req, { branch: true, doctor: false });
+    const session = await this.cashSessionService.openSession(req.body, req.auth.userId, req, branchId);
+    return ApiResponse.created(res, { message: 'Cash session opened', data: { session } });
+  });
+
+  getCashSession = asyncHandler(async (req, res) => {
+    const query = await scopedListQuery(req, { branch: true });
+    const session = await this.cashSessionService.getTodaySession(
+      query.branchId,
+      query.date ? new Date(query.date) : new Date()
+    );
+    return ApiResponse.success(res, { message: 'Cash session retrieved', data: { session } });
+  });
 
   submitCashClose = asyncHandler(async (req, res) => {
     const { branchId } = await resolveRecordScope(req, { branch: true, doctor: false });

@@ -119,11 +119,30 @@ class PharmacyService {
       status: DISPENSE_STATUS.PARTIAL,
       ...(branchId ? { branchId } : {}),
     });
+    // PHARM-GAP-2 — spec requires the pharmacy dashboard to also surface stock alerts
+    // (low-stock, near-expiry/expired, pending GRN/transfers) so pharmacists don't need to
+    // visit the separate Inventory hub. Reuse InventoryService.dashboard() rather than
+    // duplicating its stock/expiry aggregation logic.
+    const inventoryDashboard = await this.inventoryService.dashboard(branchId);
+    const {
+      lowStock,
+      outOfStock,
+      nearExpiryBatches,
+      expiredBatches,
+      pendingTransfers,
+      pendingPurchaseOrders,
+    } = inventoryDashboard.summary;
     return {
       summary: {
         queue: queue.items.length,
         dispensedToday,
         partial,
+        lowStock,
+        outOfStock,
+        nearExpiryBatches,
+        expiredBatches,
+        pendingTransfers,
+        pendingPurchaseOrders,
       },
       recentQueue: queue.items.slice(0, 10),
     };

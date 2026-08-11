@@ -96,6 +96,14 @@ class ReportController {
     return ApiResponse.success(res, { data });
   });
 
+  /** Spec: "large reports run async with expiry-limited download" — 410 once expiresAt passes. */
+  downloadRun = asyncHandler(async (req, res) => {
+    const result = await this.service.downloadReportRun(req.params.id, req.auth);
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    return res.status(200).send(result.body);
+  });
+
   listScheduled = asyncHandler(async (req, res) => {
     const data = await this.service.listScheduled(await this.#scoped(req));
     return ApiResponse.success(res, { data: data.items });

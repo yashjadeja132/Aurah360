@@ -515,6 +515,8 @@ export default function ConsultationWorkspacePage() {
                 soap={data.soap}
                 diagnosis={data.diagnosis}
                 readOnly={readOnly}
+                doctorId={consultation?.doctorId}
+                patientId={patientId}
               />
             </Panel>
             <Panel active={tab === 'vitals'}>

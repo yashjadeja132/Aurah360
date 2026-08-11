@@ -65,6 +65,13 @@ export const soapAutosaveSchema = z.object({
   objective: z.string().max(50000).optional(),
   assessment: z.string().max(50000).optional(),
   plan: z.string().max(50000).optional(),
+  /**
+   * Optimistic-concurrency token — the `currentVersion` the client last saw for this SOAP note.
+   * Omitted entirely means "don't check" (first-ever save from a client that hasn't loaded a
+   * version yet); when present, the service 409s if it no longer matches the stored version
+   * rather than blindly incrementing over a concurrent edit from another tab/session.
+   */
+  baseVersion: z.coerce.number().int().min(0).optional(),
 });
 
 export const vitalsSchema = z.object({

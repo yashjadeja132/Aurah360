@@ -19,6 +19,12 @@ export const inventoryApi = {
   adjust(payload) {
     return api.post('/inventory/adjust', payload).then((r) => r.data);
   },
+  markDamaged(payload) {
+    return api.post('/inventory/mark-damaged', payload).then((r) => r.data);
+  },
+  returnToVendor(payload) {
+    return api.post('/inventory/return-to-vendor', payload).then((r) => r.data);
+  },
   openingStock(payload) {
     return api.post('/inventory/opening-stock', payload).then((r) => r.data);
   },
@@ -27,6 +33,16 @@ export const inventoryApi = {
   },
   report(type, params) {
     return api.get(`/inventory/reports/${type}`, { params }).then((r) => r.data);
+  },
+  async exportReport(type, params = {}) {
+    const res = await api.get(`/inventory/reports/${type}/export`, {
+      params,
+      responseType: 'blob',
+    });
+    const disposition = res.headers['content-disposition'] || '';
+    const match = disposition.match(/filename="?([^"]+)"?/i);
+    const filename = match?.[1] || `inventory-${type}-export`;
+    return { blob: res.data, filename };
   },
   listSuppliers(params) {
     return api.get('/inventory/suppliers', { params }).then((r) => r.data);

@@ -83,8 +83,14 @@ export function useStaffActions() {
 
   return {
     activate: useMutation({ mutationFn: usersApi.activate, onSuccess: invalidate }),
-    deactivate: useMutation({ mutationFn: usersApi.deactivate, onSuccess: invalidate }),
-    remove: useMutation({ mutationFn: usersApi.remove, onSuccess: invalidate }),
+    deactivate: useMutation({
+      mutationFn: ({ id, reassignToUserId } = {}) => usersApi.deactivate(id, reassignToUserId),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: ({ id, reassignToUserId } = {}) => usersApi.remove(id, reassignToUserId),
+      onSuccess: invalidate,
+    }),
     resetPassword: useMutation({
       mutationFn: ({ id, newPassword }) => usersApi.resetPassword(id, newPassword),
       onSuccess: invalidate,

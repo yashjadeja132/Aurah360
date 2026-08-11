@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { CalendarX } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,8 +13,20 @@ import { PermissionGuard } from '@/components/common/PermissionGuard';
 import {
   useInventoryExpiryReport,
   useAdjustStock,
+  useMarkDamaged,
+  useReturnToVendor,
 } from '@/modules/inventory/hooks/useInventory';
+import { inventoryApi } from '@/modules/inventory/api/inventoryApi';
 import { PERMISSIONS } from '@/constants/rbac';
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 /**
  * NEW TAB — there was no expiry screen anywhere in the app; near-expiry only
@@ -36,8 +49,23 @@ const STATUS_META = {
 export function InventoryExpiryPanel() {
   const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState('');
+  const [exporting, setExporting] = useState(false);
   const { data: rows = [], isLoading, isError } = useInventoryExpiryReport();
   const adjust = useAdjustStock();
+  const markDamaged = useMarkDamaged();
+  const returnToVendor = useReturnToVendor();
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const { blob, filename } = await inventoryApi.exportReport('expiry');
+      downloadBlob(blob, filename);
+    } catch (err) {
+      toast.error(err.message || t('inventory.expiry.exportFailed', 'Export failed'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const totals = useMemo(() => {
     const acc = {
@@ -72,6 +100,36 @@ export function InventoryExpiryPanel() {
       quantity: -Math.abs(Number(row.quantity) || 0),
       batchNumber: row.batchNumber,
       reason: 'Expiry write-off',
+    });
+  };
+
+  const markDamage = (row) => {
+    const message = t(
+      'inventory.expiry.markDamagedConfirm',
+      'Mark {{quantity}} unit(s) of batch {{batch}} as damaged? This blocks the remainder from dispensing.',
+      { quantity: row.quantity, batch: row.batchNumber }
+    );
+    if (!window.confirm(message)) return;
+    markDamaged.mutate({
+      inventoryItemId: row.inventoryItemId,
+      batchNumber: row.batchNumber,
+      quantity: Math.abs(Number(row.quantity) || 0),
+      reason: 'Damaged (expiry screen)',
+    });
+  };
+
+  const returnVendor = (row) => {
+    const supplierId = window.prompt(
+      t('inventory.expiry.returnToVendorPrompt', 'Supplier ID to return batch {{batch}} to?', {
+        batch: row.batchNumber,
+      })
+    );
+    if (!supplierId) return;
+    returnToVendor.mutate({
+      inventoryItemId: row.inventoryItemId,
+      batchNumber: row.batchNumber,
+      supplierId,
+      quantity: Math.abs(Number(row.quantity) || 0),
     });
   };
 
@@ -110,15 +168,26 @@ export function InventoryExpiryPanel() {
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>{t('inventory.expiry.batches', 'Batches')}</CardTitle>
-          <Select
-            className="sm:w-56"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">{t('inventory.expiry.allStatuses', 'Expired & near expiry')}</option>
-            <option value="EXPIRED">{t('inventory.expiry.expired', 'Expired')}</option>
-            <option value="NEAR_EXPIRY">{t('inventory.expiry.nearExpiry', 'Near expiry')}</option>
-          </Select>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Select
+              className="sm:w-56"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="">{t('inventory.expiry.allStatuses', 'Expired & near expiry')}</option>
+              <option value="EXPIRED">{t('inventory.expiry.expired', 'Expired')}</option>
+              <option value="NEAR_EXPIRY">{t('inventory.expiry.nearExpiry', 'Near expiry')}</option>
+            </Select>
+            <PermissionGuard
+              permissions={[PERMISSIONS.REPORTS_EXPORT, PERMISSIONS.INVENTORY_ALL]}
+            >
+              <Button size="sm" variant="outline" disabled={exporting} onClick={handleExport}>
+                {exporting
+                  ? t('inventory.expiry.exporting', 'Exporting…')
+                  : t('inventory.expiry.export', 'Export')}
+              </Button>
+            </PermissionGuard>
+          </div>
         </CardHeader>
         <CardContent>
           {!visible.length ? (
@@ -160,22 +229,49 @@ export function InventoryExpiryPanel() {
                         <Badge variant={meta.variant}>{t(meta.labelKey, meta.labelDefault)}</Badge>
                       </TableCell>
                       <TableCell>
-                        <PermissionGuard
-                          permissions={[
-                            PERMISSIONS.INVENTORY_ADJUST,
-                            PERMISSIONS.STOCK_ADJUST,
-                            PERMISSIONS.INVENTORY_ALL,
-                          ]}
-                        >
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={adjust.isPending}
-                            onClick={() => writeOff(row)}
+                        <div className="flex flex-wrap gap-2">
+                          <PermissionGuard
+                            permissions={[
+                              PERMISSIONS.INVENTORY_ADJUST,
+                              PERMISSIONS.STOCK_ADJUST,
+                              PERMISSIONS.INVENTORY_ALL,
+                            ]}
                           >
-                            {t('inventory.expiry.writeOff', 'Write off')}
-                          </Button>
-                        </PermissionGuard>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={adjust.isPending}
+                              onClick={() => writeOff(row)}
+                            >
+                              {t('inventory.expiry.writeOff', 'Write off')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={markDamaged.isPending}
+                              onClick={() => markDamage(row)}
+                            >
+                              {t('inventory.expiry.markDamaged', 'Mark damage')}
+                            </Button>
+                          </PermissionGuard>
+                          <PermissionGuard
+                            permissions={[
+                              PERMISSIONS.INVENTORY_ADJUST,
+                              PERMISSIONS.STOCK_ADJUST,
+                              PERMISSIONS.INVENTORY_ALL,
+                              PERMISSIONS.PURCHASE_ALL,
+                            ]}
+                          >
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={returnToVendor.isPending}
+                              onClick={() => returnVendor(row)}
+                            >
+                              {t('inventory.expiry.returnToVendor', 'Return to vendor')}
+                            </Button>
+                          </PermissionGuard>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

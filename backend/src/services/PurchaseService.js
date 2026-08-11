@@ -230,10 +230,12 @@ class PurchaseService {
         purchaseOrderItemId: i.purchaseOrderItemId || null,
         name: i.name,
         batchNumber: i.batchNumber,
+        manufactureDate: i.manufactureDate ? new Date(i.manufactureDate) : null,
         expiryDate: new Date(i.expiryDate),
         quantity: Number(i.quantity),
         unitCost: Number(i.unitCost || 0),
         mrp: Number(i.mrp || 0),
+        bin: i.bin || null,
       };
     });
 
@@ -245,6 +247,9 @@ class PurchaseService {
       items,
       status: GR_STATUS.DRAFT,
       notes: payload.notes || null,
+      tax: Number(payload.tax || 0),
+      landedCost: Number(payload.landedCost || 0),
+      paymentReference: payload.paymentReference || null,
       createdBy: actorId,
       updatedBy: actorId,
     });
@@ -307,9 +312,11 @@ class PurchaseService {
         inventoryItemId: line.inventoryItemId,
         quantity: line.quantity,
         batchNumber: line.batchNumber,
+        manufactureDate: line.manufactureDate,
         expiryDate: line.expiryDate,
         unitCost: line.unitCost,
         mrp: line.mrp,
+        bin: line.bin,
         referenceId: grn._id,
         notes: `GRN ${grn.grnNumber}`,
         actorId,

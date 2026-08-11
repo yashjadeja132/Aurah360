@@ -27,6 +27,10 @@ export const medicineItemSchema = z.object({
   beforeFood: z.boolean().optional(),
   afterFood: z.boolean().optional(),
   remarks: z.string().max(500).optional().nullable(),
+  // Spec §3.3 — "{Substitution note if allowed}"; prescriber-authored, distinct from the
+  // pharmacy dispense-time substitution mechanism (PharmacyService).
+  substitutionAllowed: z.boolean().optional(),
+  substitutionNote: z.string().max(500).optional().nullable(),
 });
 
 export const createPrescriptionSchema = z.object({

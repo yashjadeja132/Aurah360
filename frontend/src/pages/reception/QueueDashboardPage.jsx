@@ -91,12 +91,21 @@ export default function QueueDashboardPage() {
             {t('reception.queue.subtitle')}
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link to={APP_ROUTES.RECEPTION}>
-            <ClipboardList className="h-4 w-4" />
-            {t('reception.title')}
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          {effectiveBranchId && (
+            <Button asChild variant="outline">
+              <Link to={`${APP_ROUTES.QUEUE_DISPLAY}?branchId=${effectiveBranchId}`} target="_blank" rel="noopener noreferrer">
+                {t('reception.queue.displayMode', 'Display mode')}
+              </Link>
+            </Button>
+          )}
+          <Button asChild variant="outline">
+            <Link to={APP_ROUTES.RECEPTION}>
+              <ClipboardList className="h-4 w-4" />
+              {t('reception.title')}
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -34,6 +34,15 @@ export const reportsApi = {
   getRun(id) {
     return api.get(`/reports/runs/${id}`).then((r) => r.data);
   },
+  /** Streams the completed async run's export. 410s (REPORT_DOWNLOAD_EXPIRED) once the run's
+   * `expiresAt` has passed — spec's "expiry-limited download" for large async reports. */
+  async downloadRun(id) {
+    const res = await api.get(`/reports/runs/${id}/download`, { responseType: 'blob' });
+    const disposition = res.headers['content-disposition'] || '';
+    const match = disposition.match(/filename="?([^"]+)"?/i);
+    const filename = match?.[1] || `report-${id}`;
+    return { blob: res.data, filename };
+  },
   listScheduled() {
     return api.get('/reports/scheduled').then((r) => r.data);
   },

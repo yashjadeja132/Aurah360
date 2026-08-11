@@ -101,6 +101,90 @@ function Section({
   );
 }
 
+/**
+ * Inline "Accept" affordance shared by every AI-suggestion insert point.
+ *
+ * Clicking the label button expands, in place, a small edit row pre-filled with the AI's
+ * suggested text (or, for payloads that aren't a single editable string — a medication with
+ * name/dose/frequency, a lab order, a diagnosis — a checkbox that lets the doctor flag that
+ * they changed it). Two exits: "Insert as-is" (no change → ACCEPTED) and "Insert with my edits"
+ * / a ticked checkbox (→ EDITED, with the edited payload attached so the audit trail reflects
+ * what was actually written into the record, not just that a suggestion existed).
+ *
+ * Nothing here writes to the record on its own — `onAccept` still only calls emitInsert into the
+ * doctor's own editable field, exactly like the old single-step accept().
+ */
+function AcceptControl({ label, payload, textKey = 'text', freeText = true, onAccept }) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(payload[textKey] ?? '');
+  const [changed, setChanged] = useState(false);
+
+  const originalText = payload[textKey] ?? '';
+
+  const open = () => {
+    setText(originalText);
+    setChanged(false);
+    setEditing(true);
+  };
+
+  const close = () => setEditing(false);
+
+  const insert = () => {
+    if (freeText) {
+      const wasEdited = text !== originalText;
+      onAccept({ ...payload, [textKey]: text }, wasEdited);
+    } else {
+      onAccept(payload, changed);
+    }
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <Button size="sm" variant="outline" onClick={open}>
+        {label}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 w-full rounded-md border border-dashed border-primary/40 bg-primary/[0.04] p-2">
+      {freeText ? (
+        <textarea
+          className="w-full min-h-[60px] rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          autoFocus
+        />
+      ) : (
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5"
+            checked={changed}
+            onChange={(e) => setChanged(e.target.checked)}
+          />
+          {t(
+            'consultations.copilot.iChangedThis',
+            "I'm changing this before saving it (record as edited, not accepted verbatim)"
+          )}
+        </label>
+      )}
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <Button size="sm" onClick={insert}>
+          {freeText && text !== originalText
+            ? t('consultations.copilot.insertWithEdits', 'Insert with my edits')
+            : t('consultations.copilot.insertAsIs', 'Insert as-is')}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={close}>
+          {t('common.cancel', 'Cancel')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** What changed between the previous suggestion and the refined one. */
 function useDiff(previous, current) {
   return useMemo(() => {
@@ -200,10 +284,10 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
     });
   }, [pendingFocus, current]);
 
-  const accept = (payload, target, label) => {
-    emitInsert(target, payload);
+  const acceptWithEdit = (finalPayload, wasEdited, target, label) => {
+    emitInsert(target, finalPayload);
     onInsert?.(target);
-    recordDisposition('ACCEPTED');
+    recordDisposition(wasEdited ? 'EDITED' : 'ACCEPTED', wasEdited ? finalPayload : undefined);
     toast.success(t('consultations.copilot.inserted', 'Inserted into {{field}} — edit before saving', { field: label }));
   };
 
@@ -346,19 +430,18 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                       <span className="flex-1">{flag}</span>
                       {!readOnly && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            accept(
-                              { text: `${t('consultations.copilot.redFlagPrefix', 'Red flag considered')}: ${flag}` },
+                        <AcceptControl
+                          label={t('consultations.copilot.noteIt', 'Note it')}
+                          payload={{ text: `${t('consultations.copilot.redFlagPrefix', 'Red flag considered')}: ${flag}` }}
+                          onAccept={(finalPayload, wasEdited) =>
+                            acceptWithEdit(
+                              finalPayload,
+                              wasEdited,
                               INSERT_TARGETS.SOAP_OBJECTIVE,
                               t('consultations.soap.objective', 'Objective')
                             )
                           }
-                        >
-                          {t('consultations.copilot.noteIt', 'Note it')}
-                        </Button>
+                        />
                       )}
                     </li>
                   ))}
@@ -571,36 +654,35 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                       )}
                       {!readOnly && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              accept(
-                                { condition: c.condition, reasoning: c.reasoning, likelihood: c.likelihood },
+                          <AcceptControl
+                            label={t('consultations.copilot.acceptToDiagnosis', 'Accept → Diagnosis')}
+                            payload={{ condition: c.condition, reasoning: c.reasoning, likelihood: c.likelihood }}
+                            freeText={false}
+                            onAccept={(finalPayload, wasEdited) =>
+                              acceptWithEdit(
+                                finalPayload,
+                                wasEdited,
                                 INSERT_TARGETS.DIAGNOSIS,
                                 t('consultations.diagnosis.title', 'Diagnosis')
                               )
                             }
-                          >
-                            {t('consultations.copilot.acceptToDiagnosis', 'Accept → Diagnosis')}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              accept(
-                                {
-                                  text: `${t('consultations.copilot.considering', 'Considering')}: ${c.condition}${
-                                    c.likelihood ? ` (${c.likelihood})` : ''
-                                  }${c.reasoning ? ` — ${c.reasoning}` : ''}`,
-                                },
+                          />
+                          <AcceptControl
+                            label={t('consultations.copilot.acceptToAssessment', 'Add to Assessment')}
+                            payload={{
+                              text: `${t('consultations.copilot.considering', 'Considering')}: ${c.condition}${
+                                c.likelihood ? ` (${c.likelihood})` : ''
+                              }${c.reasoning ? ` — ${c.reasoning}` : ''}`,
+                            }}
+                            onAccept={(finalPayload, wasEdited) =>
+                              acceptWithEdit(
+                                finalPayload,
+                                wasEdited,
                                 INSERT_TARGETS.SOAP_ASSESSMENT,
                                 t('consultations.soap.assessment', 'Assessment')
                               )
                             }
-                          >
-                            {t('consultations.copilot.acceptToAssessment', 'Add to Assessment')}
-                          </Button>
+                          />
                         </div>
                       )}
                     </li>
@@ -629,19 +711,19 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                         {inv.reason && <p className="text-xs text-muted-foreground">{inv.reason}</p>}
                       </div>
                       {!readOnly && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            accept(
-                              { testName: inv.test, reason: inv.reason || '' },
+                        <AcceptControl
+                          label={t('consultations.copilot.acceptToLab', 'Accept → Lab order')}
+                          payload={{ testName: inv.test, reason: inv.reason || '' }}
+                          freeText={false}
+                          onAccept={(finalPayload, wasEdited) =>
+                            acceptWithEdit(
+                              finalPayload,
+                              wasEdited,
                               INSERT_TARGETS.LAB_ORDER,
                               t('consultations.labs.title', 'Lab orders')
                             )
                           }
-                        >
-                          {t('consultations.copilot.acceptToLab', 'Accept → Lab order')}
-                        </Button>
+                        />
                       )}
                     </li>
                   ))}
@@ -697,20 +779,21 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                         </span>
                       </p>
                       {!readOnly && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="mt-2"
-                          onClick={() =>
-                            accept(
-                              m,
-                              INSERT_TARGETS.PRESCRIPTION_LINE,
-                              t('consultations.copilot.rxDraft', 'Prescription draft')
-                            )
-                          }
-                        >
-                          {t('consultations.copilot.acceptToRx', 'Accept → Prescription draft')}
-                        </Button>
+                        <div className="mt-2">
+                          <AcceptControl
+                            label={t('consultations.copilot.acceptToRx', 'Accept → Prescription draft')}
+                            payload={m}
+                            freeText={false}
+                            onAccept={(finalPayload, wasEdited) =>
+                              acceptWithEdit(
+                                finalPayload,
+                                wasEdited,
+                                INSERT_TARGETS.PRESCRIPTION_LINE,
+                                t('consultations.copilot.rxDraft', 'Prescription draft')
+                              )
+                            }
+                          />
+                        </div>
                       )}
                     </li>
                   ))}
@@ -728,20 +811,20 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                   {output.procedural_options_note}
                 </p>
                 {!readOnly && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="mt-2"
-                    onClick={() =>
-                      accept(
-                        { text: output.procedural_options_note },
-                        INSERT_TARGETS.SOAP_PLAN,
-                        t('consultations.soap.plan', 'Plan')
-                      )
-                    }
-                  >
-                    {t('consultations.copilot.acceptToPlan', 'Add to Plan')}
-                  </Button>
+                  <div className="mt-2">
+                    <AcceptControl
+                      label={t('consultations.copilot.acceptToPlan', 'Add to Plan')}
+                      payload={{ text: output.procedural_options_note }}
+                      onAccept={(finalPayload, wasEdited) =>
+                        acceptWithEdit(
+                          finalPayload,
+                          wasEdited,
+                          INSERT_TARGETS.SOAP_PLAN,
+                          t('consultations.soap.plan', 'Plan')
+                        )
+                      }
+                    />
+                  </div>
                 )}
               </Section>
             )}
@@ -759,20 +842,20 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                   ))}
                 </ul>
                 {!readOnly && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="mt-2"
-                    onClick={() =>
-                      accept(
-                        { text: output.diet_lifestyle_advice.map((a) => `• ${a}`).join('\n') },
-                        INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
-                        t('consultations.followUp.instructions', 'Instructions')
-                      )
-                    }
-                  >
-                    {t('consultations.copilot.acceptToInstructions', 'Accept → Patient instructions')}
-                  </Button>
+                  <div className="mt-2">
+                    <AcceptControl
+                      label={t('consultations.copilot.acceptToInstructions', 'Accept → Patient instructions')}
+                      payload={{ text: output.diet_lifestyle_advice.map((a) => `• ${a}`).join('\n') }}
+                      onAccept={(finalPayload, wasEdited) =>
+                        acceptWithEdit(
+                          finalPayload,
+                          wasEdited,
+                          INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
+                          t('consultations.followUp.instructions', 'Instructions')
+                        )
+                      }
+                    />
+                  </div>
                 )}
               </Section>
             )}
@@ -792,20 +875,20 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                     </p>
                     <p className="mt-1 whitespace-pre-wrap text-sm">{output.aftercare_advice_english}</p>
                     {!readOnly && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="mt-2"
-                        onClick={() =>
-                          accept(
-                            { text: output.aftercare_advice_english },
-                            INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
-                            t('consultations.followUp.instructions', 'Instructions')
-                          )
-                        }
-                      >
-                        {t('consultations.copilot.acceptToInstructions', 'Accept → Patient instructions')}
-                      </Button>
+                      <div className="mt-2">
+                        <AcceptControl
+                          label={t('consultations.copilot.acceptToInstructions', 'Accept → Patient instructions')}
+                          payload={{ text: output.aftercare_advice_english }}
+                          onAccept={(finalPayload, wasEdited) =>
+                            acceptWithEdit(
+                              finalPayload,
+                              wasEdited,
+                              INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
+                              t('consultations.followUp.instructions', 'Instructions')
+                            )
+                          }
+                        />
+                      </div>
                     )}
                   </div>
                 )}
@@ -816,20 +899,20 @@ export function AiCopilotPanel({ consultationId, patientId, readOnly, chiefCompl
                     </p>
                     <p className="mt-1 whitespace-pre-wrap text-sm">{output.patient_advice_gujarati}</p>
                     {!readOnly && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="mt-2"
-                        onClick={() =>
-                          accept(
-                            { text: output.patient_advice_gujarati },
-                            INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
-                            t('consultations.followUp.instructions', 'Instructions')
-                          )
-                        }
-                      >
-                        {t('consultations.copilot.acceptToInstructions', 'Accept → Patient instructions')}
-                      </Button>
+                      <div className="mt-2">
+                        <AcceptControl
+                          label={t('consultations.copilot.acceptToInstructions', 'Accept → Patient instructions')}
+                          payload={{ text: output.patient_advice_gujarati }}
+                          onAccept={(finalPayload, wasEdited) =>
+                            acceptWithEdit(
+                              finalPayload,
+                              wasEdited,
+                              INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS,
+                              t('consultations.followUp.instructions', 'Instructions')
+                            )
+                          }
+                        />
+                      </div>
                     )}
                   </div>
                 )}

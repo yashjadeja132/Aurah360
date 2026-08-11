@@ -243,6 +243,15 @@ export const CASH_CLOSE_STATUS = Object.freeze({
 
 export const CASH_CLOSE_STATUS_LIST = Object.freeze(Object.values(CASH_CLOSE_STATUS));
 
+/** Cash session — "Open cash for the day" (start-of-day till open), separate from the
+ * end-of-day CashClose record it eventually links to. */
+export const CASH_SESSION_STATUS = Object.freeze({
+  OPEN: 'OPEN',
+  CLOSED: 'CLOSED',
+});
+
+export const CASH_SESSION_STATUS_LIST = Object.freeze(Object.values(CASH_SESSION_STATUS));
+
 export default {
   INVOICE_STATUS,
   PAYMENT_STATUS,
@@ -257,4 +266,5 @@ export default {
   AGING_BUCKET,
   CREDIT_NOTE_STATUS,
   CASH_CLOSE_STATUS,
+  CASH_SESSION_STATUS,
 };

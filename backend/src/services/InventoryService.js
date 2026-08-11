@@ -15,7 +15,10 @@ import {
   INVENTORY_ITEM_TYPE,
   NEAR_EXPIRY_DAYS,
   STOCK_TX_TYPE,
+  PO_STATUS,
 } from '../enums/inventory.js';
+import PurchaseOrder from '../models/PurchaseOrder.model.js';
+import { exportReport as buildExport } from './ExportService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import StockTransferRequest from '../models/StockTransferRequest.model.js';
 import StockAdjustmentRequest from '../models/StockAdjustmentRequest.model.js';
@@ -165,9 +168,11 @@ class InventoryService {
     type,
     quantityDelta,
     batchNumber = null,
+    manufactureDate = null,
     expiryDate = null,
     unitCost = null,
     mrp = null,
+    bin = null,
     referenceType = null,
     referenceId = null,
     reason = null,
@@ -191,17 +196,21 @@ class InventoryService {
         const existing = batches.find((b) => b.batchNumber === batchNumber);
         if (existing) {
           existing.quantity = (existing.quantity || 0) + quantityDelta;
+          if (manufactureDate) existing.manufactureDate = manufactureDate;
           if (expiryDate) existing.expiryDate = expiryDate;
           if (unitCost != null) existing.purchasePrice = unitCost;
           if (mrp != null) existing.mrp = mrp;
+          if (bin) existing.bin = bin;
         } else if (allowCreateBatch || type === STOCK_TX_TYPE.OPENING_STOCK || type === STOCK_TX_TYPE.PURCHASE || type === STOCK_TX_TYPE.RETURN) {
           batches.push({
             batchNumber,
+            manufactureDate: manufactureDate || null,
             expiryDate: expiryDate || null,
             quantity: quantityDelta,
             purchasePrice: unitCost,
             mrp,
             receivedAt: new Date(),
+            bin: bin || null,
           });
         } else {
           throw ApiError.badRequest(`Batch ${batchNumber} not found`);
@@ -212,8 +221,23 @@ class InventoryService {
       if (batchNumber) {
         const batch = batches.find((b) => b.batchNumber === batchNumber);
         if (!batch) throw ApiError.badRequest(`Batch ${batchNumber} not found`);
-        if (this.#isExpired(batch.expiryDate) && type !== STOCK_TX_TYPE.ADJUSTMENT) {
+        // ADJUSTMENT/DAMAGE/VENDOR_RETURN are the write-off / mark-damage / return-to-vendor
+        // paths themselves — they must be able to consume the very expired/blocked batch they
+        // are removing, so all three are exempt from both guards below.
+        const isWriteOffType = [
+          STOCK_TX_TYPE.ADJUSTMENT,
+          STOCK_TX_TYPE.DAMAGE,
+          STOCK_TX_TYPE.VENDOR_RETURN,
+        ].includes(type);
+        if (this.#isExpired(batch.expiryDate) && !isWriteOffType) {
           throw ApiError.forbidden(`Cannot use expired batch ${batchNumber}`);
+        }
+        // PHARM-GAP-5 — a batch blocked for a non-expiry reason (damage, recall, pending
+        // vendor return) must also be refused at dispense/sale, same as an expired batch.
+        if (batch.isBlocked && !isWriteOffType) {
+          throw ApiError.forbidden(
+            `Cannot use blocked batch ${batchNumber}${batch.blockReason ? ` (${batch.blockReason})` : ''}`
+          );
         }
         if ((batch.quantity || 0) < need) {
           throw ApiError.forbidden(
@@ -224,7 +248,7 @@ class InventoryService {
       } else {
         // FEFO — earliest expiry first
         const usable = batches
-          .filter((b) => (b.quantity || 0) > 0 && !this.#isExpired(b.expiryDate))
+          .filter((b) => (b.quantity || 0) > 0 && !this.#isExpired(b.expiryDate) && !b.isBlocked)
           .sort((a, b) => {
             if (!a.expiryDate) return 1;
             if (!b.expiryDate) return -1;
@@ -654,9 +678,11 @@ class InventoryService {
     inventoryItemId,
     quantity,
     batchNumber,
+    manufactureDate = null,
     expiryDate,
     unitCost = null,
     mrp = null,
+    bin = null,
     referenceId = null,
     notes = null,
     actorId,
@@ -675,9 +701,11 @@ class InventoryService {
       type: STOCK_TX_TYPE.PURCHASE,
       quantityDelta: Number(quantity),
       batchNumber,
+      manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
       expiryDate: new Date(expiryDate),
       unitCost,
       mrp,
+      bin,
       referenceType: 'GoodsReceipt',
       referenceId,
       notes,
@@ -884,6 +912,17 @@ class InventoryService {
       }
     }
 
+    const transferFilter = { status: { $in: ['REQUESTED', 'APPROVED', 'DISPATCHED', 'IN_TRANSIT'] } };
+    const poFilter = { status: { $in: [PO_STATUS.ORDERED, PO_STATUS.PARTIAL_RECEIVED] } };
+    if (branchId) {
+      transferFilter.$or = [{ fromBranchId: branchId }, { toBranchId: branchId }];
+      poFilter.branchId = branchId;
+    }
+    const [pendingTransfers, pendingPurchaseOrders] = await Promise.all([
+      StockTransferRequest.countDocuments({ ...transferFilter, deletedAt: null }),
+      PurchaseOrder.countDocuments({ ...poFilter, deletedAt: null }),
+    ]);
+
     return {
       summary: {
         totalItems: items.length,
@@ -892,6 +931,8 @@ class InventoryService {
         nearExpiryBatches,
         expiredBatches,
         totalValue: Math.round(totalValue * 100) / 100,
+        pendingTransfers,
+        pendingPurchaseOrders,
       },
     };
   }
@@ -935,6 +976,129 @@ class InventoryService {
       return { items: rows };
     }
     throw ApiError.badRequest('Unknown report type');
+  }
+
+  /**
+   * INV-REPORT-EXPORT — mirrors the generic Reports module's `exportReport` (ReportService →
+   * ExportService.exportReport) so inventory's own view-only report endpoints get the same
+   * CSV/Excel export capability instead of a second export mechanism being built for them.
+   */
+  async exportReport(type, format, query = {}) {
+    const result = await this.reports(type, query);
+    const rows = result.items || [];
+    const columnsByType = {
+      ledger: [
+        { key: 'transactionNumber', label: 'Transaction #' },
+        { key: 'itemName', label: 'Item' },
+        { key: 'itemSku', label: 'SKU' },
+        { key: 'type', label: 'Type' },
+        { key: 'batchNumber', label: 'Batch #' },
+        { key: 'quantity', label: 'Quantity' },
+        { key: 'balanceAfter', label: 'Balance After' },
+        { key: 'createdAt', label: 'Date' },
+      ],
+      'low-stock': [
+        { key: 'itemCode', label: 'Item Code' },
+        { key: 'name', label: 'Name' },
+        { key: 'currentStock', label: 'Current Stock' },
+        { key: 'reorderLevel', label: 'Reorder Level' },
+      ],
+      expiry: [
+        { key: 'itemCode', label: 'Item Code' },
+        { key: 'name', label: 'Name' },
+        { key: 'batchNumber', label: 'Batch #' },
+        { key: 'expiryDate', label: 'Expiry Date' },
+        { key: 'quantity', label: 'Quantity' },
+        { key: 'status', label: 'Status' },
+      ],
+    };
+    columnsByType['near-expiry'] = columnsByType.expiry;
+    const columns =
+      columnsByType[type] ||
+      Object.keys(rows[0] || {}).map((key) => ({ key, label: key }));
+
+    return buildExport({
+      format,
+      columns,
+      rows,
+      meta: { filename: `inventory-${type}-report`, title: `Inventory ${type} report` },
+    });
+  }
+
+  /**
+   * PHARM-GAP-5 — spec §5 "mark damage" on the expiry screen. Writes off the damaged quantity
+   * with a dedicated DAMAGE ledger entry (rather than the generic ADJUSTMENT) and, if any of the
+   * batch remains (partial damage), blocks the remainder from being dispensed/sold until it is
+   * either returned to the vendor or written off too.
+   */
+  async markDamaged(inventoryItemId, batchNumber, reason, quantity = null, actorId, req = null) {
+    const item = await this.itemRepo.findByIdNotDeleted(inventoryItemId);
+    if (!item) throw ApiError.notFound('Inventory item not found');
+    const batch = (item.batches || []).find((b) => b.batchNumber === batchNumber);
+    if (!batch) throw ApiError.notFound(`Batch ${batchNumber} not found`);
+    const qty = quantity != null ? Number(quantity) : batch.quantity || 0;
+    if (qty <= 0) throw ApiError.badRequest('quantity must be positive');
+    if (qty > (batch.quantity || 0)) {
+      throw ApiError.badRequest(`Only ${batch.quantity} unit(s) of ${batchNumber} available`);
+    }
+
+    const { item: updated, transaction } = await this.#applyMovement({
+      item,
+      type: STOCK_TX_TYPE.DAMAGE,
+      quantityDelta: -qty,
+      batchNumber,
+      reason: reason || 'Damaged stock',
+      actorId,
+      req,
+    });
+
+    // If part of the batch survives, block it from further dispense/sale until resolved.
+    const currentBatches = (updated.batches || []).map((b) => b.toObject?.() || { ...b });
+    const remaining = currentBatches.find((b) => b.batchNumber === batchNumber);
+    if (remaining && (remaining.quantity || 0) > 0) {
+      await this.itemRepo.updateById(item._id, {
+        batches: currentBatches.map((b) =>
+          b.batchNumber === batchNumber
+            ? { ...b, isBlocked: true, isDamaged: true, blockReason: reason || 'Damaged stock' }
+            : b
+        ),
+      });
+    }
+
+    const finalItem = await this.itemRepo.findByIdNotDeleted(item._id);
+    return { item: this.#mapItem(finalItem), transaction: transaction.toSafeObject() };
+  }
+
+  /**
+   * PHARM-GAP-5 — spec §5 "return to vendor", distinct from the generic non-vendor-specific
+   * `/inventory/return` (customer/expiry return). Removes the returned quantity from stock with
+   * a dedicated VENDOR_RETURN ledger entry, referencing the supplier for traceability.
+   */
+  async returnToVendor(inventoryItemId, batchNumber, supplierId, quantity, actorId, req = null) {
+    const item = await this.itemRepo.findByIdNotDeleted(inventoryItemId);
+    if (!item) throw ApiError.notFound('Inventory item not found');
+    if (!supplierId) throw ApiError.badRequest('supplierId is required');
+    const batch = (item.batches || []).find((b) => b.batchNumber === batchNumber);
+    if (!batch) throw ApiError.notFound(`Batch ${batchNumber} not found`);
+    const qty = Number(quantity);
+    if (!(qty > 0)) throw ApiError.badRequest('quantity must be positive');
+    if (qty > (batch.quantity || 0)) {
+      throw ApiError.badRequest(`Only ${batch.quantity} unit(s) of ${batchNumber} available`);
+    }
+
+    const { item: updated, transaction } = await this.#applyMovement({
+      item,
+      type: STOCK_TX_TYPE.VENDOR_RETURN,
+      quantityDelta: -qty,
+      batchNumber,
+      reason: 'Returned to vendor',
+      referenceType: 'Supplier',
+      referenceId: supplierId,
+      actorId,
+      req,
+    });
+
+    return { item: this.#mapItem(updated), transaction: transaction.toSafeObject() };
   }
 
   /** Select a usable batch (FEFO) for UI helpers */

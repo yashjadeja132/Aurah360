@@ -31,6 +31,15 @@ export function PurchaseOrdersPanel() {
   const [itemId, setItemId] = useState('');
   const [qty, setQty] = useState(50);
 
+  // GRN-GAP-4 — receive-quick GRN fields: manufacture date + bin are per-line/optional,
+  // tax/landedCost/paymentReference are header-level. Kept as simple controlled inputs since
+  // "receive quick" is a one-line GRN shortcut, not a full multi-line entry form.
+  const [manufactureDate, setManufactureDate] = useState('');
+  const [bin, setBin] = useState('');
+  const [tax, setTax] = useState('');
+  const [landedCost, setLandedCost] = useState('');
+  const [paymentReference, setPaymentReference] = useState('');
+
   const createPo = async () => {
     const item = items.find((i) => i.id === itemId);
     if (!supplierId || !item) return;
@@ -60,15 +69,20 @@ export function PurchaseOrdersPanel() {
         supplierId: po.supplierId,
         branchId: po.branchId,
         purchaseOrderId: po.id,
+        tax: tax ? Number(tax) : undefined,
+        landedCost: landedCost ? Number(landedCost) : undefined,
+        paymentReference: paymentReference || undefined,
         items: [
           {
             inventoryItemId: line.inventoryItemId,
             name: line.name,
             batchNumber: `UI-${Date.now()}`,
+            manufactureDate: manufactureDate || undefined,
             expiryDate: future.toISOString(),
             quantity: line.quantityOrdered || 10,
             unitCost: line.unitCost,
             mrp: line.mrp,
+            bin: bin || undefined,
           },
         ],
       });
@@ -107,6 +121,38 @@ export function PurchaseOrdersPanel() {
         <Button onClick={createPo} disabled={create.isPending || !supplierId || !itemId}>
           {t('inventory.po.createPo', 'Create PO')}
         </Button>
+      </div>
+
+      {/* GRN-GAP-4 — optional receive-quick GRN details, applied to the next "Receive" click below. */}
+      <div className="grid gap-3 rounded-xl border p-4 sm:grid-cols-5">
+        <Input
+          type="date"
+          placeholder={t('inventory.po.manufactureDate', 'Manufacture date')}
+          value={manufactureDate}
+          onChange={(e) => setManufactureDate(e.target.value)}
+        />
+        <Input
+          placeholder={t('inventory.po.bin', 'Bin / location')}
+          value={bin}
+          onChange={(e) => setBin(e.target.value)}
+        />
+        <Input
+          type="number"
+          placeholder={t('inventory.po.tax', 'Tax')}
+          value={tax}
+          onChange={(e) => setTax(e.target.value)}
+        />
+        <Input
+          type="number"
+          placeholder={t('inventory.po.landedCost', 'Landed cost')}
+          value={landedCost}
+          onChange={(e) => setLandedCost(e.target.value)}
+        />
+        <Input
+          placeholder={t('inventory.po.paymentReference', 'Payment reference')}
+          value={paymentReference}
+          onChange={(e) => setPaymentReference(e.target.value)}
+        />
       </div>
 
       <div className="space-y-2">

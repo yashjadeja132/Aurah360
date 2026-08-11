@@ -10,6 +10,7 @@ import {
   listStaffQuerySchema,
   idParamSchema,
   resetPasswordSchema,
+  deactivateStaffSchema,
 } from '../../validators/user.validator.js';
 
 const router = Router();
@@ -55,14 +56,14 @@ router.post(
 router.post(
   '/:id/deactivate',
   requirePermission(PERMISSIONS.USERS_ACTIVATE, PERMISSIONS.USERS_ALL),
-  validate({ params: idParamSchema }),
+  validate({ params: idParamSchema, body: deactivateStaffSchema }),
   userController.deactivate
 );
 
 router.delete(
   '/:id',
   requirePermission(PERMISSIONS.USERS_DELETE, PERMISSIONS.USERS_ALL),
-  validate({ params: idParamSchema }),
+  validate({ params: idParamSchema, body: deactivateStaffSchema }),
   userController.softDelete
 );
 

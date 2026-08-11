@@ -426,6 +426,12 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.MASTERS_VIEW,
     PERMISSIONS.INVENTORY_TRANSFER_REQUEST,
     PERMISSIONS.INVENTORY_TRANSFER_RECEIVE,
+    // PHARM-GAP-1 — the Reports nav entry gates on REPORTS_VIEW/REPORTS_ALL/DASHBOARD_VIEW only
+    // (no role allowlist on that entry, matching how every other role reaches Reports). Pharmacist
+    // already holds INVENTORY_VIEW and can reach real report data via the API, so the nav link was
+    // simply invisible. Granting the narrow view-level permission (not REPORTS_ALL) closes that gap
+    // without giving pharmacists report management/export capability.
+    PERMISSIONS.REPORTS_VIEW,
   ],
 
   [ROLES.CRM_EXECUTIVE]: [

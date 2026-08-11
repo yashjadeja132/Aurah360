@@ -43,6 +43,27 @@ export function PharmacyOverviewPanel({ onOpenPrescription }) {
 
       <div className="space-y-2">
         <h2 className="font-semibold">
+          {t('pharmacy.dashboard.stockAlerts', 'Stock alerts')}
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            [t('pharmacy.dashboard.lowStock', 'Low stock'), summary.lowStock],
+            [t('pharmacy.dashboard.outOfStock', 'Out of stock'), summary.outOfStock],
+            [t('pharmacy.dashboard.nearExpiry', 'Near expiry'), summary.nearExpiryBatches],
+            [t('pharmacy.dashboard.expired', 'Expired'), summary.expiredBatches],
+            [t('pharmacy.dashboard.pendingTransfers', 'Pending transfers'), summary.pendingTransfers],
+            [t('pharmacy.dashboard.pendingPurchaseOrders', 'Pending GRN'), summary.pendingPurchaseOrders],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-xl border bg-card p-4">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className="mt-1 text-2xl font-semibold">{isLoading ? '—' : value ?? 0}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="font-semibold">
           {t('pharmacy.dashboard.readyToDispense', 'Ready to dispense')}
         </h2>
         {isLoading && <Skeleton className="h-20 w-full" />}

@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Copy, Pill, Plus, Trash2 } from 'lucide-react';
+import { Copy, FilePlus2, Pill, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PERMISSIONS } from '@/constants/rbac';
-import { APP_ROUTES } from '@/constants/routes';
+import { APP_ROUTES, prescriptionEditPath } from '@/constants/routes';
+import { useCreatePrescription } from '@/modules/prescriptions/hooks/usePrescriptions';
 import { INSERT_TARGETS } from '../insertBus';
 import { useInsertTarget } from '../hooks/useInsertTarget';
 
@@ -36,12 +37,17 @@ function readDraft(consultationId) {
 }
 
 /**
- * Scratchpad for prescription lines the doctor accepted from the copilot. It is deliberately a
- * DRAFT and nothing else: it never posts a prescription, so an AI suggestion can never become a
- * dispensable Rx without the doctor re-entering it in the prescription module and signing there.
+ * Scratchpad for prescription lines the doctor accepted from the copilot. Lines start as a
+ * sessionStorage-only DRAFT — nothing here is dispensable — and stay editable until the doctor
+ * explicitly presses "Create prescription from draft" (Fix 5), which posts them as a real
+ * consultation-linked Prescription (DRAFT status) and hands off to the real prescription editor.
+ * That editor still runs the same PrescriptionSafetyPanel/finalize gate as any other prescription,
+ * so an AI suggestion can never become a dispensable Rx without going through it.
  */
 export function PrescriptionDraftPanel({ consultationId, readOnly }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const createPrescription = useCreatePrescription();
   const [lines, setLines] = useState(() => readDraft(consultationId));
 
   useEffect(() => setLines(readDraft(consultationId)), [consultationId]);
@@ -94,6 +100,43 @@ export function PrescriptionDraftPanel({ consultationId, readOnly }) {
       toast.success(t('consultations.rxDraft.copied', 'Draft copied to clipboard'));
     } catch {
       toast.error(t('consultations.rxDraft.copyFailed', 'Could not copy — select the text manually.'));
+    }
+  };
+
+  /**
+   * Fix 5 — turns the sessionStorage-only scratchpad into a real, consultation-linked
+   * Prescription. Goes through the SAME create mutation (and therefore the same
+   * safety-check/finalize gate on PrescriptionEditorPage) that the prescription module's own
+   * "New prescription" flow uses — this never bypasses PrescriptionSafetyPanel, it just lands the
+   * doctor on the real editor with the drafted lines already filled in as an editable DRAFT.
+   */
+  const createRealPrescription = async () => {
+    if (!lines.length) return;
+    const items = lines.map((l) => ({
+      medicineName: l.genericName?.trim() || l.brand?.trim() || t('consultations.rxDraft.untitled', 'Untitled medicine'),
+      genericName: l.genericName || null,
+      strength: l.formStrength || null,
+      dosage: l.dosing || null,
+      duration: l.duration || null,
+      instructions: [l.composition, l.brand].filter(Boolean).join(' · ') || null,
+      remarks: l.cautions || null,
+    }));
+    try {
+      const res = await createPrescription.mutateAsync({ consultationId, items });
+      const newId = res?.data?.prescription?.id;
+      if (newId) {
+        // The draft has become a real prescription — the sessionStorage scratchpad no longer
+        // represents anything unsaved, so it's cleared rather than left to resurrect stale lines.
+        try {
+          window.sessionStorage.removeItem(storageKey(consultationId));
+        } catch {
+          /* ignore */
+        }
+        setLines([]);
+        navigate(`${prescriptionEditPath(newId)}?consultationId=${consultationId}`);
+      }
+    } catch {
+      /* useCreatePrescription already toasts the error */
     }
   };
 
@@ -165,6 +208,16 @@ export function PrescriptionDraftPanel({ consultationId, readOnly }) {
               {t('consultations.rxDraft.copy', 'Copy draft')}
             </Button>
           )}
+          <PermissionGuard permissions={[PERMISSIONS.PRESCRIPTION_CREATE, PERMISSIONS.PRESCRIPTION_ALL]}>
+            <Button
+              size="sm"
+              disabled={lines.length === 0 || createPrescription.isPending}
+              onClick={createRealPrescription}
+            >
+              <FilePlus2 className="h-3.5 w-3.5" />
+              {t('consultations.rxDraft.createPrescription', 'Create prescription from draft')}
+            </Button>
+          </PermissionGuard>
           <PermissionGuard permissions={[PERMISSIONS.PRESCRIPTION_VIEW, PERMISSIONS.PRESCRIPTION_ALL]}>
             <Button asChild size="sm" variant="outline">
               <Link to={`${APP_ROUTES.PRESCRIPTIONS}?consultationId=${consultationId}`}>
