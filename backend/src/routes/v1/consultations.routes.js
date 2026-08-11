@@ -120,6 +120,13 @@ router.post(
 );
 
 router.get(
+  '/:id/patient-photos',
+  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
+  validate({ params: consultationIdParamSchema }),
+  controller.patientPhotos
+);
+
+router.get(
   '/:id/workspace',
   requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
   validate({ params: consultationIdParamSchema }),

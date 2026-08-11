@@ -22,7 +22,6 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
   const [priority, setPriority] = useState('NORMAL');
   const [receptionNotes, setReceptionNotes] = useState('');
   const [symptoms, setSymptoms] = useState('');
-  const [mobile, setMobile] = useState(appointment?.patient?.mobile || '');
   const [privacyPolicy, setPrivacyPolicy] = useState(false);
   const [treatmentConsent, setTreatmentConsent] = useState(false);
   // Step 2 (intake: photos + fee + send to doctor) opens right after a successful check-in.
@@ -40,7 +39,6 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
         priority,
         receptionNotes: receptionNotes || null,
         symptoms: symptoms || null,
-        updateContact: mobile ? { mobile } : undefined,
         consent: {
           privacyPolicy: privacyPolicy || undefined,
           treatmentConsent: treatmentConsent || undefined,
@@ -107,11 +105,6 @@ export function CheckInDialog({ open, onOpenChange, appointment }) {
                 </option>
               ))}
             </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>{t('reception.checkIn.updateMobile')}</Label>
-            <Input value={mobile} onChange={(e) => setMobile(e.target.value)} />
           </div>
 
           <div className="space-y-2">

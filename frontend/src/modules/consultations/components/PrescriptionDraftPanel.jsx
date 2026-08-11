@@ -149,31 +149,53 @@ export function PrescriptionDraftPanel({ consultationId, readOnly }) {
         </p>
       )}
 
+      {/* Compact: medicine + dosing + duration on one row; details tuck into a
+          collapsible so the panel stays small. */}
       {lines.map((line, index) => (
-        <div key={index} className="space-y-2 rounded-lg border p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {FIELDS.map((f) => (
-              <div key={f.key} className="space-y-1">
-                <Label className="text-xs">{f.label}</Label>
-                <Input value={line[f.key]} disabled={readOnly} onChange={patch(index, f.key)} />
-              </div>
-            ))}
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-warning">{t('consultations.rxDraft.cautions', 'Cautions')}</Label>
-            <textarea
-              className="min-h-[52px] w-full rounded-lg border px-3 py-2 text-sm"
-              value={line.cautions}
+        <div key={index} className="rounded-lg border p-2.5">
+          <div className="flex items-center gap-2">
+            <Input
+              className="flex-1 font-medium"
+              placeholder={t('consultations.rxDraft.generic', 'Medicine')}
+              value={line.genericName}
               disabled={readOnly}
-              onChange={patch(index, 'cautions')}
+              onChange={patch(index, 'genericName')}
+            />
+            {!readOnly && (
+              <Button size="sm" variant="ghost" className="shrink-0 px-2" onClick={() => remove(index)}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-2">
+            <Input
+              placeholder={t('consultations.rxDraft.dosing', 'Dosing (e.g. BD, apply twice)')}
+              value={line.dosing}
+              disabled={readOnly}
+              onChange={patch(index, 'dosing')}
+            />
+            <Input
+              placeholder={t('consultations.rxDraft.duration', 'Duration (e.g. 2 weeks)')}
+              value={line.duration}
+              disabled={readOnly}
+              onChange={patch(index, 'duration')}
             />
           </div>
           {!readOnly && (
-            <Button size="sm" variant="ghost" onClick={() => remove(index)}>
-              <Trash2 className="h-3.5 w-3.5" />
-              {t('consultations.rxDraft.remove', 'Remove line')}
-            </Button>
+            <details className="mt-1">
+              <summary className="cursor-pointer text-xs text-muted-foreground">
+                {t('consultations.rxDraft.more', 'More (strength, brand, cautions)')}
+              </summary>
+              <div className="mt-1.5 grid grid-cols-2 gap-2">
+                <Input placeholder={t('consultations.rxDraft.formStrength', 'Form / strength')} value={line.formStrength} onChange={patch(index, 'formStrength')} />
+                <Input placeholder={t('consultations.rxDraft.brand', 'Brand example')} value={line.brand} onChange={patch(index, 'brand')} />
+              </div>
+              {line.cautions ? (
+                <p className="mt-1 text-xs text-warning">⚠ {line.cautions}</p>
+              ) : null}
+            </details>
           )}
+          {readOnly && line.cautions ? <p className="mt-1 text-xs text-warning">⚠ {line.cautions}</p> : null}
         </div>
       ))}
 

@@ -9,6 +9,7 @@ import api from '@/services/api';
 import { consultationsApi } from '@/modules/consultations/api/consultationsApi';
 import { billingApi } from '@/modules/billing/api/billingApi';
 import { receptionApi } from '../api/receptionApi';
+import { BODY_REGIONS } from '@/constants/bodyRegions';
 
 const PHOTO_TYPES = [
   { value: 'BEFORE', label: 'Before' },
@@ -172,12 +173,26 @@ export function IntakeStep({ intake, onDone }) {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
-          <Input
-            value={bodyRegion}
-            onChange={(e) => setBodyRegion(e.target.value)}
-            placeholder="Body area (e.g. forearm)"
+          <Select
+            value={BODY_REGIONS.includes(bodyRegion) || !bodyRegion ? bodyRegion : '__other__'}
+            onChange={(e) => setBodyRegion(e.target.value === '__other__' ? ' ' : e.target.value)}
             className="w-40"
-          />
+          >
+            <option value="">Body area…</option>
+            {BODY_REGIONS.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+            <option value="__other__">Other (type)…</option>
+          </Select>
+          {bodyRegion && !BODY_REGIONS.includes(bodyRegion) && (
+            <Input
+              autoFocus
+              value={bodyRegion.trim() === '' ? '' : bodyRegion}
+              onChange={(e) => setBodyRegion(e.target.value)}
+              placeholder="Type body area"
+              className="w-40"
+            />
+          )}
           <Button
             type="button"
             size="sm"

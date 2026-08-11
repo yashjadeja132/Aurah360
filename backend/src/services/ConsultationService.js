@@ -239,6 +239,30 @@ class ConsultationService {
     return this.#map(doc);
   }
 
+  /**
+   * Every visit's photos for this patient, grouped by consultation (newest first),
+   * so the doctor sees the reception-uploaded intake photos AND all past-visit photos
+   * in one place. The current consultation is flagged.
+   */
+  async patientPhotosGrouped(consultationId) {
+    const current = await this.consultationRepository.findByIdNotDeleted(consultationId);
+    if (!current) throw ApiError.notFound('Consultation not found');
+    const consultations = await this.consultationRepository.findByPatient(current.patientId, { limit: 30 });
+    const groups = [];
+    for (const c of consultations) {
+      const photos = await this.photoRepository.findByConsultation(c._id);
+      if (!photos.length && c._id.toString() !== consultationId) continue;
+      groups.push({
+        consultationId: c._id.toString(),
+        consultationNumber: c.consultationNumber,
+        date: c.startedAt || c.createdAt,
+        isCurrent: c._id.toString() === consultationId,
+        photos: photos.map((p) => p.toSafeObject()),
+      });
+    }
+    return { groups };
+  }
+
   async getWorkspace(id) {
     const consultation = await this.getById(id);
     const soap = await this.soapRepository.findByConsultation(id);

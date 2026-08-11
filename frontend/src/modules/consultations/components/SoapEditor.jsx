@@ -58,24 +58,63 @@ export function SoapEditor({ consultationId, soap, readOnly }) {
   useInsertTarget(INSERT_TARGETS.SOAP_ASSESSMENT, appendInto('assessment'), !readOnly);
   useInsertTarget(INSERT_TARGETS.SOAP_PLAN, appendInto('plan'), !readOnly);
 
+  // Tap-to-add common phrases so the doctor types as little as possible.
   const fields = [
-    { key: 'subjective', label: t('consultations.soap.subjective', 'Subjective') },
-    { key: 'objective', label: t('consultations.soap.objective', 'Objective') },
-    { key: 'assessment', label: t('consultations.soap.assessment', 'Assessment') },
-    { key: 'plan', label: t('consultations.soap.plan', 'Plan') },
+    {
+      key: 'subjective',
+      label: t('consultations.soap.subjective', "Today's note / complaint"),
+      chips: ['Itching present', 'Burning sensation', 'Worse in sun', 'No pain', 'No fever', 'Since months', 'Recurring'],
+    },
+    {
+      key: 'objective',
+      label: t('consultations.soap.objective', 'Examination'),
+      chips: ['Erythematous patches', 'Scaling present', 'Hyperpigmentation', 'Well-demarcated lesion', 'Acne lesions', 'Hair thinning', 'No secondary infection'],
+    },
+    {
+      key: 'assessment',
+      label: t('consultations.soap.assessment', 'Assessment / diagnosis'),
+      chips: [],
+    },
+    {
+      key: 'plan',
+      label: t('consultations.soap.plan', 'Plan / advice'),
+      chips: ['Topical treatment started', 'Oral medication started', 'Advised sun protection', 'Review after 2 weeks', 'Review after 1 month', 'Investigations advised', 'Photo-documentation done'],
+    },
   ];
 
+  const addChip = (key, phrase) => {
+    setForm((prev) => {
+      const next = { ...prev, [key]: appendText(prev[key], phrase) };
+      if (!readOnly) save(next, setDraftStatus);
+      return next;
+    });
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">{t('consultations.soap.title', 'SOAP Notes')}</h3>
+        <h3 className="font-semibold">{t('consultations.soap.title', 'Consultation notes')}</h3>
         {!readOnly && <DraftIndicator status={draftStatus} />}
       </div>
-      {fields.map(({ key, label }) => (
-        <div key={key} className="space-y-1.5">
+      {fields.map(({ key, label, chips }) => (
+        <div key={key} className="space-y-1">
           <Label>{label}</Label>
+          {!readOnly && chips.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {chips.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => addChip(key, c)}
+                  className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs hover:bg-accent"
+                >
+                  + {c}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
-            className="min-h-[100px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+            className="min-h-[64px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
             value={form[key]}
             onChange={onChange(key)}
             disabled={readOnly}

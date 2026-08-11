@@ -34,6 +34,11 @@ class ConsultationController {
     return ApiResponse.success(res, { message: 'AI precheck queued', data: { queued: true } });
   });
 
+  patientPhotos = asyncHandler(async (req, res) => {
+    const data = await this.consultationService.patientPhotosGrouped(req.params.id);
+    return ApiResponse.success(res, { message: 'Patient photos by visit', data });
+  });
+
   getWorkspace = asyncHandler(async (req, res) => {
     const data = await this.consultationService.getWorkspace(req.params.id);
     return ApiResponse.success(res, { data });
