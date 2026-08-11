@@ -12,6 +12,7 @@ import { LoyaltyTiersPanel } from '@/modules/loyalty/components/LoyaltyTiersPane
 import { LoyaltyCampaignsPanel } from '@/modules/loyalty/components/LoyaltyCampaignsPanel';
 import { LoyaltyApprovalsPanel } from '@/modules/loyalty/components/LoyaltyApprovalsPanel';
 import { LoyaltySettingsPanel } from '@/modules/loyalty/components/LoyaltySettingsPanel';
+import { LoyaltyReportsPanel } from '@/modules/loyalty/components/LoyaltyReportsPanel';
 
 /**
  * Permission sets carried over verbatim from the six pages this hub replaces
@@ -36,6 +37,11 @@ const SETTINGS_PERMS = [
 ];
 const CAMPAIGNS_PERMS = [PERMISSIONS.LOYALTY_CAMPAIGNS_MANAGE, PERMISSIONS.LOYALTY_ALL];
 const APPROVALS_PERMS = [PERMISSIONS.LOYALTY_ADJUST_APPROVE, PERMISSIONS.LOYALTY_ALL];
+const REPORTS_PERMS = [
+  PERMISSIONS.LOYALTY_REPORTS_VIEW,
+  PERMISSIONS.LOYALTY_REPORTS_EXPORT,
+  PERMISSIONS.LOYALTY_ALL,
+];
 
 /** Union of every tab gate — what it takes to see the hub at all. */
 export const LOYALTY_HUB_PERMISSIONS = [
@@ -45,6 +51,7 @@ export const LOYALTY_HUB_PERMISSIONS = [
     ...SETTINGS_PERMS,
     ...CAMPAIGNS_PERMS,
     ...APPROVALS_PERMS,
+    ...REPORTS_PERMS,
   ]),
 ];
 
@@ -66,6 +73,7 @@ export default function LoyaltyHubPage() {
   const canViewSettings = hasAnyPermission(perms, SETTINGS_PERMS);
   const canManageCampaigns = hasAnyPermission(perms, CAMPAIGNS_PERMS);
   const canApproveAdjustments = hasAnyPermission(perms, APPROVALS_PERMS);
+  const canViewReports = hasAnyPermission(perms, REPORTS_PERMS);
 
   const TABS = useMemo(
     () => [
@@ -74,9 +82,18 @@ export default function LoyaltyHubPage() {
       ...(canViewSettings ? [{ id: 'tiers', label: t('loyalty.hub.tabs.tiers', 'Tiers') }] : []),
       ...(canManageCampaigns ? [{ id: 'campaigns', label: t('loyalty.hub.tabs.campaigns', 'Campaigns') }] : []),
       ...(canApproveAdjustments ? [{ id: 'approvals', label: t('loyalty.hub.tabs.approvals', 'Approvals') }] : []),
+      ...(canViewReports ? [{ id: 'reports', label: t('loyalty.hub.tabs.reports', 'Reports') }] : []),
       ...(canViewSettings ? [{ id: 'settings', label: t('loyalty.hub.tabs.settings', 'Settings') }] : []),
     ],
-    [t, canViewOverview, canViewRules, canViewSettings, canManageCampaigns, canApproveAdjustments]
+    [
+      t,
+      canViewOverview,
+      canViewRules,
+      canViewSettings,
+      canManageCampaigns,
+      canApproveAdjustments,
+      canViewReports,
+    ]
   );
 
   const requested = searchParams.get('tab');
@@ -144,6 +161,11 @@ export default function LoyaltyHubPage() {
         {tab === 'approvals' && (
           <PermissionGuard permissions={APPROVALS_PERMS}>
             <LoyaltyApprovalsPanel />
+          </PermissionGuard>
+        )}
+        {tab === 'reports' && (
+          <PermissionGuard permissions={REPORTS_PERMS}>
+            <LoyaltyReportsPanel />
           </PermissionGuard>
         )}
         {tab === 'settings' && (

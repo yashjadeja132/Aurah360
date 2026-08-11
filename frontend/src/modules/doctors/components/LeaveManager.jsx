@@ -11,12 +11,15 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/common/EmptyState';
 import { leaveFormSchema } from '../validation/doctorSchema';
 import { useDoctorLeaves, useDoctorMutations } from '../hooks/useDoctors';
+import { RosterImpactPanel } from './RosterImpactPanel';
 
 export function LeaveManager({ doctorId, branches = [] }) {
   const { t } = useTranslation();
   const { data: leaves = [], isLoading } = useDoctorLeaves(doctorId);
   const { createLeave, deleteLeave } = useDoctorMutations();
   const [open, setOpen] = useState(false);
+  const [impactedAppointments, setImpactedAppointments] = useState([]);
+  const [pendingValues, setPendingValues] = useState(null);
 
   const {
     register,
@@ -34,23 +37,39 @@ export function LeaveManager({ doctorId, branches = [] }) {
     },
   });
 
-  const onSubmit = async (values) => {
+  const submitLeave = async (values, overrideReason = null) => {
+    const payload = {
+      ...values,
+      branchId: values.branchId || null,
+      reason: values.reason || null,
+    };
+    if (overrideReason) {
+      payload.acknowledgeOverride = true;
+      payload.overrideReason = overrideReason;
+    }
     try {
-      await createLeave.mutateAsync({
-        id: doctorId,
-        payload: {
-          ...values,
-          branchId: values.branchId || null,
-          reason: values.reason || null,
-        },
-      });
-      toast.success(t('doctors.leaveManager.toastAdded', 'Leave added'));
+      const result = await createLeave.mutateAsync({ id: doctorId, payload });
+      setImpactedAppointments([]);
+      setPendingValues(null);
+      toast.success(
+        result?.overridden
+          ? t('doctors.leaveManager.toastAddedWithOverride', 'Leave added (override recorded)')
+          : t('doctors.leaveManager.toastAdded', 'Leave added')
+      );
       reset();
       setOpen(false);
     } catch (err) {
+      const impacted = err.response?.data?.errors?.impactedAppointments;
+      if (err.response?.status === 409 && Array.isArray(impacted) && impacted.length) {
+        setImpactedAppointments(impacted);
+        setPendingValues(values);
+        return;
+      }
       toast.error(err.response?.data?.message || t('doctors.leaveManager.failed', 'Failed'));
     }
   };
+
+  const onSubmit = (values) => submitLeave(values);
 
   return (
     <div className="space-y-4">
@@ -96,6 +115,18 @@ export function LeaveManager({ doctorId, branches = [] }) {
           </div>
           <Button type="submit" disabled={createLeave.isPending}>{t('doctors.leaveManager.saveLeave', 'Save leave')}</Button>
         </form>
+      )}
+
+      {impactedAppointments.length > 0 && pendingValues && (
+        <RosterImpactPanel
+          impactedAppointments={impactedAppointments}
+          isSubmitting={createLeave.isPending}
+          onOverride={(reason) => submitLeave(pendingValues, reason)}
+          onCancel={() => {
+            setImpactedAppointments([]);
+            setPendingValues(null);
+          }}
+        />
       )}
 
       {isLoading ? (

@@ -7,6 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasAnyPermission } from '@/utils/permissions';
+import { PERMISSIONS } from '@/constants/rbac';
 import {
   useDispense,
   useDispenseItems,
@@ -14,9 +18,14 @@ import {
 } from '@/modules/inventory/hooks/useInventory';
 import { APP_ROUTES } from '@/constants/routes';
 
+// Deliberately checked on its own — PHARMACY_ALL must NOT confer this (see rbac.js).
+const SUBSTITUTE_PERMS = [PERMISSIONS.PHARMACY_SUBSTITUTE];
+
 export default function DispenseScreenPage() {
   const { t } = useTranslation();
   const { id } = useParams();
+  const { user } = useAuth();
+  const canSubstitute = hasAnyPermission(user?.permissions, SUBSTITUTE_PERMS);
   const { data: dispense, isLoading } = useDispense(id);
   const mutate = useDispenseItems(id);
   const { data: invData } = useInventoryItems({ itemType: 'MEDICINE', limit: 100 });
@@ -36,6 +45,9 @@ export default function DispenseScreenPage() {
         inventoryItemId: it.inventoryItemId || '',
         batchNumber: it.batchNumber || '',
         quantity: Math.max(0, (it.quantityRequested || 0) - (it.quantityDispensed || 0)),
+        isSubstituted: Boolean(it.substitution?.isSubstituted),
+        substitutedMedicineId: it.substitution?.substitutedMedicineId || '',
+        substitutionReason: it.substitution?.reason || '',
       }))
     );
   }, [dispense]);
@@ -45,7 +57,13 @@ export default function DispenseScreenPage() {
 
   const completed = dispense.status === 'COMPLETED';
 
+  // Block dispensing any line where substitution is toggled on but the mandatory reason is empty.
+  const blockedBySubstitution = lines.some(
+    (l) => l.quantity > 0 && l.inventoryItemId && l.isSubstituted && !l.substitutionReason?.trim()
+  );
+
   const submit = (partial = false) => {
+    if (blockedBySubstitution) return;
     const payloadItems = lines
       .filter((l) => l.quantity > 0 && l.inventoryItemId)
       .map((l) => ({
@@ -53,6 +71,15 @@ export default function DispenseScreenPage() {
         inventoryItemId: l.inventoryItemId,
         batchNumber: l.batchNumber || undefined,
         quantity: partial ? Math.min(1, l.quantity) : l.quantity,
+        ...(l.isSubstituted
+          ? {
+              substitution: {
+                isSubstituted: true,
+                substitutedMedicineId: l.substitutedMedicineId || undefined,
+                reason: l.substitutionReason,
+              },
+            }
+          : {}),
       }));
     if (!payloadItems.length) return;
     mutate.mutate({ items: payloadItems });
@@ -108,29 +135,30 @@ export default function DispenseScreenPage() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <Label>{t('pharmacy.dispense.medicineStock', 'Medicine / stock')}</Label>
-                  <Select
+                  <SearchableCombobox
                     disabled={completed}
                     value={line.inventoryItemId}
-                    onChange={(e) => {
+                    onChange={(id) => {
                       const next = [...lines];
                       next[idx] = {
                         ...next[idx],
-                        inventoryItemId: e.target.value,
+                        inventoryItemId: id,
                         batchNumber:
-                          invItems.find((i) => i.id === e.target.value)?.batches?.[0]
-                            ?.batchNumber || '',
+                          invItems.find((i) => i.id === id)?.batches?.[0]?.batchNumber || '',
                       };
                       setLines(next);
                     }}
-                  >
-                    <option value="">{t('pharmacy.dispense.selectItem', 'Select item')}</option>
-                    {invItems.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name} · {t('pharmacy.dispense.stock', 'stock')} {i.currentStock}
-                        {i.stockStatus === 'LOW' ? ` · ${t('pharmacy.dispense.low', 'LOW')}` : ''}
-                      </option>
-                    ))}
-                  </Select>
+                    options={invItems}
+                    filterKeys={['name']}
+                    renderLabel={(i) => i.name}
+                    renderSublabel={(i) =>
+                      `${t('pharmacy.dispense.stock', 'stock')} ${i.currentStock}${
+                        i.stockStatus === 'LOW' ? ` · ${t('pharmacy.dispense.low', 'LOW')}` : ''
+                      }`
+                    }
+                    placeholder={t('pharmacy.dispense.selectItem', 'Select item')}
+                    emptyText={t('pharmacy.dispense.selectItem', 'Select item')}
+                  />
                 </div>
                 <div>
                   <Label>{t('pharmacy.dispense.batch', 'Batch')}</Label>
@@ -170,19 +198,110 @@ export default function DispenseScreenPage() {
                   />
                 </div>
               </div>
+
+              {canSubstitute && (
+                <div className="space-y-2 rounded-lg border border-dashed p-3">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      disabled={completed}
+                      checked={line.isSubstituted}
+                      onChange={(e) => {
+                        const next = [...lines];
+                        next[idx] = {
+                          ...next[idx],
+                          isSubstituted: e.target.checked,
+                          ...(e.target.checked
+                            ? {}
+                            : { substitutedMedicineId: '', substitutionReason: '' }),
+                        };
+                        setLines(next);
+                      }}
+                    />
+                    {t('pharmacy.dispense.substitute', 'Substitute')}
+                  </label>
+
+                  {line.isSubstituted && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label>{t('pharmacy.dispense.substituteWith', 'Replacement medicine')}</Label>
+                        <SearchableCombobox
+                          disabled={completed}
+                          value={line.substitutedMedicineId}
+                          onChange={(id) => {
+                            const next = [...lines];
+                            next[idx] = { ...next[idx], substitutedMedicineId: id };
+                            setLines(next);
+                          }}
+                          options={invItems}
+                          filterKeys={['name']}
+                          renderLabel={(i) => i.name}
+                          renderSublabel={(i) => `${t('pharmacy.dispense.stock', 'stock')} ${i.currentStock}`}
+                          placeholder={t('pharmacy.dispense.selectItem', 'Select item')}
+                          emptyText={t('pharmacy.dispense.selectItem', 'Select item')}
+                        />
+                      </div>
+                      <div>
+                        <Label>{t('pharmacy.dispense.substitutionReason', 'Reason (required)')}</Label>
+                        <Input
+                          disabled={completed}
+                          value={line.substitutionReason}
+                          onChange={(e) => {
+                            const next = [...lines];
+                            next[idx] = { ...next[idx], substitutionReason: e.target.value };
+                            setLines(next);
+                          }}
+                        />
+                        {!line.substitutionReason?.trim() && (
+                          <p className="mt-1 text-xs text-destructive">
+                            {t(
+                              'pharmacy.dispense.substitutionReasonRequired',
+                              'A reason is required when substituting.'
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {Boolean(dispense.items?.[idx]?.substitution?.isSubstituted) && (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {t('pharmacy.dispense.substitutedNotice', 'Substituted')}:{' '}
+                  {dispense.items[idx].substitution.originalMedicineName || line.medicineName} →{' '}
+                  {dispense.items[idx].substitution.substitutedMedicineName || '—'} —{' '}
+                  {t('pharmacy.dispense.substitutionReasonLabel', 'reason')}:{' '}
+                  {dispense.items[idx].substitution.reason || '—'}
+                </p>
+              )}
             </div>
           );
         })}
       </div>
 
       {!completed && (
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={mutate.isPending} onClick={() => submit(false)}>
-            {t('pharmacy.dispense.fullDispense', 'Full dispense')}
-          </Button>
-          <Button variant="outline" disabled={mutate.isPending} onClick={() => submit(true)}>
-            {t('pharmacy.dispense.partialUnit', 'Partial (1 unit)')}
-          </Button>
+        <div className="space-y-2">
+          {blockedBySubstitution && (
+            <p className="text-sm text-destructive">
+              {t(
+                'pharmacy.dispense.substitutionBlocked',
+                'Add a reason for every substituted line before dispensing.'
+              )}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={mutate.isPending || blockedBySubstitution} onClick={() => submit(false)}>
+              {t('pharmacy.dispense.fullDispense', 'Full dispense')}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={mutate.isPending || blockedBySubstitution}
+              onClick={() => submit(true)}
+            >
+              {t('pharmacy.dispense.partialUnit', 'Partial (1 unit)')}
+            </Button>
+          </div>
         </div>
       )}
     </section>

@@ -125,6 +125,8 @@ const appointmentSchema = new mongoose.Schema(
     },
     cancellationReason: { type: String, default: null },
     cancelledAt: { type: Date, default: null },
+    /** §3 no-show reason — optional free text captured when marking NO_SHOW. */
+    noShowReason: { type: String, default: null },
     completedAt: { type: Date, default: null },
     /** Appointment reminder dedup — set once a reminder scan has dispatched it, to prevent
      *  duplicate sends on subsequent repeatable-job runs (see queues/appointmentReminderJobs.js). */
@@ -230,6 +232,7 @@ appointmentSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     cancellationReason: this.cancellationReason,
     cancelledAt: this.cancelledAt,
     completedAt: this.completedAt,
+    noShowReason: this.noShowReason,
     requiresApproval: this.requiresApproval,
     approvalDecision: this.approvalDecision,
     approvedBy: this.approvedBy ? this.approvedBy.toString() : null,

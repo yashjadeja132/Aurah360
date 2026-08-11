@@ -29,7 +29,9 @@ export function useDoctorTreatmentPlans(doctorId, params = {}) {
       const res = await treatmentPlansApi.listByDoctor({ doctorId, ...params });
       return res.data || [];
     },
-    enabled: Boolean(doctorId),
+    // undefined means "let the backend infer the caller's own doctor profile" (DOCTOR role);
+    // only an explicit '' (nothing picked yet, non-doctor staff view) disables the query.
+    enabled: doctorId !== '',
   });
 }
 
@@ -165,6 +167,56 @@ export function useRejectPlan(id) {
       qc.invalidateQueries({ queryKey: QUERY_KEYS.TREATMENT_PLAN_DETAIL(id) });
     },
     onError: (e) => toast.error(errMsg(e, 'Reject failed')),
+  });
+}
+
+/** Cross-patient "Treatment plans awaiting approval" queue — mirrors useLabOrderReviewQueue. */
+export function usePendingApprovalQueue(params = {}) {
+  return useQuery({
+    queryKey: ['treatment-plans', 'pending-approval', params],
+    queryFn: async () => {
+      const res = await treatmentPlansApi.pendingApprovalQueue(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
+export function useHoldPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (note) => treatmentPlansApi.hold(id, note),
+    onSuccess: () => {
+      toast.success('Plan held for later');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: ['treatment-plans', 'pending-approval'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Hold failed')),
+  });
+}
+
+export function useUnholdPlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => treatmentPlansApi.unhold(id),
+    onSuccess: () => {
+      toast.success('Hold cleared');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: ['treatment-plans', 'pending-approval'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Action failed')),
+  });
+}
+
+export function useEscalatePlan(id) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => treatmentPlansApi.escalate(id, payload),
+    onSuccess: () => {
+      toast.success('Plan escalated for senior review');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: ['treatment-plans', 'pending-approval'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Escalate failed')),
   });
 }
 

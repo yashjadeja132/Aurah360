@@ -1,6 +1,6 @@
 import AuditLogRepository from '../repositories/AuditLogRepository.js';
 import logger from '../libs/logger.js';
-import { AUDIT_ACTIONS } from '../enums/auditAction.js';
+import { AUDIT_ACTIONS, AUDIT_ACTIONS_BY_FAMILY } from '../enums/auditAction.js';
 
 /**
  * NFR-018 — METADATA REDACTION POLICY.
@@ -120,6 +120,17 @@ class AuditService {
     const and = [];
 
     if (query.action) filter.action = query.action;
+    // Family narrows further: if both are given, `action` must also belong to the family, or the
+    // combination is contradictory and should return nothing rather than silently widen to
+    // the whole family (which would ignore the caller's explicit `action`).
+    if (query.family) {
+      const familyActions = AUDIT_ACTIONS_BY_FAMILY[query.family] || [];
+      if (query.action) {
+        filter.action = familyActions.includes(query.action) ? query.action : { $in: [] };
+      } else {
+        filter.action = { $in: familyActions };
+      }
+    }
     if (query.actorId) filter.actorId = query.actorId;
     if (query.targetUserId) filter.targetUserId = query.targetUserId;
     if (query.resourceType) filter.resourceType = query.resourceType;
@@ -180,6 +191,7 @@ class AuditService {
       metadata: {
         filter: {
           action: query.action || null,
+          family: query.family || null,
           actorId: query.actorId || null,
           targetUserId: query.targetUserId || null,
           resourceType: query.resourceType || null,

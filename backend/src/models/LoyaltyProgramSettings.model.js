@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 
+const REDEMPTION_IDENTITY_CONFIRMATION_LIST = ['NONE', 'IN_PERSON', 'OTP'];
+const EXPIRED_REDEMPTION_RESTORE_POLICY_LIST = ['RESTORE_SHORT_EXPIRY', 'FORFEIT'];
+
 /**
  * LOY-001/Section 3.3 — global program settings, versioned like Organization.model.js's
  * branchOverridableFields pattern. Each save creates a NEW version (effective-dated); the
@@ -32,6 +35,38 @@ const loyaltyProgramSettingsSchema = new mongoose.Schema(
     /** Category/item codes excluded from the redeemable base (e.g. pharmacy medicines, taxes). */
     excludedRedemptionCategories: { type: [String], default: [] },
     earnOnRedeemedPortion: { type: Boolean, default: false },
+
+    /**
+     * LOY-005 — how a redemption at the point of sale confirms the points actually belong to the
+     * person present. NONE = no gate (legacy behaviour); IN_PERSON = staff must tick that they
+     * checked the patient's identity (front-desk visual/ID check, no OTP infra needed);
+     * OTP = an OTP was sent to the patient and verified before redeeming. OTP *delivery* is out of
+     * scope for this pass — LoyaltyLedgerService.redeem() only validates the `otpVerified` flag
+     * the caller supplies; wiring an actual SMS/WhatsApp OTP send-and-verify flow is left to the
+     * module that adds one.
+     */
+    redemptionIdentityConfirmation: {
+      type: String,
+      enum: ['NONE', 'IN_PERSON', 'OTP'],
+      // Defaults to NONE (legacy/no-gate behaviour) — this is a new opt-in control, not a
+      // retroactive requirement. Defaulting to IN_PERSON silently broke every existing
+      // redemption call site (smoke scripts, pre-existing tests, the money-safety concurrency
+      // suite) that had no reason to know this flag existed. Admin turns it on deliberately.
+      default: 'NONE',
+    },
+
+    /**
+     * LOY-006 — when a refund re-credits previously-redeemed points that have since expired
+     * (DEBIT_EXPIRY already ran), what happens to the re-credit: RESTORE_SHORT_EXPIRY re-credits
+     * them with a fresh short expiry (see BillingService's refund path) so the patient isn't
+     * simply denied the refund of their own points; FORFEIT does not re-credit expired points at
+     * all — only points that had not yet expired are restored, with their original expiry.
+     */
+    expiredRedemptionRestorePolicy: {
+      type: String,
+      enum: ['RESTORE_SHORT_EXPIRY', 'FORFEIT'],
+      default: 'RESTORE_SHORT_EXPIRY',
+    },
 
     tiersEnabled: { type: Boolean, default: false },
     /** Owner approval required for rule-value changes above this % delta from current value.
@@ -72,6 +107,8 @@ loyaltyProgramSettingsSchema.methods.toSafeObject = function toSafeObject(extra 
     expiryReminderDaysBefore: this.expiryReminderDaysBefore,
     excludedRedemptionCategories: this.excludedRedemptionCategories,
     earnOnRedeemedPortion: this.earnOnRedeemedPortion,
+    redemptionIdentityConfirmation: this.redemptionIdentityConfirmation,
+    expiredRedemptionRestorePolicy: this.expiredRedemptionRestorePolicy,
     tiersEnabled: this.tiersEnabled,
     ruleChangeApprovalThresholdPercent: this.ruleChangeApprovalThresholdPercent,
     manualAdjustmentPointLimitsByRole: this.manualAdjustmentPointLimitsByRole

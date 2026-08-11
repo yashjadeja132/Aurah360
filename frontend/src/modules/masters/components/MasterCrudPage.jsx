@@ -6,13 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Pagination } from '@/components/common/Pagination';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PERMISSIONS } from '@/constants/rbac';
-import { MasterForm } from './MasterForm';
+import { MasterDrawer } from './MasterDrawer';
 import { useMasterActive, useMasterList, useMasterMutations } from '../hooks/useMasters';
 
 /**
@@ -157,7 +156,11 @@ export function MasterCrudPage({ config }) {
             </TableHeader>
             <TableBody>
               {data.items.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer"
+                  onClick={() => openEdit(row)}
+                >
                   {config.columns.map((col) => (
                     <TableCell key={col.key}>
                       {col.key === 'color' && row.color ? (
@@ -175,27 +178,10 @@ export function MasterCrudPage({ config }) {
                       {row.isActive ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-2">
                       <PermissionGuard permissions={[PERMISSIONS.MASTERS_EDIT, PERMISSIONS.MASTERS_ALL]}>
                         <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>Edit</Button>
-                        {row.isActive ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => mutations.deactivate.mutateAsync(row.id).then(() => toast.success('Deactivated')).catch((e) => toast.error(e.response?.data?.message || 'Failed'))}
-                          >
-                            Deactivate
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => mutations.activate.mutateAsync(row.id).then(() => toast.success('Activated')).catch((e) => toast.error(e.response?.data?.message || 'Failed'))}
-                          >
-                            Activate
-                          </Button>
-                        )}
                       </PermissionGuard>
                       <PermissionGuard permissions={[PERMISSIONS.MASTERS_DELETE, PERMISSIONS.MASTERS_ALL]}>
                         {!row.isSystem && (
@@ -216,22 +202,16 @@ export function MasterCrudPage({ config }) {
         onPageChange={(page) => setFilters((p) => ({ ...p, page }))}
       />
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editing ? 'Edit' : 'Create'} {config.title.slice(0, -1)}</DialogTitle>
-            <DialogDescription>Values are stored in MongoDB masters — not hardcoded.</DialogDescription>
-          </DialogHeader>
-          <MasterForm
-            isService={config.isService}
-            categories={categories}
-            defaultValues={editing || undefined}
-            onCancel={() => setDialogOpen(false)}
-            isSubmitting={mutations.create.isPending || mutations.update.isPending}
-            onSubmit={handleSubmit}
-          />
-        </DialogContent>
-      </Dialog>
+      <MasterDrawer
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        master={editing}
+        config={config}
+        categories={categories}
+        onSubmit={handleSubmit}
+        isSubmitting={mutations.create.isPending || mutations.update.isPending}
+        mutations={mutations}
+      />
     </section>
   );
 }

@@ -60,6 +60,9 @@ export const prescriptionsApi = {
   listMedicines(params) {
     return api.get('/prescriptions/medicines', { params }).then((res) => res.data);
   },
+  createMedicine(payload) {
+    return api.post('/prescriptions/medicines', payload).then((res) => res.data);
+  },
 };
 
 export default prescriptionsApi;

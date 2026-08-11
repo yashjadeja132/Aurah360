@@ -13,6 +13,7 @@ import {
   OwnerLandingPage,
 
   DoctorMyDayPage,
+  NurseTodayPage,
   StaffListPage,
   StaffCreatePage,
   StaffDetailPage,
@@ -28,6 +29,10 @@ import {
   ResourcesPage,
   PrivacyAdminPage,
   AiGovernancePage,
+  IntegrationsPage,
+  OrganizationProfilePage,
+  AuditLogPage,
+  ConsultationTemplatesPage,
   DoctorListPage,
   DoctorCreatePage,
   DoctorDetailPage,
@@ -52,10 +57,12 @@ import {
   ConsultationListPage,
   ConsultationWorkspacePage,
   ReportReviewQueuePage,
+  FollowUpsQueuePage,
   PrescriptionListPage,
   PrescriptionEditorPage,
   PrescriptionPrintPage,
   TreatmentPlanListPage,
+  TreatmentPlanApprovalQueuePage,
   TreatmentPlanBuilderPage,
   TreatmentPlanPrintPage,
   ProtocolLibraryPage,
@@ -64,6 +71,7 @@ import {
   CashierDashboardPage,
   CashClosePage,
   DiscountApprovalQueuePage,
+  RefundApprovalQueuePage,
   DuePaymentsPage,
   InvoiceDetailPage,
   InvoicePrintPage,
@@ -75,6 +83,7 @@ import {
   SessionPrintPage,
   PrescriptionQueuePage,
   DispenseScreenPage,
+  DirectSalePage,
   InventoryTransfersPage,
   StockLedgerPage,
   PurchaseOrdersPage,
@@ -218,6 +227,17 @@ function TreatmentPlanPermission({ children }) {
   return (
     <PermissionGuard
       permissions={[PERMISSIONS.TREATMENT_PLAN_VIEW, PERMISSIONS.TREATMENT_PLAN_ALL]}
+      fallback="redirect"
+    >
+      {children}
+    </PermissionGuard>
+  );
+}
+
+function TreatmentPlanApprovePermission({ children }) {
+  return (
+    <PermissionGuard
+      permissions={[PERMISSIONS.TREATMENT_PLAN_APPROVE, PERMISSIONS.TREATMENT_PLAN_ALL]}
       fallback="redirect"
     >
       {children}
@@ -422,6 +442,12 @@ export const router = createBrowserRouter([
             element: <AnalyticsPermission><OwnerLandingPage /></AnalyticsPermission>,
           },
           {
+            // Nurse's post-login landing — the queue they work from. Same queue.view gate as the
+            // full queue board; there is no dedicated nurse permission for it.
+            path: APP_ROUTES.NURSE_TODAY,
+            element: <QueuePermission><NurseTodayPage /></QueuePermission>,
+          },
+          {
             path: APP_ROUTES.STAFF,
             element: <StaffPermission><StaffListPage /></StaffPermission>,
           },
@@ -621,6 +647,15 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // §5 — keep above CONSULTATION_WORKSPACE so 'follow-ups' is not read as an id.
+            path: APP_ROUTES.FOLLOW_UPS_QUEUE,
+            element: (
+              <ConsultationPermission>
+                <FollowUpsQueuePage />
+              </ConsultationPermission>
+            ),
+          },
+          {
             path: APP_ROUTES.CONSULTATION_WORKSPACE,
             element: (
               <ConsultationPermission>
@@ -682,6 +717,15 @@ export const router = createBrowserRouter([
               <TreatmentPlanPermission>
                 <TreatmentPlanPrintPage />
               </TreatmentPlanPermission>
+            ),
+          },
+          {
+            // Must stay above TREATMENT_PLAN_EDIT so 'approval-queue' is not read as a plan id.
+            path: APP_ROUTES.TREATMENT_PLAN_APPROVAL_QUEUE,
+            element: (
+              <TreatmentPlanApprovePermission>
+                <TreatmentPlanApprovalQueuePage />
+              </TreatmentPlanApprovePermission>
             ),
           },
           {
@@ -756,6 +800,17 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: APP_ROUTES.BILLING_REFUND_APPROVALS,
+            element: (
+              <PermissionGuard
+                permissions={[PERMISSIONS.BILLING_REFUND_APPROVE, PERMISSIONS.BILLING_ALL]}
+                fallback="redirect"
+              >
+                <RefundApprovalQueuePage />
+              </PermissionGuard>
+            ),
+          },
+          {
             // Hub route guard is deliberately broad — each tab self-gates on the permission
             // its former standalone route required, and the panels re-check on render.
             path: APP_ROUTES.TREATMENT_DASHBOARD,
@@ -785,11 +840,22 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            // Widened beyond TreatmentSessionPermission so NURSE — who holds patch_test.view /
+            // patch_test.record but no treatment_session.* grant — can reach the patch-test
+            // register the same as a technician or doctor can.
             path: APP_ROUTES.TREATMENT_SAFETY,
             element: (
-              <TreatmentSessionPermission>
+              <PermissionGuard
+                permissions={[
+                  PERMISSIONS.TREATMENT_SESSION_VIEW,
+                  PERMISSIONS.TREATMENT_SESSION_ALL,
+                  PERMISSIONS.PATCH_TEST_VIEW,
+                  PERMISSIONS.PATCH_TEST_RECORD,
+                ]}
+                fallback="redirect"
+              >
                 <TreatmentSafetyPage />
-              </TreatmentSessionPermission>
+              </PermissionGuard>
             ),
           },
           {
@@ -838,6 +904,16 @@ export const router = createBrowserRouter([
             element: (
               <PharmacyPermission>
                 <DispenseScreenPage />
+              </PharmacyPermission>
+            ),
+          },
+          {
+            // Standalone route for the direct/retail sale flow — same dual
+            // pattern as PHARMACY_QUEUE: a hub tab AND its own route.
+            path: APP_ROUTES.PHARMACY_SALES,
+            element: (
+              <PharmacyPermission>
+                <DirectSalePage />
               </PharmacyPermission>
             ),
           },
@@ -1119,6 +1195,49 @@ export const router = createBrowserRouter([
                     fallback="redirect"
                   >
                     <AiGovernancePage />
+                  </PermissionGuard>
+                ),
+              },
+              {
+                path: 'integrations',
+                element: (
+                  <PermissionGuard
+                    permissions={[
+                      PERMISSIONS.AI_GOVERNANCE_VIEW,
+                      PERMISSIONS.AI_GOVERNANCE_MANAGE,
+                      PERMISSIONS.NOTIFICATIONS_VIEW,
+                      PERMISSIONS.NOTIFICATIONS_ALL,
+                    ]}
+                    fallback="redirect"
+                  >
+                    <IntegrationsPage />
+                  </PermissionGuard>
+                ),
+              },
+              {
+                path: 'organization',
+                element: (
+                  <PermissionGuard
+                    permissions={[PERMISSIONS.BRANCHES_VIEW, PERMISSIONS.BRANCHES_ALL]}
+                    fallback="redirect"
+                  >
+                    <OrganizationProfilePage />
+                  </PermissionGuard>
+                ),
+              },
+              {
+                path: 'audit-log',
+                element: (
+                  <PermissionGuard permissions={[PERMISSIONS.AUDIT_VIEW]} fallback="redirect">
+                    <AuditLogPage />
+                  </PermissionGuard>
+                ),
+              },
+              {
+                path: 'consultation-templates',
+                element: (
+                  <PermissionGuard permissions={[PERMISSIONS.CONSULTATION_TEMPLATE_MANAGE]} fallback="redirect">
+                    <ConsultationTemplatesPage />
                   </PermissionGuard>
                 ),
               },

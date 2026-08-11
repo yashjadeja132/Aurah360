@@ -28,6 +28,9 @@ export const createOfferSchema = z.object({
   branchIds: z.array(objectId).optional(),
   serviceIds: z.array(objectId).optional(),
   audience: z.enum(['ALL', 'NEW_PATIENTS', 'EXISTING_PATIENTS', 'VIP']).optional(),
+  requiresMarketingConsent: z.boolean().optional(),
+  /** Tier names, referencing LoyaltyTier.model.js. Empty/omitted = no tier targeting. */
+  targetTiers: z.array(z.string()).optional(),
   terms: localizedText.optional(),
   bookingCta: z.string().max(60).optional(),
 });

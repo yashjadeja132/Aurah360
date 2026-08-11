@@ -10,6 +10,7 @@ import {
   PAYMENT_STATUS_LABELS,
   formatMoney,
 } from '@/modules/billing/constants';
+import { usePatientBalance, usePatientLedger } from '@/modules/loyalty/hooks/useLoyalty';
 
 export default function InvoicePrintPage() {
   const { t } = useTranslation();
@@ -25,6 +26,19 @@ export default function InvoicePrintPage() {
   }, [id]);
 
   const invoice = data?.invoice;
+
+  // §6 — receipt must show redeemed + earned + remaining loyalty balance. Earned points on THIS
+  // invoice are credited asynchronously (E1/E2 event listeners), so they are looked up from the
+  // patient's ledger by sourceRefId rather than assumed to exist yet; remaining balance is the
+  // patient's live redeemable balance at the moment the receipt is viewed/printed.
+  const patientId = invoice?.patient?.id || invoice?.patientId;
+  const { data: loyaltyBalance } = usePatientBalance(patientId || undefined);
+  const { data: loyaltyLedger } = usePatientLedger(patientId || undefined, { sourceRefId: id, limit: 20 });
+  const earnedEntries = (loyaltyLedger?.items || loyaltyLedger || []).filter?.(
+    (entry) => entry?.sourceRefId === id && entry?.entryType === 'CREDIT'
+  ) || [];
+  const earnedPoints = earnedEntries.reduce((sum, e) => sum + (Number(e.points) || 0), 0);
+  const showLoyaltySummary = Boolean(patientId) && (invoice?.loyaltyRedemption || loyaltyBalance);
 
   if (error) return <p className="p-6 text-sm text-destructive">{error}</p>;
   if (!invoice) return <p className="p-6 text-sm text-muted-foreground">{t('billing.print.preparing', 'Preparing print…')}</p>;
@@ -142,6 +156,34 @@ export default function InvoicePrintPage() {
             <span>{formatMoney(invoice.balanceAmount)}</span>
           </div>
         </div>
+
+        {showLoyaltySummary && (
+          <section className="rounded-lg border border-dashed p-3">
+            <h2 className="mb-1 font-semibold">{t('billing.print.loyalty', 'Loyalty points')}</h2>
+            {invoice.loyaltyRedemption ? (
+              <p>
+                {t('billing.print.loyaltyRedeemed', 'Redeemed: {{points}} pts = {{value}}', {
+                  points: invoice.loyaltyRedemption.points,
+                  value: formatMoney(invoice.loyaltyRedemption.valueInr),
+                })}
+              </p>
+            ) : (
+              <p>{t('billing.print.loyaltyNoneRedeemed', 'Redeemed: none')}</p>
+            )}
+            <p>
+              {earnedPoints > 0
+                ? t('billing.print.loyaltyEarned', 'Earned on this invoice: {{points}} pts', { points: earnedPoints })
+                : t('billing.print.loyaltyEarnedPending', 'Earned on this invoice: pending (credited shortly after payment)')}
+            </p>
+            {loyaltyBalance && (
+              <p>
+                {t('billing.print.loyaltyRemaining', 'Remaining balance: {{balance}} pts', {
+                  balance: loyaltyBalance.redeemableBalance ?? loyaltyBalance.balance ?? 0,
+                })}
+              </p>
+            )}
+          </section>
+        )}
 
         <section>
           <h2 className="mb-2 font-semibold">{t('billing.print.paymentReceipt', 'Payment receipt')}</h2>

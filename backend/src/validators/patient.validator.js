@@ -187,6 +187,13 @@ export const uploadDocumentSchema = z.object({
   /** DOC-002 — id of the document this upload replaces; the service bumps `version` from it.
    *  Must be listed here or `validate()` strips it before it reaches the service. */
   supersedesDocumentId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable(),
+  /**
+   * §5 (Documents at front desk) — patient visibility is chosen at Save, not only after the
+   * fact via a separate release action. RELEASED is deliberately excluded here: front desk may
+   * only ask for doctor approval before release, never publish directly to the patient, so an
+   * un-reviewed upload can't be self-releasing.
+   */
+  patientVisibility: z.enum(['HIDDEN', 'RELEASE_ON_APPROVAL']).optional(),
 });
 
 export const renameDocumentSchema = z.object({

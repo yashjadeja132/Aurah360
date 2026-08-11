@@ -2,6 +2,7 @@ import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import NotificationService from '../services/NotificationService.js';
 import { hasGlobalScope } from '../helpers/scope.helper.js';
+import config from '../config/index.js';
 
 /**
  * SEC-030 — notifications have NO branch dimension.
@@ -115,6 +116,57 @@ class NotificationController {
       req
     );
     return ApiResponse.success(res, { message: 'Template updated', data: { template } });
+  });
+
+  /**
+   * Owner Overview "provider health" strip + Settings → Integrations page (§5/§6 of the admin
+   * flow doc). This is deliberately the simplest possible read: whether each provider's secrets
+   * are present in config, not a live ping. A real health check (webhook round-trip, API ping)
+   * is future work; "configured or not" is enough to tell the owner whether
+   * WhatsApp/SMS/voice/push/email/AI are wired up at all. Never returns secret values — booleans
+   * and non-secret identifiers (provider name, model name) only.
+   */
+  providerStatus = asyncHandler(async (req, res) => {
+    const np = config.notificationProviders || {};
+    const status = {
+      whatsapp: {
+        configured: Boolean(np.whatsapp?.accessToken && np.whatsapp?.phoneNumberId),
+        provider: np.whatsapp?.provider || null,
+      },
+      sms: {
+        configured: Boolean(np.sms?.apiKey || np.sms?.bulkSenders?.apiKey),
+        provider: np.sms?.provider || null,
+      },
+      voice: {
+        configured: Boolean(np.voice?.exotelSid && np.voice?.exotelToken),
+        provider: np.voice?.provider || null,
+      },
+      push: {
+        configured: Boolean(np.push?.fcmServerKey),
+        provider: np.push?.provider || null,
+      },
+      email: {
+        configured: Boolean(np.email?.host && np.email?.user && np.email?.password),
+        provider: np.email?.provider || null,
+      },
+      ai: {
+        configured: Boolean(config.ai?.anthropicApiKey || config.ai?.geminiApiKey || config.ai?.apiKey),
+        // Mirrors AiProviderAdapter#effectiveProvider's own precedence: Anthropic first, Gemini
+        // as the automatic fallback when ANTHROPIC_API_KEY is empty, then whatever AI_PROVIDER
+        // names. Presence-only — never exposes the key value itself.
+        provider: config.ai?.anthropicApiKey
+          ? 'anthropic'
+          : config.ai?.geminiApiKey
+            ? 'gemini (fallback)'
+            : (config.ai?.provider || null),
+        model: config.ai?.anthropicApiKey
+          ? config.ai?.anthropicModel
+          : config.ai?.geminiApiKey
+            ? config.ai?.geminiModel
+            : (config.ai?.model || null),
+      },
+    };
+    return ApiResponse.success(res, { data: { status } });
   });
 }
 

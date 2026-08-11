@@ -63,6 +63,7 @@ export const PERMISSIONS = Object.freeze({
   LOYALTY_ADJUST: 'loyalty.adjust',
   LOYALTY_ADJUST_APPROVE: 'loyalty.adjust_approve',
   LOYALTY_REPORTS_VIEW: 'loyalty.reports_view',
+  LOYALTY_REPORTS_EXPORT: 'loyalty.reports_export',
   LOYALTY_CAMPAIGNS_MANAGE: 'loyalty.campaigns_manage',
   LOYALTY_ALL: 'loyalty.*',
 
@@ -81,6 +82,14 @@ export const PERMISSIONS = Object.freeze({
   PURCHASE_VIEW: 'purchase.view',
   PURCHASE_CREATE: 'purchase.create',
   PURCHASE_ALL: 'purchase.*',
+  /**
+   * PHARM-SUBST — substitute a different product/medicine than the one on the signed
+   * prescription line, with a mandatory reason. Deliberately namespaced OUTSIDE `pharmacy.*`
+   * (same trick as `prescription_safety.override` vs `prescription.*`) so the broad PHARMACY_ALL
+   * wildcard cannot silently confer it — it must be granted on purpose to whoever is trusted to
+   * authorize a substitution.
+   */
+  PHARMACY_SUBSTITUTE: 'pharmacy_substitution.authorize',
 
   // Clinical / consultation
   CLINICAL_VIEW: 'clinical.view',
@@ -163,6 +172,13 @@ export const PERMISSIONS = Object.freeze({
   CONSULTATION_SIGN: 'consultation.sign',
   CONSULTATION_LOCK: 'consultation.lock',
   CONSULTATION_ALL: 'consultation.*',
+  /**
+   * Settings → Masters — "Consultation templates (versioned, medical-lead approved)". Deliberately
+   * namespaced outside `consultation.*` (same trick as CONSULTATION_DIAGNOSE vs CONSULTATION_EDIT):
+   * every clinical role holding CONSULTATION_EDIT/CONSULTATION_ALL to chart with templates must not
+   * automatically gain the power to admin/approve the shared template library itself.
+   */
+  CONSULTATION_TEMPLATE_MANAGE: 'consultation_template.manage',
 
   // Prescription (Module 9)
   PRESCRIPTION_VIEW: 'prescription.view',
@@ -260,6 +276,8 @@ export const PERMISSIONS = Object.freeze({
   BILLING_CASH_CLOSE_APPROVE: 'billing.cash_close_approve',
   BILLING_CREDIT_NOTE: 'billing.credit_note',
   BILLING_DISCOUNT_APPROVE: 'billing.discount_approve',
+  /** A.8 — approve/reject a refund request that exceeds config.billing.refundApprovalThresholdAmount. */
+  BILLING_REFUND_APPROVE: 'billing.refund_approve',
 
   /**
    * MON-002 — annulling an ISSUED (finalized) invoice, and declaring an outstanding balance
@@ -345,6 +363,11 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.PHARMACY_VIEW, module: 'pharmacy', description: 'View pharmacy' },
   { key: PERMISSIONS.PHARMACY_DISPENSE, module: 'pharmacy', description: 'Dispense medicines' },
   { key: PERMISSIONS.PHARMACY_ALL, module: 'pharmacy', description: 'All pharmacy permissions' },
+  {
+    key: PERMISSIONS.PHARMACY_SUBSTITUTE,
+    module: 'pharmacy_substitution',
+    description: 'Authorize substituting a different product for a prescribed medicine at dispense, with reason',
+  },
   { key: PERMISSIONS.PURCHASE_VIEW, module: 'purchase', description: 'View purchase orders' },
   { key: PERMISSIONS.PURCHASE_CREATE, module: 'purchase', description: 'Create purchase orders' },
   { key: PERMISSIONS.PURCHASE_ALL, module: 'purchase', description: 'All purchase permissions' },
@@ -413,6 +436,11 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.CONSULTATION_SIGN, module: 'consultation', description: 'Sign consultations' },
   { key: PERMISSIONS.CONSULTATION_LOCK, module: 'consultation', description: 'Lock consultations' },
   { key: PERMISSIONS.CONSULTATION_ALL, module: 'consultation', description: 'All consultation permissions' },
+  {
+    key: PERMISSIONS.CONSULTATION_TEMPLATE_MANAGE,
+    module: 'consultation_template',
+    description: 'Manage and approve the shared consultation template library (SOAP/diagnosis/examination/quick-phrase)',
+  },
 
   { key: PERMISSIONS.PRESCRIPTION_VIEW, module: 'prescription', description: 'View prescriptions' },
   { key: PERMISSIONS.PRESCRIPTION_CREATE, module: 'prescription', description: 'Create prescriptions' },
@@ -500,6 +528,7 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.BILLING_CASH_CLOSE_APPROVE, module: 'billing', description: 'Approve branch cash close' },
   { key: PERMISSIONS.BILLING_CREDIT_NOTE, module: 'billing', description: 'Issue/use credit notes' },
   { key: PERMISSIONS.BILLING_DISCOUNT_APPROVE, module: 'billing', description: 'Approve invoice discounts above threshold' },
+  { key: PERMISSIONS.BILLING_REFUND_APPROVE, module: 'billing', description: 'Approve refunds above threshold' },
   { key: PERMISSIONS.BILLING_VOID_FINALIZED, module: 'billing', description: 'Cancel a finalized (issued) invoice' },
   { key: PERMISSIONS.BILLING_WRITE_OFF, module: 'billing', description: 'Write off an uncollectable invoice balance' },
 
@@ -528,6 +557,7 @@ export const PERMISSION_CATALOG = Object.freeze([
   { key: PERMISSIONS.LOYALTY_ADJUST, module: 'loyalty', description: 'Make a manual loyalty credit/debit within limit' },
   { key: PERMISSIONS.LOYALTY_ADJUST_APPROVE, module: 'loyalty', description: 'Approve a manual loyalty adjustment above limit' },
   { key: PERMISSIONS.LOYALTY_REPORTS_VIEW, module: 'loyalty', description: 'View loyalty liability/issuance/redemption reports' },
+  { key: PERMISSIONS.LOYALTY_REPORTS_EXPORT, module: 'loyalty', description: 'Export loyalty program reports (CSV/Excel/PDF)' },
   { key: PERMISSIONS.LOYALTY_CAMPAIGNS_MANAGE, module: 'loyalty', description: 'Create/manage loyalty campaigns' },
   { key: PERMISSIONS.LOYALTY_ALL, module: 'loyalty', description: 'All loyalty permissions' },
 ]);

@@ -150,7 +150,7 @@ class AppointmentRepository extends BaseRepository {
       .populate('patientId', 'mrn firstName lastName mobile photo')
       .populate({
         path: 'doctorId',
-        select: 'doctorCode specialization userId',
+        select: 'doctorCode specialization userId colorCode',
         populate: { path: 'userId', select: 'firstName lastName' },
       })
       .populate('branchId', 'name displayName branchCode')

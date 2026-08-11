@@ -272,6 +272,7 @@ class AppointmentService {
         doctorCode: doc.doctorId.doctorCode,
         name: u ? `${u.firstName} ${u.lastName}`.trim() : null,
         specialization: doc.doctorId.specialization,
+        colorCode: doc.doctorId.colorCode || null,
       };
       extra.doctorId = doc.doctorId._id.toString();
     }

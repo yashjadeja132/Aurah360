@@ -1,9 +1,14 @@
 export const APPOINTMENT_STATUS_LABELS = Object.freeze({
+  REQUESTED: 'Requested',
+  PENDING_APPROVAL: 'Pending Approval',
   SCHEDULED: 'Scheduled',
   CONFIRMED: 'Confirmed',
   CHECKED_IN: 'Checked In',
+  WAITING: 'Waiting',
   IN_CONSULTATION: 'In Consultation',
+  AWAITING_TREATMENT: 'Awaiting Treatment',
   TREATMENT: 'Treatment',
+  AWAITING_BILLING: 'Awaiting Billing',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
   NO_SHOW: 'No Show',
@@ -11,11 +16,16 @@ export const APPOINTMENT_STATUS_LABELS = Object.freeze({
 });
 
 export const APPOINTMENT_STATUS_VARIANT = Object.freeze({
+  REQUESTED: 'secondary',
+  PENDING_APPROVAL: 'warning',
   SCHEDULED: 'secondary',
   CONFIRMED: 'default',
   CHECKED_IN: 'warning',
+  WAITING: 'warning',
   IN_CONSULTATION: 'warning',
+  AWAITING_TREATMENT: 'warning',
   TREATMENT: 'warning',
+  AWAITING_BILLING: 'secondary',
   COMPLETED: 'success',
   CANCELLED: 'destructive',
   NO_SHOW: 'destructive',

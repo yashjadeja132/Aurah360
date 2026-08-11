@@ -28,6 +28,12 @@ export const treatmentSessionsApi = {
   start(id, payload = {}) {
     return api.post(`/treatment-sessions/${id}/start`, payload).then((res) => res.data);
   },
+  pause(id, payload = {}) {
+    return api.post(`/treatment-sessions/${id}/pause`, payload).then((res) => res.data);
+  },
+  resume(id) {
+    return api.post(`/treatment-sessions/${id}/resume`).then((res) => res.data);
+  },
   complete(id, payload = {}) {
     return api.post(`/treatment-sessions/${id}/complete`, payload).then((res) => res.data);
   },

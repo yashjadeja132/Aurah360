@@ -54,6 +54,29 @@ export function ReportsCatalogPanel() {
           ))}
         </div>
       </section>
+
+      <section className="space-y-3">
+        <h2 className="font-semibold">
+          {t('reports.workspace.governanceSection', 'Governance & compliance')}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {t(
+            'reports.workspace.governanceSectionHint',
+            'These live on their own dedicated screens rather than the tabular exporter — linked here so the catalogue stays a single starting point.'
+          )}
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Link to={APP_ROUTES.NOTIFICATIONS + '?tab=log'} className="rounded-lg border px-3 py-2 text-sm hover:bg-muted/40">
+            {t('reports.governanceLinks.communications', 'Communications delivery log')}
+          </Link>
+          <Link to={APP_ROUTES.SETTINGS_AI_GOVERNANCE} className="rounded-lg border px-3 py-2 text-sm hover:bg-muted/40">
+            {t('reports.governanceLinks.aiGovernance', 'AI governance')}
+          </Link>
+          <Link to={APP_ROUTES.SETTINGS_AUDIT_LOG} className="rounded-lg border px-3 py-2 text-sm hover:bg-muted/40">
+            {t('reports.governanceLinks.securityAudit', 'Security / audit log')}
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

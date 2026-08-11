@@ -335,6 +335,19 @@ class InventoryController {
     const data = await this.pharmacy.dispenseReport(await scopedListQuery(req, { branch: true }));
     return ApiResponse.success(res, { data });
   });
+
+  // Direct / retail sale (PHARM-DIRECT) — no prescription behind it.
+  createDirectSale = asyncHandler(async (req, res) => {
+    const sale = await this.pharmacy.createDirectSale(req.body, req.auth.userId, req, {
+      branchId: await this.#branchScope(req),
+    });
+    return ApiResponse.created(res, { message: 'Sale recorded', data: { sale } });
+  });
+
+  listDirectSales = asyncHandler(async (req, res) => {
+    const result = await this.pharmacy.listDirectSales(await scopedListQuery(req, { branch: true }));
+    return ApiResponse.success(res, { data: result.items, meta: result.meta });
+  });
 }
 
 export default InventoryController;

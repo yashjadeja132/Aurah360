@@ -114,6 +114,38 @@ export default function SessionPrintPage() {
             {session.complications || t('treatmentSessions.print.none', 'None')}
           </p>
         </section>
+
+        {(session.pauseHistory || []).length > 0 && (
+          <section>
+            <h2 className="mb-2 font-semibold">{t('treatmentSessions.print.pauseHistory', 'Pause history')}</h2>
+            <ul className="list-disc pl-5">
+              {session.pauseHistory.map((p, idx) => (
+                <li key={idx}>
+                  {p.pausedAt ? new Date(p.pausedAt).toLocaleString() : '—'}
+                  {p.resumedAt ? ` → ${new Date(p.resumedAt).toLocaleString()}` : ` (${t('treatmentSessions.print.stillPaused', 'still paused')})`}
+                  {' — '}
+                  {p.reason}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {(session.consumablesUsed || []).length > 0 && (
+          <section>
+            <h2 className="mb-2 font-semibold">{t('treatmentSessions.print.consumablesUsed', 'Consumables used')}</h2>
+            <ul className="list-disc pl-5">
+              {session.consumablesUsed.map((c, idx) => (
+                <li key={idx}>
+                  {c.productName || '—'}
+                  {c.batchNumber ? ` · ${t('treatmentSessions.print.batch', 'Batch')} ${c.batchNumber}` : ''}
+                  {' · '}
+                  {t('treatmentSessions.print.qty', 'qty')} {c.quantity ?? '—'}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
 
       <Link to={APP_ROUTES.TREATMENT_DASHBOARD} className="text-sm underline print:hidden">

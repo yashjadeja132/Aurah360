@@ -4,6 +4,18 @@ import AuditService from './AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { ENTITY_STATUS, PAGINATION } from '../constants/index.js';
 import { MASTER_TYPES } from '../constants/masterTypes.js';
+import Appointment from '../models/Appointment.model.js';
+import TreatmentPlan from '../models/TreatmentPlan.model.js';
+import { ACTIVE_APPOINTMENT_STATUSES } from '../enums/appointment.js';
+import { TREATMENT_PLAN_STATUS } from '../enums/treatmentPlan.js';
+
+/** Plan statuses that still represent a live commitment to deliver a service. */
+const NON_TERMINAL_TREATMENT_PLAN_STATUSES = [
+  TREATMENT_PLAN_STATUS.DRAFT,
+  TREATMENT_PLAN_STATUS.RECOMMENDED,
+  TREATMENT_PLAN_STATUS.APPROVED,
+  TREATMENT_PLAN_STATUS.ACCEPTED,
+];
 
 /**
  * Generic master CRUD — one service for all master types.
@@ -46,6 +58,8 @@ class MasterService {
       sortOrder: payload.sortOrder ?? 0,
       color: payload.color || null,
       metadata: payload.metadata || {},
+      effectiveFrom: payload.effectiveFrom || null,
+      effectiveTo: payload.effectiveTo || null,
       status: ENTITY_STATUS.ACTIVE,
       isActive: true,
       isSystem: payload.isSystem ?? false,
@@ -64,8 +78,10 @@ class MasterService {
 
     await this.auditService.record(AUDIT_ACTIONS.MASTER_CREATED, {
       actorId,
-      metadata: { masterId: master._id.toString(), type, name: master.name },
+      metadata: { masterId: master._id.toString(), type, name: master.name, after: data },
       req,
+      resourceType: 'Master',
+      resourceId: master._id.toString(),
     });
 
     return master.toSafeObject();
@@ -83,7 +99,7 @@ class MasterService {
     }
 
     const updates = { updatedBy: actorId };
-    ['name', 'description', 'sortOrder', 'color', 'metadata'].forEach((key) => {
+    ['name', 'description', 'sortOrder', 'color', 'metadata', 'effectiveFrom', 'effectiveTo'].forEach((key) => {
       if (payload[key] !== undefined) updates[key] = payload[key];
     });
     if (payload.code !== undefined) {
@@ -99,12 +115,21 @@ class MasterService {
       if (payload.price !== undefined) updates.price = payload.price;
     }
 
+    const before = master.toSafeObject();
     const updated = await this.masterRepository.updateById(id, updates);
 
     await this.auditService.record(AUDIT_ACTIONS.MASTER_UPDATED, {
       actorId,
-      metadata: { masterId: id, type, fields: Object.keys(payload) },
+      metadata: {
+        masterId: id,
+        type,
+        fields: Object.keys(payload),
+        before: Object.fromEntries(Object.keys(payload).map((k) => [k, before[k]])),
+        after: Object.fromEntries(Object.keys(payload).map((k) => [k, updated.toSafeObject()[k]])),
+      },
       req,
+      resourceType: 'Master',
+      resourceId: id,
     });
 
     return updated.toSafeObject();
@@ -165,9 +190,50 @@ class MasterService {
       actorId,
       metadata: { masterId: id, type },
       req,
+      resourceType: 'Master',
+      resourceId: id,
     });
 
     return updated.toSafeObject();
+  }
+
+  /**
+   * Dependency-warning check — read-only, run by the UI before a deactivation is confirmed.
+   * Not a hard block: the caller decides whether to proceed once it sees the counts.
+   *
+   * Currently implemented for SERVICE (the clearest, highest-value case — a service master
+   * referenced by live appointments/treatment plans). Other master types
+   * (e.g. PAYMENT_METHOD referenced by invoices, LEAD_SOURCE by patients) have no real
+   * dependents wired up yet; this follows the same pattern and should be extended per-type
+   * as those references start to matter operationally.
+   */
+  async checkDependencies(type, id) {
+    const master = await this.masterRepository.findByIdNotDeleted(id);
+    if (!master || master.type !== type) throw ApiError.notFound('Master record not found');
+
+    if (type !== MASTER_TYPES.SERVICE) {
+      return { activeReferences: 0, type: null, breakdown: {} };
+    }
+
+    const [appointmentCount, treatmentPlanCount] = await Promise.all([
+      Appointment.countDocuments({
+        serviceId: id,
+        status: { $in: ACTIVE_APPOINTMENT_STATUSES },
+      }),
+      TreatmentPlan.countDocuments({
+        'items.serviceId': id,
+        status: { $in: NON_TERMINAL_TREATMENT_PLAN_STATUSES },
+      }),
+    ]);
+
+    return {
+      activeReferences: appointmentCount + treatmentPlanCount,
+      type: 'APPOINTMENTS_AND_PLANS',
+      breakdown: {
+        appointments: appointmentCount,
+        treatmentPlans: treatmentPlanCount,
+      },
+    };
   }
 
   async deactivate(type, id, actorId, req = null) {
@@ -185,6 +251,8 @@ class MasterService {
       actorId,
       metadata: { masterId: id, type },
       req,
+      resourceType: 'Master',
+      resourceId: id,
     });
 
     return updated.toSafeObject();
@@ -208,6 +276,8 @@ class MasterService {
       actorId,
       metadata: { masterId: id, type },
       req,
+      resourceType: 'Master',
+      resourceId: id,
     });
 
     return updated.toSafeObject();

@@ -12,6 +12,8 @@ import LoyaltyEarningRule from '../../src/models/LoyaltyEarningRule.model.js';
 import LoyaltyAdjustmentRequest from '../../src/models/LoyaltyAdjustmentRequest.model.js';
 import LoyaltyTier, { PatientTierState } from '../../src/models/LoyaltyTier.model.js';
 import Invoice from '../../src/models/Invoice.model.js';
+import RecallEntry from '../../src/models/RecallEntry.model.js';
+import Patient from '../../src/models/Patient.model.js';
 import { eventBus } from '../../src/events/eventBus.js';
 import { registerLoyaltyEventListeners } from '../../src/loyalty/eventSubscriptions.js';
 import { BILLING_EVENTS, INVOICE_STATUS } from '../../src/enums/billing.js';
@@ -22,6 +24,7 @@ import {
 } from '../../src/enums/loyalty.js';
 import { ROLES } from '../../src/constants/roles.js';
 import { PERMISSIONS } from '../../src/constants/permissions.js';
+import TokenService from '../../src/services/TokenService.js';
 
 /**
  * TIER-2 loyalty money integrity. Run against the real replica set — the double-spend fix rests
@@ -60,6 +63,8 @@ describe('Loyalty money integrity (real DB)', () => {
       LoyaltyTier.deleteMany({}),
       PatientTierState.deleteMany({}),
       Invoice.deleteMany({}),
+      RecallEntry.deleteMany({}),
+      Patient.deleteMany({}),
     ]);
     patientId = new mongoose.Types.ObjectId();
     branchId = new mongoose.Types.ObjectId();
@@ -89,6 +94,24 @@ describe('Loyalty money integrity (real DB)', () => {
   };
   const redeemedTotal = () => pointsOfType(LOYALTY_ENTRY_TYPE.DEBIT_REDEEM);
   const earnedTotal = () => pointsOfType(LOYALTY_ENTRY_TYPE.CREDIT);
+
+  /**
+   * E6/E10 credit asynchronously off a domain event (safeHandle's fire-and-forget listener) —
+   * a fixed setTimeout guessed at how long that takes, and under full-suite load (many files'
+   * beforeAll connecting/registering listeners in the same process) that guess sometimes loses
+   * the race, failing a real credit as if it never happened. Poll instead: wait until the total
+   * actually reaches the expected value, or fail after a generous ceiling — deterministic on a
+   * slow box, still fast (sub-second) on a quiet one.
+   */
+  const waitForEarnedTotal = async (expected, timeoutMs = 5000) => {
+    const start = Date.now();
+    let last = await earnedTotal();
+    while (last !== expected && Date.now() - start < timeoutMs) {
+      await new Promise((resolve) => { setTimeout(resolve, 50); });
+      last = await earnedTotal();
+    }
+    return last;
+  };
 
   // ---- DEFECT 1: redemption double-spend ---------------------------------
 
@@ -327,9 +350,15 @@ describe('Loyalty money integrity (real DB)', () => {
   });
 
   describe('ruleChangeApprovalThresholdPercent', () => {
-    const ownerReq = { auth: { role: ROLES.OWNER, permissions: [] } };
+    const tokenService = new TokenService();
     const staffReq = { auth: { role: ROLES.RECEPTIONIST, permissions: [PERMISSIONS.LOYALTY_RULES_MANAGE] } };
     const bigChange = { formulaType: 'PER_AMOUNT', pointValue: 5, perAmountInr: 100 };
+    /** SEC-002 — an above-threshold change additionally requires a verified step-up token; the
+     *  approver-with-step-up request below carries one that matches its own actorId. */
+    const ownerReqWithStepUp = (actorId) => ({
+      auth: { role: ROLES.OWNER, permissions: [], userId: actorId.toString() },
+      headers: { 'x-step-up-token': tokenService.signStepUpToken(actorId.toString()) },
+    });
 
     it('refuses an above-threshold rule-value change from a non-approver', async () => {
       await settings({ ruleChangeApprovalThresholdPercent: 20 });
@@ -356,15 +385,271 @@ describe('Loyalty money integrity (real DB)', () => {
       expect(updated.versions).toHaveLength(2);
     });
 
+    it('refuses an above-threshold change from an approver with no step-up token', async () => {
+      await settings({ ruleChangeApprovalThresholdPercent: 20 });
+      const rule = await spendRule();
+      const ownerReqNoStepUp = { auth: { role: ROLES.OWNER, permissions: [] } };
+
+      await expect(
+        admin.addRuleVersion(rule._id.toString(), bigChange, new mongoose.Types.ObjectId(), ownerReqNoStepUp)
+      ).rejects.toThrow(/[Ss]tep-up/);
+    });
+
     it('lets an approver make the above-threshold change and stamps their approval', async () => {
       await settings({ ruleChangeApprovalThresholdPercent: 20 });
       const rule = await spendRule();
       const actorId = new mongoose.Types.ObjectId();
 
-      const updated = await admin.addRuleVersion(rule._id.toString(), bigChange, actorId, ownerReq);
+      const updated = await admin.addRuleVersion(rule._id.toString(), bigChange, actorId, ownerReqWithStepUp(actorId));
       const newest = updated.versions[updated.versions.length - 1];
       expect(newest.approvedBy).toBe(actorId.toString());
       expect(newest.approvedAt).toBeTruthy();
+    });
+  });
+
+  // ---- GAP FIX: E6 ON_TIME_FOLLOW_UP ---------------------------------------
+
+  describe('E6 ON_TIME_FOLLOW_UP', () => {
+    const followUpRule = async (version = {}) =>
+      LoyaltyEarningRule.create({
+        ruleCode: 'ON_TIME_FOLLOWUP',
+        eventType: LOYALTY_EARNING_EVENT.ON_TIME_FOLLOW_UP,
+        name: 'On-time follow-up',
+        versions: [
+          {
+            formulaType: 'FIXED',
+            pointValue: 50,
+            effectiveFrom: new Date(Date.now() - 60_000),
+            ...version,
+          },
+        ],
+      });
+
+    it('credits when the fulfilling appointment completes within the grace window', async () => {
+      await settings();
+      await followUpRule({ graceWindowDays: 3 });
+      const recallEntryId = new mongoose.Types.ObjectId();
+      const dueDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000); // 2 days ago, within a 3-day grace
+
+      eventBus.emitDomain('FollowUpAppointmentCompleted', {
+        appointmentId: new mongoose.Types.ObjectId().toString(),
+        recallEntryId: recallEntryId.toString(),
+        patientId: patientId.toString(),
+        branchId: branchId.toString(),
+        dueDate: dueDate.toISOString(),
+        completedAt: new Date().toISOString(),
+      });
+
+      expect(await waitForEarnedTotal(50)).toBe(50);
+    });
+
+    it('does not credit when the appointment completes after the grace window', async () => {
+      await settings();
+      await followUpRule({ graceWindowDays: 1 });
+      const dueDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000); // 5 days ago, past a 1-day grace
+
+      eventBus.emitDomain('FollowUpAppointmentCompleted', {
+        appointmentId: new mongoose.Types.ObjectId().toString(),
+        recallEntryId: new mongoose.Types.ObjectId().toString(),
+        patientId: patientId.toString(),
+        branchId: branchId.toString(),
+        dueDate: dueDate.toISOString(),
+        completedAt: new Date().toISOString(),
+      });
+
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      expect(await earnedTotal()).toBe(0);
+    });
+
+    it('never double-credits the same recall entry on a repeated event', async () => {
+      await settings();
+      await followUpRule({ graceWindowDays: 3 });
+      const recallEntryId = new mongoose.Types.ObjectId().toString();
+      const dueDate = new Date(Date.now() - 1000);
+      const payload = {
+        appointmentId: new mongoose.Types.ObjectId().toString(),
+        recallEntryId,
+        patientId: patientId.toString(),
+        branchId: branchId.toString(),
+        dueDate: dueDate.toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+
+      eventBus.emitDomain('FollowUpAppointmentCompleted', payload);
+      expect(await waitForEarnedTotal(50)).toBe(50);
+      eventBus.emitDomain('FollowUpAppointmentCompleted', payload);
+      // Negative half of this assertion (no second credit) — nothing to poll toward, so a fixed
+      // settle window is correct here, not a bug: waitForEarnedTotal would just spin to its
+      // ceiling since 50 is already the (correct) steady state.
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+
+      expect(await earnedTotal()).toBe(50);
+    });
+  });
+
+  // ---- GAP FIX: E10 PROFILE_COMPLETION -------------------------------------
+
+  describe('E10 PROFILE_COMPLETION', () => {
+    const profileRule = async (fields) =>
+      LoyaltyEarningRule.create({
+        ruleCode: 'PROFILE_COMPLETION',
+        eventType: LOYALTY_EARNING_EVENT.PROFILE_COMPLETION,
+        name: 'Profile completion',
+        versions: [
+          {
+            formulaType: 'FIXED',
+            pointValue: 25,
+            effectiveFrom: new Date(Date.now() - 60_000),
+            profileCompletionFields: fields,
+          },
+        ],
+      });
+
+    const makePatient = async (overrides = {}) =>
+      Patient.create({
+        mrn: `MRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+        firstName: 'Test',
+        lastName: 'Patient',
+        gender: 'FEMALE',
+        mobile: '9999999999',
+        primaryBranchId: branchId,
+        ...overrides,
+      });
+
+    it('credits once, the first time every configured field is non-empty', async () => {
+      await settings();
+      await profileRule(['email', 'dateOfBirth']);
+      const patient = await makePatient({ email: 'a@b.com', dateOfBirth: new Date('1990-01-01') });
+      patientId = patient._id;
+
+      eventBus.emitDomain('PatientProfileUpdated', {
+        patientId: patient._id.toString(),
+        branchId: branchId.toString(),
+        emittedAt: new Date().toISOString(),
+      });
+      expect(await waitForEarnedTotal(25)).toBe(25);
+
+      // Repeat save — the engine's one-time-only ledger check must block a second credit.
+      // Negative half (no second credit) — fixed settle window, same reasoning as E6 above.
+      eventBus.emitDomain('PatientProfileUpdated', {
+        patientId: patient._id.toString(),
+        branchId: branchId.toString(),
+        emittedAt: new Date().toISOString(),
+      });
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      expect(await earnedTotal()).toBe(25);
+    });
+
+    it('does not credit while a configured field is still empty', async () => {
+      await settings();
+      await profileRule(['email', 'dateOfBirth']);
+      const patient = await makePatient({ email: 'a@b.com' }); // dateOfBirth left unset
+      patientId = patient._id;
+
+      eventBus.emitDomain('PatientProfileUpdated', {
+        patientId: patient._id.toString(),
+        branchId: branchId.toString(),
+        emittedAt: new Date().toISOString(),
+      });
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      expect(await earnedTotal()).toBe(0);
+    });
+  });
+
+  // ---- GAP FIX: LOY-005 redemption identity confirmation -------------------
+
+  describe('redemptionIdentityConfirmation', () => {
+    it('blocks a redemption with no identity confirmation when the setting requires it', async () => {
+      await settings({ redemptionIdentityConfirmation: 'IN_PERSON' });
+      await grant(1000);
+
+      await expect(
+        ledger.redeem({ branchId, patientId, points: 500, invoiceId: new mongoose.Types.ObjectId(), redeemedValueInr: 50 })
+      ).rejects.toThrow(/identity/i);
+      expect(await redeemedTotal()).toBe(0);
+    });
+
+    it('allows a redemption once identityConfirmed is supplied', async () => {
+      await settings({ redemptionIdentityConfirmation: 'IN_PERSON' });
+      await grant(1000);
+
+      await ledger.redeem({
+        branchId,
+        patientId,
+        points: 500,
+        invoiceId: new mongoose.Types.ObjectId(),
+        redeemedValueInr: 50,
+        identityConfirmed: true,
+      });
+      expect(await redeemedTotal()).toBe(500);
+    });
+
+    it('additionally requires otpVerified in OTP mode', async () => {
+      await settings({ redemptionIdentityConfirmation: 'OTP' });
+      await grant(1000);
+
+      await expect(
+        ledger.redeem({
+          branchId,
+          patientId,
+          points: 500,
+          invoiceId: new mongoose.Types.ObjectId(),
+          redeemedValueInr: 50,
+          identityConfirmed: true,
+        })
+      ).rejects.toThrow(/otp/i);
+
+      await ledger.redeem({
+        branchId,
+        patientId,
+        points: 500,
+        invoiceId: new mongoose.Types.ObjectId(),
+        redeemedValueInr: 50,
+        identityConfirmed: true,
+        otpVerified: true,
+      });
+      expect(await redeemedTotal()).toBe(500);
+    });
+
+    it('imposes no gate when the setting is NONE (default legacy behaviour)', async () => {
+      await settings({ redemptionIdentityConfirmation: 'NONE' });
+      await grant(1000);
+
+      await ledger.redeem({ branchId, patientId, points: 500, invoiceId: new mongoose.Types.ObjectId(), redeemedValueInr: 50 });
+      expect(await redeemedTotal()).toBe(500);
+    });
+  });
+
+  // ---- GAP FIX: LOY-006 refund re-credits redeemed points -------------------
+
+  describe('credit() earnLotExpiryDateOverride (refund re-credit support)', () => {
+    it('lets a CREDIT_REVERSAL pin an explicit expiry instead of computing one from settings', async () => {
+      await settings({ pointsExpiryMonths: 12 });
+      const explicitExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      const entry = await ledger.credit({
+        branchId,
+        patientId,
+        points: 500,
+        entryType: LOYALTY_ENTRY_TYPE.CREDIT_REVERSAL,
+        earnLotExpiryDateOverride: explicitExpiry,
+      });
+
+      expect(new Date(entry.earnLotExpiryDate).getTime()).toBe(explicitExpiry.getTime());
+    });
+
+    it('lets a CREDIT_REVERSAL restore a never-expiring lot by overriding with null', async () => {
+      await settings({ pointsExpiryMonths: 12 });
+
+      const entry = await ledger.credit({
+        branchId,
+        patientId,
+        points: 500,
+        entryType: LOYALTY_ENTRY_TYPE.CREDIT_REVERSAL,
+        earnLotExpiryDateOverride: null,
+      });
+
+      expect(entry.earnLotExpiryDate).toBeNull();
     });
   });
 

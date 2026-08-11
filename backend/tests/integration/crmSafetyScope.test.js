@@ -708,6 +708,7 @@ describe('SEC-030 CRM / safety / staff branch scoping', () => {
     it('refuses to let a branch manager deactivate ANOTHER branch', async () => {
       const res = await request(app)
         .post(`/api/v1/branches/${branchB._id.toString()}/deactivate`)
+        .send({ reason: 'Testing cross-branch scope' })
         .set(auth(tokenManagerA));
 
       expect(res.status).toBe(404);

@@ -7,6 +7,7 @@ import { cn } from '@/utils/cn';
 import { NotificationInboxPanel } from '@/modules/notifications/components/NotificationInboxPanel';
 import { NotificationTemplatesPanel } from '@/modules/notifications/components/NotificationTemplatesPanel';
 import { NotificationDeliveryLogPanel } from '@/modules/notifications/components/NotificationDeliveryLogPanel';
+import { ConsentCategoriesPanel } from '@/modules/notifications/components/ConsentCategoriesPanel';
 
 /**
  * /notifications, /notifications/log and /notifications/templates were all
@@ -33,6 +34,7 @@ export default function CommunicationHubPage() {
     () => [
       { id: 'inbox', label: t('notifications.hub.tabs.inbox', 'Inbox') },
       { id: 'templates', label: t('notifications.hub.tabs.templates', 'Templates') },
+      { id: 'consent', label: t('notifications.hub.tabs.consent', 'Consent categories') },
       { id: 'log', label: t('notifications.hub.tabs.log', 'Delivery log') },
     ],
     [t]
@@ -88,6 +90,11 @@ export default function CommunicationHubPage() {
         {tab === 'templates' && (
           <PermissionGuard permissions={NOTIFICATION_PERMS}>
             <NotificationTemplatesPanel />
+          </PermissionGuard>
+        )}
+        {tab === 'consent' && (
+          <PermissionGuard permissions={[PERMISSIONS.CONSENT_VIEW, PERMISSIONS.CONSENT_ALL]}>
+            <ConsentCategoriesPanel />
           </PermissionGuard>
         )}
         {tab === 'log' && (

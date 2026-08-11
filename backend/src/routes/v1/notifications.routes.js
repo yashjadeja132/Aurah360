@@ -20,6 +20,7 @@ const manage = [PERMISSIONS.NOTIFICATIONS_MANAGE, PERMISSIONS.NOTIFICATIONS_ALL]
 
 router.use(authenticate);
 
+router.get('/provider-status', controller.providerStatus);
 router.get('/inbox', requirePermission(...view), controller.inbox);
 router.get('/unread-count', requirePermission(...view), controller.unreadCount);
 router.post('/inbox/read-all', requirePermission(...view), controller.markAllRead);

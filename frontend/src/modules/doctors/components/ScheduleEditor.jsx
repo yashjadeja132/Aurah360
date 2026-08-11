@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { useDoctorSchedules, useDoctorMutations } from '../hooks/useDoctors';
+import { RosterImpactPanel } from './RosterImpactPanel';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -37,6 +38,7 @@ export function ScheduleEditor({ doctorId, branches = [] }) {
   const { data: schedules = [], isLoading } = useDoctorSchedules(doctorId, branchId);
   const { upsertSchedules } = useDoctorMutations();
   const [days, setDays] = useState(emptyWeek());
+  const [impactedAppointments, setImpactedAppointments] = useState([]);
 
   useEffect(() => {
     if (!branches.length) return;
@@ -65,18 +67,30 @@ export function ScheduleEditor({ doctorId, branches = [] }) {
     setDays((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   };
 
-  const onSave = async () => {
+  const onSave = async (overrideReason = null) => {
     if (!branchId) {
       toast.error(t('doctors.scheduleEditor.selectBranch', 'Select a branch'));
       return;
     }
     try {
-      await upsertSchedules.mutateAsync({
-        id: doctorId,
-        payload: { branchId, days },
-      });
-      toast.success(t('doctors.scheduleEditor.toastSaved', 'Schedule saved'));
+      const payload = { branchId, days };
+      if (overrideReason) {
+        payload.acknowledgeOverride = true;
+        payload.overrideReason = overrideReason;
+      }
+      const result = await upsertSchedules.mutateAsync({ id: doctorId, payload });
+      setImpactedAppointments([]);
+      if (result?.overridden) {
+        toast.success(t('doctors.scheduleEditor.toastSavedWithOverride', 'Schedule saved (override recorded)'));
+      } else {
+        toast.success(t('doctors.scheduleEditor.toastSaved', 'Schedule saved'));
+      }
     } catch (err) {
+      const impacted = err.response?.data?.errors?.impactedAppointments;
+      if (err.response?.status === 409 && Array.isArray(impacted) && impacted.length) {
+        setImpactedAppointments(impacted);
+        return;
+      }
       toast.error(err.response?.data?.message || t('doctors.scheduleEditor.saveFailed', 'Save failed'));
     }
   };
@@ -119,7 +133,16 @@ export function ScheduleEditor({ doctorId, branches = [] }) {
         </div>
       )}
 
-      <Button onClick={onSave} disabled={upsertSchedules.isPending}>
+      {impactedAppointments.length > 0 && (
+        <RosterImpactPanel
+          impactedAppointments={impactedAppointments}
+          isSubmitting={upsertSchedules.isPending}
+          onOverride={(reason) => onSave(reason)}
+          onCancel={() => setImpactedAppointments([])}
+        />
+      )}
+
+      <Button onClick={() => onSave()} disabled={upsertSchedules.isPending}>
         {upsertSchedules.isPending ? t('doctors.scheduleEditor.saving', 'Saving…') : t('doctors.scheduleEditor.saveWeeklySchedule', 'Save weekly schedule')}
       </Button>
     </div>

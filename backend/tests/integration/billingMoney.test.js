@@ -11,6 +11,7 @@ import CreditNote from '../../src/models/CreditNote.model.js';
 import AuditLog from '../../src/models/AuditLog.model.js';
 import LoyaltyLedgerEntry from '../../src/models/LoyaltyLedgerEntry.model.js';
 import LoyaltyBalanceCache from '../../src/models/LoyaltyBalanceCache.model.js';
+import LoyaltyProgramSettings from '../../src/models/LoyaltyProgramSettings.model.js';
 import BillingService from '../../src/services/BillingService.js';
 import LoyaltyLedgerService from '../../src/services/LoyaltyLedgerService.js';
 import { PaymentRepository } from '../../src/repositories/BillingRepository.js';
@@ -61,6 +62,7 @@ describe('Billing money integrity (real DB)', () => {
       AuditLog.deleteMany({}),
       LoyaltyLedgerEntry.deleteMany({}),
       LoyaltyBalanceCache.deleteMany({}),
+      LoyaltyProgramSettings.deleteMany({}),
     ]);
     const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
     branch = await Branch.create({
@@ -437,6 +439,63 @@ describe('Billing money integrity (real DB)', () => {
       const row = await Payment.findById(payment._id).lean();
       expect(row.refundedAmount).toBe(1000);
       expect(row.status).toBe(PAYMENT_RECORD_STATUS.REFUNDED);
+    });
+
+    // ---- GAP FIX: LOY-006 refund re-credits redeemed points -----------------
+    it('re-credits redeemed loyalty points as CREDIT_REVERSAL when a redeemed invoice is refunded', async () => {
+      await LoyaltyProgramSettings.create({
+        version: 1,
+        effectiveFrom: new Date(Date.now() - 60_000),
+        programEnabled: true,
+        redemptionPointsPerRupee: 10,
+        minimumPointsToRedeem: 100,
+        redemptionStepPoints: 100,
+        redemptionIdentityConfirmation: 'NONE',
+      });
+      await ledger.credit({
+        branchId: branch._id,
+        patientId: patient._id,
+        points: 1000,
+        entryType: LOYALTY_ENTRY_TYPE.CREDIT,
+        createdBy: actorId,
+      });
+
+      const draft = await billing.create(
+        {
+          patientId: patient._id.toString(),
+          branchId: branch._id.toString(),
+          items: [
+            { itemType: INVOICE_ITEM_TYPE.SERVICE, description: 'Consultation', quantity: 1, unitPrice: 1000 },
+          ],
+          discountType: DISCOUNT_TYPE.FLAT,
+          discountValue: 0,
+        },
+        actorId
+      );
+      await billing.applyLoyaltyRedemption(draft.id, { points: 500 }, actorId);
+      const invoice = await billing.finalize(draft.id, actorId);
+      await billing.recordPayment(invoice.id, { amount: invoice.total, method: 'CASH' }, actorId);
+      const payment = await paymentOf(invoice.id);
+
+      await billing.refund(payment._id.toString(), { reason: 'GOODWILL' }, actorId);
+
+      const reversals = await LoyaltyLedgerEntry.find({
+        entryType: LOYALTY_ENTRY_TYPE.CREDIT_REVERSAL,
+        sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
+        sourceRefId: new mongoose.Types.ObjectId(invoice.id),
+      }).lean();
+      expect(reversals.reduce((s, e) => s + e.points, 0)).toBe(500);
+
+      // Idempotent: refunding again (nothing left to refund) must not double-restore.
+      await expect(
+        billing.refund(payment._id.toString(), { amount: 1, reason: 'GOODWILL' }, actorId)
+      ).rejects.toThrow(/already been refunded/i);
+      const reversalsAfter = await LoyaltyLedgerEntry.find({
+        entryType: LOYALTY_ENTRY_TYPE.CREDIT_REVERSAL,
+        sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
+        sourceRefId: new mongoose.Types.ObjectId(invoice.id),
+      }).lean();
+      expect(reversalsAfter.reduce((s, e) => s + e.points, 0)).toBe(500);
     });
   });
 

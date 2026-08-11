@@ -36,9 +36,23 @@ export const billingApi = {
   duePayments(params) {
     return api.get('/billing/due-payments', { params }).then((res) => res.data);
   },
-  /** A.8 — refund a recorded payment. `reason` must be a REFUND_REASON code. */
+  /**
+   * A.8 — refund a recorded payment. `reason` must be a REFUND_REASON code. Below the org's
+   * refund-approval threshold (or for an approver) this applies immediately; above it, the
+   * backend queues a RefundRequest instead — response `status` tells you which happened.
+   */
   refundPayment(paymentId, payload) {
     return api.post(`/billing/payments/${paymentId}/refund`, payload).then((res) => res.data);
+  },
+  /** A.8 — approver worklist of refund requests above the approval threshold. */
+  refundApprovalQueue(params) {
+    return api.get('/billing/refund-approvals', { params }).then((res) => res.data);
+  },
+  approveRefund(id, decisionNote) {
+    return api.post(`/billing/refunds/${id}/approve`, { decisionNote }).then((res) => res.data);
+  },
+  rejectRefund(id, decisionNote) {
+    return api.post(`/billing/refunds/${id}/reject`, { decisionNote }).then((res) => res.data);
   },
   recordPayment(id, payload) {
     return api.post(`/billing/${id}/payments`, payload).then((res) => res.data);

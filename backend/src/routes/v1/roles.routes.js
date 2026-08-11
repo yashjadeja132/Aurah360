@@ -21,4 +21,11 @@ router.get(
   roleController.listPermissions
 );
 
+// §2.1 — role-template staff creation: default permission bundle per role.
+router.get(
+  '/templates',
+  requirePermission(PERMISSIONS.ROLES_VIEW, PERMISSIONS.ROLES_ALL, PERMISSIONS.USERS_CREATE, PERMISSIONS.USERS_EDIT),
+  roleController.listRoleTemplates
+);
+
 export default router;

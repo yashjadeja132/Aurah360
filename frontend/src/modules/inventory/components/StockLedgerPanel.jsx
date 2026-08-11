@@ -26,12 +26,19 @@ export function StockLedgerPanel({ initialItemId = '' }) {
   const { t } = useTranslation();
   const [type, setType] = useState('');
   const [itemId, setItemId] = useState(initialItemId);
+  const [deepLinked, setDeepLinked] = useState(Boolean(initialItemId));
   const { data, isLoading } = useStockLedger({
     type: type || undefined,
     inventoryItemId: itemId || undefined,
     limit: 100,
   });
   const rows = data?.items || [];
+  // Deep-linked from the hub (e.g. "View ledger" on an item) — the ledger rows for that
+  // item already carry a human-readable name/SKU, so use those instead of ever putting the
+  // raw ObjectId into a visible text field.
+  const deepLinkedItemLabel = rows[0]?.itemName
+    ? `${rows[0].itemName}${rows[0].itemSku ? ` (${rows[0].itemSku})` : ''}`
+    : t('common.loading', 'Loading…');
 
   return (
     <div className="space-y-6">
@@ -43,11 +50,24 @@ export function StockLedgerPanel({ initialItemId = '' }) {
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Input
-          placeholder={t('inventory.ledger.itemIdPlaceholder', 'Inventory item ID (optional)')}
-          value={itemId}
-          onChange={(e) => setItemId(e.target.value)}
-        />
+        {deepLinked && itemId ? (
+          <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <span className="font-medium">{deepLinkedItemLabel}</span>
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline"
+              onClick={() => setDeepLinked(false)}
+            >
+              {t('inventory.ledger.changeItem', 'Change')}
+            </button>
+          </div>
+        ) : (
+          <Input
+            placeholder={t('inventory.ledger.itemIdPlaceholder', 'Inventory item ID (optional)')}
+            value={itemId}
+            onChange={(e) => setItemId(e.target.value)}
+          />
+        )}
         <Select value={type} onChange={(e) => setType(e.target.value)}>
           <option value="">{t('inventory.ledger.allTypes', 'All types')}</option>
           {TX_TYPES.map((txType) => (

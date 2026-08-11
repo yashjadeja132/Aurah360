@@ -10,6 +10,7 @@ import { TreatmentPlanListPanel } from '@/modules/treatmentPlans/components/Trea
 import { ProtocolLibraryPanel } from '@/modules/treatmentPlans/components/ProtocolLibraryPanel';
 import { PackageBuilderPanel } from '@/modules/treatmentPlans/components/PackageBuilderPanel';
 import { AdverseEventRegisterPanel } from '@/modules/treatmentSafety/components/AdverseEventRegisterPanel';
+import { PatchTestPanel } from '@/modules/treatmentSafety/components/PatchTestPanel';
 import { APP_ROUTES } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 import { cn } from '@/utils/cn';
@@ -129,7 +130,22 @@ export default function TreatmentsHubPage() {
           {tab === 'plans' && canViewPlans && <TreatmentPlanListPanel />}
           {tab === 'protocols' && canViewPlans && <ProtocolLibraryPanel />}
           {tab === 'packages' && canViewPlans && <PackageBuilderPanel />}
-          {tab === 'safety' && canViewSafety && <AdverseEventRegisterPanel />}
+          {tab === 'safety' && canViewSafety && (
+            <div className="space-y-8">
+              <div className="space-y-3">
+                <h2 className="font-display text-xl font-semibold">
+                  {t('treatments.safety.patchTest.title', 'Patch tests')}
+                </h2>
+                <PatchTestPanel />
+              </div>
+              <div className="space-y-3">
+                <h2 className="font-display text-xl font-semibold">
+                  {t('treatments.safety.register.sectionTitle', 'Adverse events')}
+                </h2>
+                <AdverseEventRegisterPanel />
+              </div>
+            </div>
+          )}
         </>
       )}
     </section>

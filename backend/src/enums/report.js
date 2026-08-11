@@ -27,7 +27,24 @@ export const REPORT_TYPE = Object.freeze({
   LOYALTY_REDEMPTION: 'loyalty-redemption',
   LOYALTY_EXPIRY: 'loyalty-expiry',
   LOYALTY_REFERRAL: 'loyalty-referral',
+  LOYALTY_PROGRAM_IMPACT: 'loyalty-program-impact',
+  LOYALTY_FRAUD_SIGNALS: 'loyalty-fraud-signals',
+  LOYALTY_AUDIT: 'loyalty-audit',
 });
+
+/** Report types that live under the Loyalty Program → Reports tab specifically (as opposed to
+ *  the general reports catalogue) — used to gate export behind LOYALTY_REPORTS_EXPORT in addition
+ *  to the generic REPORTS_EXPORT permission, and to record a loyalty-specific audit action. */
+export const LOYALTY_REPORT_TYPE_LIST = Object.freeze([
+  'loyalty-liability',
+  'loyalty-issuance',
+  'loyalty-redemption',
+  'loyalty-expiry',
+  'loyalty-referral',
+  'loyalty-program-impact',
+  'loyalty-fraud-signals',
+  'loyalty-audit',
+]);
 
 export const REPORT_TYPE_LIST = Object.freeze(Object.values(REPORT_TYPE));
 

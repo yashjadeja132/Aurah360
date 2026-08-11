@@ -19,6 +19,9 @@ const organizationSchema = new mongoose.Schema(
     /** Source of truth for report/day-bucket timezone — beats CLINIC_DEFAULT_TIMEZONE.
      *  See src/config/orgRuntime.js for the precedence note. */
     timezone: { type: String, default: 'Asia/Kolkata' },
+    /** Supported UI language codes (frontend/src/i18n/index.js SUPPORTED_LANGUAGES). Drives which
+     *  languages patients/staff may pick from in the portal and staff console. */
+    languages: { type: [String], default: ['en', 'hi', 'gu'] },
     /** India's FY starts in April. Drives `period=FY`/`FY_PREV` report ranges
      *  (src/helpers/reportFilters.helper.js). */
     financialYearStartMonth: { type: Number, default: 4, min: 1, max: 12 },
@@ -50,6 +53,7 @@ organizationSchema.methods.toSafeObject = function toSafeObject() {
     privacyContactEmail: this.privacyContactEmail,
     grievanceContactEmail: this.grievanceContactEmail,
     timezone: this.timezone,
+    languages: this.languages,
     financialYearStartMonth: this.financialYearStartMonth,
     invoicePrefix: this.invoicePrefix,
     invoiceFooterNote: this.invoiceFooterNote,

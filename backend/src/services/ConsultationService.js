@@ -22,10 +22,12 @@ import LabOrder, {
   LAB_ORDER_STATUS_TRANSITIONS,
   LAB_ORDER_TERMINAL_STATUSES,
 } from '../models/LabOrder.model.js';
+import Consultation from '../models/Consultation.model.js';
 import { generateConsultationNumber } from '../helpers/consultationNumber.helper.js';
 import {
   CONSULTATION_STATUS,
   EDITABLE_CONSULTATION_STATUSES,
+  CONTENT_CLASSIFICATION,
 } from '../enums/consultation.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { TIMELINE_EVENT } from '../enums/patient.js';
@@ -317,6 +319,27 @@ class ConsultationService {
       throw ApiError.badRequest('Consultation is already signed');
     }
 
+    // Doc §3.8 — signing must be blocked while mandatory clinical fields are still empty; a signed
+    // note that never actually says what the assessment/plan was is a real clinical-record defect,
+    // not a formality. Assessment and Plan come from the SOAP note; a diagnosis (favorites or free
+    // text — either is acceptable per §3.1) must also be recorded. This mirrors the existing
+    // guard style elsewhere in this codebase (name the exact missing field, one ApiError.badRequest).
+    const [soapForGuard, diagnosisForGuard] = await Promise.all([
+      this.soapRepository.findByConsultation(id),
+      this.diagnosisRepository.findByConsultation(id),
+    ]);
+    const missing = [];
+    if (!soapForGuard?.assessment?.trim()) missing.push('Assessment');
+    if (!soapForGuard?.plan?.trim()) missing.push('Plan');
+    if (!diagnosisForGuard?.primaryDiagnosis?.trim()) missing.push('Diagnosis');
+    if (missing.length) {
+      throw ApiError.badRequest(
+        `Cannot sign — required field(s) missing: ${missing.join(', ')}`,
+        null,
+        'CONSULTATION_MANDATORY_FIELDS_MISSING'
+      );
+    }
+
     const endedAt = consultation.endedAt || new Date();
     const duration = consultation.startedAt
       ? Math.round((endedAt - new Date(consultation.startedAt)) / 60000)
@@ -470,23 +493,61 @@ class ConsultationService {
     };
   }
 
-  /** EMR-006 — explicit doctor-approved release of a patient-facing summary; internal note stays internal. */
-  async releasePatientSummary(id, { summary }, actorId, req = null) {
+  /**
+   * EMR-006 / §3.7 — explicit doctor-approved release. Each note section is classified
+   * STAFF_ONLY / INTERNAL_CLINICAL / PATIENT_FACING; only PATIENT_FACING sections are ever
+   * surfaced to the patient app. `patientFacingSummary` (the field existing consumers read) is
+   * derived here as the flattened text of just the PATIENT_FACING sections — legacy/back-compat
+   * callers that still pass a single `summary` string are treated as one PATIENT_FACING section
+   * (the old binary "release everything" behavior), so no existing caller breaks.
+   */
+  async releasePatientSummary(id, payload, actorId, req = null) {
     const consultation = await this.consultationRepository.findByIdNotDeleted(id);
     if (!consultation) throw ApiError.notFound('Consultation not found');
     if (![CONSULTATION_STATUS.SIGNED, CONSULTATION_STATUS.LOCKED].includes(consultation.status)) {
       throw ApiError.badRequest('Only a signed consultation can be released to the patient');
     }
 
+    const sections =
+      Array.isArray(payload?.sections) && payload.sections.length
+        ? payload.sections.map((s) => ({
+            key: s.key,
+            label: s.label ?? null,
+            text: s.text || '',
+            classification: s.classification || CONTENT_CLASSIFICATION.INTERNAL_CLINICAL,
+          }))
+        : // Back-compat shape: { summary } — treated as a single patient-facing section.
+          [
+            {
+              key: 'summary',
+              label: 'Summary',
+              text: payload?.summary || '',
+              classification: CONTENT_CLASSIFICATION.PATIENT_FACING,
+            },
+          ];
+
+    const patientFacingSummary =
+      sections
+        .filter((s) => s.classification === CONTENT_CLASSIFICATION.PATIENT_FACING && s.text?.trim())
+        .map((s) => s.text.trim())
+        .join('\n\n') || null;
+
     await this.consultationRepository.updateById(id, {
-      patientFacingSummary: summary,
+      releaseSections: sections,
+      patientFacingSummary,
       patientFacingReleasedAt: new Date(),
       patientFacingReleasedBy: actorId,
     });
 
     await this.auditService.record(AUDIT_ACTIONS.DOCUMENT_RELEASED, {
       actorId,
-      metadata: { consultationId: id, type: 'CONSULTATION_SUMMARY' },
+      metadata: {
+        consultationId: id,
+        type: 'CONSULTATION_SUMMARY',
+        patientFacingSectionCount: sections.filter(
+          (s) => s.classification === CONTENT_CLASSIFICATION.PATIENT_FACING
+        ).length,
+      },
       req,
     });
 
@@ -685,6 +746,137 @@ class ConsultationService {
       items,
       meta: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
     };
+  }
+
+  /**
+   * §5 — cross-patient "Follow-ups due/overdue" worklist. Mirrors listLabOrderReviewQueue's
+   * {items, meta} shape / query pattern so the frontend list page can reuse the same paging UI.
+   * A follow-up only surfaces here once it has an explicit reminderDate (§3.6's minimal reminder
+   * plan) — a bare value/unit recommendation with no date attached has nothing to be "due" by.
+   * `scope: 'DUE'` (default) limits to reminderDate <= now + 7 days (due or approaching) and
+   * excludes DONE; `scope: 'ALL'` returns every follow-up with a reminderDate regardless of when.
+   */
+  async listFollowUpQueue(query = {}) {
+    const limit = Math.min(Number(query.limit) || 25, 100);
+    const page = Math.max(Number(query.page) || 1, 1);
+
+    const filter = {
+      deletedAt: null,
+      'followUp.reminderDate': { $ne: null },
+    };
+    if (query.doctorId) filter.doctorId = query.doctorId;
+    if (query.branchId) filter.branchId = query.branchId;
+    if (query.status) {
+      filter['followUp.status'] = query.status;
+    } else if (!query.scope || query.scope === 'DUE') {
+      filter['followUp.status'] = { $ne: 'DONE' };
+    }
+    if (!query.scope || query.scope === 'DUE') {
+      const horizon = new Date();
+      horizon.setDate(horizon.getDate() + 7);
+      filter['followUp.reminderDate'] = { $ne: null, $lte: horizon };
+    }
+
+    const [rows, total] = await Promise.all([
+      Consultation.find(filter)
+        .sort({ 'followUp.reminderDate': 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('patientId', 'mrn firstName lastName mobile')
+        .populate({ path: 'doctorId', select: 'doctorCode userId', populate: { path: 'userId', select: 'firstName lastName' } })
+        .populate({ path: 'followUp.preferredDoctorId', select: 'doctorCode userId', populate: { path: 'userId', select: 'firstName lastName' } })
+        .populate('followUp.preferredBranchId', 'name displayName')
+        .populate('branchId', 'name displayName')
+        .exec(),
+      Consultation.countDocuments(filter).exec(),
+    ]);
+
+    const now = new Date();
+    const items = rows.map((row) => {
+      const patient = row.patientId;
+      const doctor = row.doctorId;
+      const doctorUser = doctor?.userId;
+      const preferredDoctor = row.followUp?.preferredDoctorId;
+      const preferredDoctorUser = preferredDoctor?.userId;
+      const dueDate = row.followUp?.reminderDate || null;
+      return {
+        id: row._id.toString(),
+        consultationId: row._id.toString(),
+        consultationNumber: row.consultationNumber,
+        patientId: patient?._id ? patient._id.toString() : null,
+        patient: patient?._id
+          ? {
+              id: patient._id.toString(),
+              mrn: patient.mrn,
+              fullName: [patient.firstName, patient.lastName].filter(Boolean).join(' '),
+              mobile: patient.mobile,
+            }
+          : null,
+        doctor: doctor?._id
+          ? {
+              id: doctor._id.toString(),
+              doctorCode: doctor.doctorCode,
+              name: doctorUser ? `${doctorUser.firstName || ''} ${doctorUser.lastName || ''}`.trim() : null,
+            }
+          : null,
+        branch: row.branchId?._id
+          ? { id: row.branchId._id.toString(), name: row.branchId.displayName || row.branchId.name }
+          : null,
+        dueDate,
+        overdue: Boolean(dueDate && dueDate < now),
+        reason: row.followUp?.reason || null,
+        instructions: row.followUp?.instructions || null,
+        priority: row.followUp?.priority || 'NORMAL',
+        value: row.followUp?.value ?? null,
+        unit: row.followUp?.unit || null,
+        reminderNote: row.followUp?.reminderNote || null,
+        status: row.followUp?.status || 'PENDING',
+        preferredDoctor: preferredDoctor?._id
+          ? {
+              id: preferredDoctor._id.toString(),
+              doctorCode: preferredDoctor.doctorCode,
+              name: preferredDoctorUser
+                ? `${preferredDoctorUser.firstName || ''} ${preferredDoctorUser.lastName || ''}`.trim()
+                : null,
+            }
+          : null,
+        preferredBranch: row.followUp?.preferredBranchId?._id
+          ? {
+              id: row.followUp.preferredBranchId._id.toString(),
+              name: row.followUp.preferredBranchId.displayName || row.followUp.preferredBranchId.name,
+            }
+          : null,
+      };
+    });
+
+    return {
+      items,
+      meta: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    };
+  }
+
+  /**
+   * §5 — "mark done / reschedule" action from the Follow-ups list. Deliberately narrow: it only
+   * touches the follow-up subdocument's status/reminder fields, never the signed clinical record,
+   * so it stays usable even on a SIGNED/LOCKED consultation (the note itself is not being edited).
+   */
+  async updateFollowUpStatus(id, payload, actorId, req = null, scope = null) {
+    const consultation = await this.consultationRepository.findByIdNotDeleted(id);
+    if (!consultation) throw ApiError.notFound('Consultation not found');
+    this.#assertConsultationInScope(consultation, scope);
+
+    const current = consultation.followUp?.toObject?.() || consultation.followUp || {};
+    const next = { ...current, status: payload.status };
+    if (payload.reminderDate !== undefined) next.reminderDate = payload.reminderDate;
+    if (payload.reminderNote !== undefined) next.reminderNote = payload.reminderNote;
+
+    await this.consultationRepository.updateById(id, { followUp: next, updatedBy: actorId });
+    await this.auditService.record(AUDIT_ACTIONS.CONSULTATION_SAVED, {
+      actorId,
+      metadata: { consultationId: id, followUpStatus: payload.status },
+      req,
+    });
+    return this.getWorkspace(id);
   }
 
   async updateLabOrder(labOrderId, payload, actorId, req = null, scope = null) {

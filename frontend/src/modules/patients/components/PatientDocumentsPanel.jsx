@@ -51,6 +51,9 @@ export function PatientDocumentsPanel({ patientId }) {
    */
   const [clinicalDate, setClinicalDate] = useState('');
   const [source, setSource] = useState('PATIENT');
+  // §5 — patient visibility chosen at Save: hidden (staff/doctor-only) or released once a
+  // doctor approves. Defaults HIDDEN, matching the server default for anything left unset.
+  const [patientVisibility, setPatientVisibility] = useState('HIDDEN');
 
   const categoryLabel = (c) =>
     t(`patients.documents.categories.${c}`, c.replaceAll('_', ' '));
@@ -79,6 +82,7 @@ export function PatientDocumentsPanel({ patientId }) {
     formData.append('category', category);
     formData.append('clinicalDate', clinicalDate);
     formData.append('source', source);
+    formData.append('patientVisibility', patientVisibility);
     if (title) formData.append('title', title);
     try {
       await uploadDocument.mutateAsync({ id: patientId, formData });
@@ -87,6 +91,7 @@ export function PatientDocumentsPanel({ patientId }) {
       setTitle('');
       // Cleared, not reset to today — the next document is a different document with its own date.
       setClinicalDate('');
+      setPatientVisibility('HIDDEN');
     } catch (err) {
       toast.error(err?.response?.data?.message || t('patients.documents.uploadFailed', 'Upload failed'));
     }
@@ -129,6 +134,19 @@ export function PatientDocumentsPanel({ patientId }) {
               {SOURCES.map((s) => (
                 <option key={s} value={s}>{sourceLabel(s)}</option>
               ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="doc-visibility">{t('patients.documents.visibility', 'Patient visibility')}</Label>
+            <Select
+              id="doc-visibility"
+              value={patientVisibility}
+              onChange={(e) => setPatientVisibility(e.target.value)}
+            >
+              <option value="HIDDEN">{t('patients.documents.visibilityHidden', 'Hidden (staff only)')}</option>
+              <option value="RELEASE_ON_APPROVAL">
+                {t('patients.documents.visibilityReleaseOnApproval', 'Release on doctor approval')}
+              </option>
             </Select>
           </div>
           <div className="space-y-1">

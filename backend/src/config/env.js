@@ -58,6 +58,12 @@ const envSchema = z.object({
   /** Billing — discount above this percent of subtotal requires explicit approval before finalize. */
   BILLING_DISCOUNT_APPROVAL_THRESHOLD_PERCENT: z.coerce.number().default(20),
 
+  /** Billing — a refund above this amount (₹) is queued for BILLING_REFUND_APPROVE instead of applying immediately. */
+  BILLING_REFUND_APPROVAL_THRESHOLD_AMOUNT: z.coerce.number().default(2000),
+
+  /** Billing — a cash-close variance (₹, absolute value) beyond this amount can only be approved by OWNER, not a branch manager. */
+  BILLING_CASH_CLOSE_VARIANCE_ESCALATION_THRESHOLD_AMOUNT: z.coerce.number().default(500),
+
   /** AI clinical copilot gateway (Module 9) — provider-neutral; MOCK is safe default. */
   AI_PROVIDER: z.enum(['MOCK', 'OPENAI_COMPATIBLE', 'ANTHROPIC']).default('MOCK'),
   AI_API_KEY: z.string().optional().default(''),
@@ -66,6 +72,13 @@ const envSchema = z.object({
   /** Anthropic provider — key is read from env only, never logged, never committed. */
   ANTHROPIC_API_KEY: z.string().optional().default(''),
   ANTHROPIC_MODEL: z.string().default('claude-sonnet-5'),
+  /**
+   * Gemini — automatic fallback when ANTHROPIC_API_KEY is unset/empty (see
+   * AiProviderAdapter#effectiveProvider). Same never-logged, never-committed handling as the
+   * Anthropic key above.
+   */
+  GEMINI_API_KEY: z.string().optional().default(''),
+  GEMINI_MODEL: z.string().default('gemini-flash-latest'),
   AI_TIMEOUT_MS: z.coerce.number().default(8000),
   AI_MONTHLY_BUDGET_USD: z.coerce.number().default(50),
   AI_ENABLED: z

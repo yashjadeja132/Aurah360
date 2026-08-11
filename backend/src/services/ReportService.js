@@ -18,7 +18,13 @@ import User from '../models/User.model.js';
 import ScheduledReport from '../models/ScheduledReport.model.js';
 import LoyaltyLedgerEntry from '../models/LoyaltyLedgerEntry.model.js';
 import LoyaltyBalanceCache from '../models/LoyaltyBalanceCache.model.js';
+import LoyaltyProgramSettings from '../models/LoyaltyProgramSettings.model.js';
+import LoyaltyAdjustmentRequest from '../models/LoyaltyAdjustmentRequest.model.js';
+import AuditLog from '../models/AuditLog.model.js';
 import { LOYALTY_ENTRY_TYPE, LOYALTY_EARNING_EVENT } from '../enums/loyalty.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { hasAnyPermission } from '../helpers/permission.helper.js';
+import { ROLES } from '../constants/roles.js';
 import SavedReportFilter from '../models/SavedReportFilter.model.js';
 import ReportRun from '../models/ReportRun.model.js';
 import AuditService from './AuditService.js';
@@ -31,6 +37,7 @@ import {
   REPORT_RUN_STATUS,
   SCHEDULE_FREQUENCY,
   EXPORT_FORMAT,
+  LOYALTY_REPORT_TYPE_LIST,
 } from '../enums/report.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { dayBucket, clinicDayKey } from '../utils/date.util.js';
@@ -601,10 +608,46 @@ class ReportService {
     };
   }
 
+  /**
+   * Loyalty Program → Reports is gated by LOYALTY_REPORTS_VIEW/LOYALTY_REPORTS_EXPORT in
+   * addition to the generic REPORTS_VIEW/REPORTS_EXPORT the route already checked — these report
+   * types surface program liability/financial detail, so a role that can see generic reports
+   * (e.g. CRM_EXECUTIVE via REPORTS_VIEW) must not automatically see loyalty liability figures
+   * unless it also holds the loyalty-specific permission.
+   */
+  // `req` is omitted only by the background report-run worker (`processReportRun`), which never
+  // has an HTTP request to check — that path is safe specifically because `queueExport` already
+  // ran this same check synchronously at enqueue time (see `assertLoyaltyExportPermission`
+  // below). Every caller that DOES have a real request (the synchronous generate/export routes)
+  // always passes it, so a missing `req` here can only mean "already authorized upstream," never
+  // "authorization was skipped."
+  #assertLoyaltyReportPermission(type, req, requiredPermission) {
+    if (!LOYALTY_REPORT_TYPE_LIST.includes(type)) return;
+    if (!req) return;
+    if (req?.auth?.role === ROLES.OWNER) return;
+    const granted = req?.auth?.permissions || [];
+    if (!hasAnyPermission(granted, [requiredPermission, PERMISSIONS.LOYALTY_ALL])) {
+      throw ApiError.forbidden('Insufficient permissions for loyalty reports');
+    }
+  }
+
+  // Exposed so the controller can gate the ASYNC queue path (`POST /export/:type/queue`) the same
+  // way the synchronous export path is gated — without this, enqueueing a loyalty report only
+  // needed the generic REPORTS_EXPORT permission, and the actual generation later runs inside
+  // `processReportRun` with no `req` at all (it's a background job), so the loyalty-specific check
+  // never ran anywhere for the queued path.
+  assertLoyaltyExportPermission(type, req) {
+    this.#assertLoyaltyReportPermission(type, req, PERMISSIONS.LOYALTY_REPORTS_EXPORT);
+  }
+
   async generateReport(type, query = {}, { actorId, req, audit = true } = {}) {
+    this.#assertLoyaltyReportPermission(type, req, PERMISSIONS.LOYALTY_REPORTS_VIEW);
     const filters = parseReportFilters(query);
     let columns;
     let rows;
+    // Populated only by report types that have extra summary data beyond a flat table (currently
+    // just LOYALTY_LIABILITY's branch breakdown/₹ total) — every other report leaves this null.
+    let meta = null;
 
     switch (type) {
       case REPORT_TYPE.APPOINTMENTS:
@@ -643,10 +686,18 @@ class ReportService {
       case REPORT_TYPE.QUEUE:
         ({ columns, rows } = await this.#reportQueue(filters));
         break;
-      case REPORT_TYPE.LOYALTY_LIABILITY:
+      case REPORT_TYPE.LOYALTY_LIABILITY: {
         // Takes no filters on purpose — a point balance has no branch. See the method's docblock.
-        ({ columns, rows } = await this.#reportLoyaltyLiability());
+        const liability = await this.#reportLoyaltyLiability();
+        columns = liability.columns;
+        rows = liability.rows;
+        meta = {
+          branchBreakdown: liability.branchBreakdown,
+          totalLiabilityInr: liability.totalLiabilityInr,
+          note: liability.note,
+        };
         break;
+      }
       case REPORT_TYPE.LOYALTY_ISSUANCE:
         ({ columns, rows } = await this.#reportLoyaltyIssuance(filters));
         break;
@@ -658,6 +709,15 @@ class ReportService {
         break;
       case REPORT_TYPE.LOYALTY_REFERRAL:
         ({ columns, rows } = await this.#reportLoyaltyReferral(filters));
+        break;
+      case REPORT_TYPE.LOYALTY_PROGRAM_IMPACT:
+        ({ columns, rows, meta } = await this.#reportLoyaltyProgramImpact(filters));
+        break;
+      case REPORT_TYPE.LOYALTY_FRAUD_SIGNALS:
+        ({ columns, rows } = await this.#reportLoyaltyFraudSignals(filters));
+        break;
+      case REPORT_TYPE.LOYALTY_AUDIT:
+        ({ columns, rows } = await this.#reportLoyaltyAudit(filters));
         break;
       default:
         throw ApiError.badRequest('Unknown report type');
@@ -671,10 +731,14 @@ class ReportService {
       });
     }
 
-    return { reportType: type, filters, columns, rows, rowCount: rows.length };
+    return { reportType: type, filters, columns, rows, rowCount: rows.length, ...(meta ? { meta } : {}) };
   }
 
   async export(type, format, query = {}, { actorId, req } = {}) {
+    // Export needs the stricter EXPORT permission, not just VIEW — checked before generateReport
+    // re-checks VIEW, so a viewer-only role gets a clean 403 rather than a report body it can't
+    // legitimately walk away with.
+    this.#assertLoyaltyReportPermission(type, req, PERMISSIONS.LOYALTY_REPORTS_EXPORT);
     const report = await this.generateReport(type, query, { actorId, req, audit: true });
     const exported = exportReport({
       format,
@@ -693,6 +757,22 @@ class ReportService {
       },
       req,
     });
+
+    // Loyalty-specific export audit trail (⚠ export permission + audit per the LOY reports spec)
+    // — a distinct action from the generic REPORT_EXPORTED above, so "who exported loyalty
+    // liability/fraud data" is directly queryable without filtering every report export by type.
+    if (LOYALTY_REPORT_TYPE_LIST.includes(type)) {
+      await this.audit.record(AUDIT_ACTIONS.LOYALTY_REPORT_EXPORTED, {
+        actorId,
+        metadata: {
+          reportType: type,
+          format,
+          rowCount: report.rowCount,
+          filters: query,
+        },
+        req,
+      });
+    }
 
     return { ...exported, reportType: type, rowCount: report.rowCount };
   }
@@ -1294,17 +1374,39 @@ class ReportService {
    */
   async #reportLoyaltyLiability() {
     const match = { currentBalance: { $gt: 0 } };
-    const rows = await LoyaltyBalanceCache.find(match)
-      .populate('patientId', 'firstName middleName lastName mrn')
-      .sort({ currentBalance: -1 })
-      .limit(2000)
-      .lean();
+    const [rows, settings] = await Promise.all([
+      LoyaltyBalanceCache.find(match)
+        // LOY-014 — `primaryBranchId` is the closest thing to a "home branch" a patient carries
+        // (PatientService/Patient.model.js); it is used ONLY to label each row for a branch-wise
+        // read of an org-wide liability, never to filter it — a balance still has no real branch
+        // (see the class-level comment above), so nothing here changes what is owed or to whom.
+        .populate('patientId', 'firstName middleName lastName mrn primaryBranchId')
+        .sort({ currentBalance: -1 })
+        .limit(2000)
+        .lean(),
+      // Current conversion rate only — a historical per-entry rate would need each ledger row's
+      // own conversionRateVersion, which a point-in-time BALANCE (not a ledger entry) doesn't
+      // carry, so "today's rate against today's balance" is the honest number to report.
+      LoyaltyProgramSettings.findOne().sort({ effectiveFrom: -1 }).select('redemptionPointsPerRupee').lean(),
+    ]);
+
+    const branchIds = [...new Set(rows.map((c) => c.patientId?.primaryBranchId?.toString()).filter(Boolean))];
+    const branches = branchIds.length
+      ? await Branch.find({ _id: { $in: branchIds } }).select('name displayName branchCode').lean()
+      : [];
+    const branchNameById = new Map(branches.map((b) => [b._id.toString(), b.displayName || b.name]));
+
+    const pointsPerRupee = settings?.redemptionPointsPerRupee || null;
+    const inrValue = (points) => (pointsPerRupee ? Math.round((points / pointsPerRupee) * 100) / 100 : null);
+
     return {
       columns: [
         { key: 'patient', label: 'Patient' },
         { key: 'mrn', label: 'MRN' },
+        { key: 'branch', label: 'Home Branch' },
         { key: 'currentBalance', label: 'Points Balance' },
         { key: 'redeemableBalance', label: 'Redeemable Points' },
+        { key: 'liabilityInr', label: 'Liability (₹)' },
         { key: 'lifetimeEarned', label: 'Lifetime Earned' },
         { key: 'lifetimeRedeemed', label: 'Lifetime Redeemed' },
         { key: 'recalculatedAt', label: 'As Of' },
@@ -1312,12 +1414,36 @@ class ReportService {
       rows: rows.map((c) => ({
         patient: personName(c.patientId),
         mrn: c.patientId?.mrn || '',
+        branch: branchNameById.get(c.patientId?.primaryBranchId?.toString()) || 'Unassigned',
         currentBalance: c.currentBalance,
         redeemableBalance: c.redeemableBalance,
+        liabilityInr: inrValue(c.redeemableBalance),
         lifetimeEarned: c.lifetimeEarned,
         lifetimeRedeemed: c.lifetimeRedeemed,
         recalculatedAt: c.recalculatedAt?.toISOString?.() || '',
       })),
+      // LOY-014 — branch-wise breakdown, derived from patient.primaryBranchId since a point
+      // balance itself carries no branch. "Unassigned" groups patients with no primary branch on
+      // file; it is not the same as "zero liability" and must not be dropped from the total.
+      branchBreakdown: Object.values(
+        rows.reduce((acc, c) => {
+          const key = c.patientId?.primaryBranchId?.toString() || 'UNASSIGNED';
+          const label = key === 'UNASSIGNED' ? 'Unassigned' : branchNameById.get(key) || key;
+          if (!acc[key]) {
+            acc[key] = { branch: label, patients: 0, pointsBalance: 0, liabilityInr: 0 };
+          }
+          acc[key].patients += 1;
+          acc[key].pointsBalance += c.redeemableBalance;
+          acc[key].liabilityInr += inrValue(c.redeemableBalance) || 0;
+          return acc;
+        }, {})
+      ),
+      totalLiabilityInr: pointsPerRupee
+        ? Math.round((rows.reduce((sum, c) => sum + c.redeemableBalance, 0) / pointsPerRupee) * 100) / 100
+        : null,
+      note: pointsPerRupee
+        ? null
+        : 'No LoyaltyProgramSettings found — liability could not be converted to ₹.',
     };
   }
 
@@ -1455,6 +1581,198 @@ class ReportService {
         side: r.ruleCode,
         points: r.points,
         referralId: r.sourceRefId?.toString?.() || '',
+        createdAt: r.createdAt?.toISOString?.() || '',
+      })),
+    };
+  }
+
+  /**
+   * BEST-EFFORT — "program impact" has no dedicated methodology anywhere in this codebase (no
+   * cohort/attribution model, no A/B holdout). This is the simplest HONEST metric available from
+   * data we actually have: average invoice spend for patients who hold at least one loyalty
+   * ledger entry ("members") vs patients who hold none ("non-members"), over the filtered date
+   * range. It is a correlation, not a causal lift — the `note` in the returned meta says so
+   * explicitly so the UI never implies more rigor than the number supports.
+   */
+  async #reportLoyaltyProgramImpact(filters) {
+    const memberIds = await LoyaltyLedgerEntry.distinct('patientId', this.#loyaltyDateMatch(filters));
+    const memberIdSet = new Set(memberIds.map((id) => id.toString()));
+
+    const invoiceMatch = {
+      deletedAt: null,
+      status: { $ne: 'VOID' },
+      ...(filters.branchId ? { branchId: filters.branchId } : {}),
+      ...(filters.dateFrom || filters.dateTo
+        ? {
+            createdAt: {
+              ...(filters.dateFrom ? { $gte: filters.dateFrom } : {}),
+              ...(filters.dateTo ? { $lte: filters.dateTo } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const rows = await Invoice.aggregate([
+      { $match: invoiceMatch },
+      {
+        $group: {
+          _id: '$patientId',
+          totalSpend: { $sum: '$total' },
+          invoiceCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const summarize = (list) => {
+      const patients = list.length;
+      const totalSpend = list.reduce((s, r) => s + (r.totalSpend || 0), 0);
+      const invoiceCount = list.reduce((s, r) => s + (r.invoiceCount || 0), 0);
+      return {
+        patients,
+        avgSpendPerPatient: patients ? roundMoney(totalSpend / patients) : 0,
+        avgInvoiceCount: patients ? Math.round((invoiceCount / patients) * 100) / 100 : 0,
+        totalSpend: roundMoney(totalSpend),
+      };
+    };
+
+    const memberRows = rows.filter((r) => memberIdSet.has(r._id?.toString()));
+    const nonMemberRows = rows.filter((r) => !memberIdSet.has(r._id?.toString()));
+    const members = summarize(memberRows);
+    const nonMembers = summarize(nonMemberRows);
+    const upliftPercent = nonMembers.avgSpendPerPatient
+      ? pct(members.avgSpendPerPatient - nonMembers.avgSpendPerPatient, nonMembers.avgSpendPerPatient)
+      : null;
+
+    return {
+      columns: [
+        { key: 'cohort', label: 'Cohort' },
+        { key: 'patients', label: 'Patients' },
+        { key: 'avgSpendPerPatient', label: 'Avg Spend / Patient (₹)' },
+        { key: 'avgInvoiceCount', label: 'Avg Invoices / Patient' },
+        { key: 'totalSpend', label: 'Total Spend (₹)' },
+      ],
+      rows: [
+        { cohort: 'Loyalty members', ...members },
+        { cohort: 'Non-members', ...nonMembers },
+      ],
+      meta: {
+        upliftPercent,
+        note:
+          'BEST-EFFORT metric: average invoice spend of patients with at least one loyalty ledger ' +
+          'entry vs patients with none, over the selected range. This is a correlation, not a ' +
+          'controlled before/after or attribution measure — the codebase has no cohort/holdout ' +
+          'methodology to compute a causal lift.',
+      },
+    };
+  }
+
+  /**
+   * BEST-EFFORT — simple threshold-based flags, no ML/scoring model (none exists in this
+   * codebase). Two independent signals computed straight from LoyaltyLedgerEntry/
+   * LoyaltyAdjustmentRequest, both configurable-in-spirit thresholds chosen to be conservative:
+   *   1. Unusually large single manual adjustment (>= 500 points in one entry).
+   *   2. High-frequency redemptions — a patient with more than 5 DEBIT_REDEEM entries within the
+   *      filtered window is flagged for review (does not itself imply wrongdoing).
+   */
+  async #reportLoyaltyFraudSignals(filters) {
+    const LARGE_ADJUSTMENT_THRESHOLD = 500;
+    const HIGH_FREQUENCY_REDEMPTION_COUNT = 5;
+
+    const largeAdjustments = await LoyaltyLedgerEntry.find({
+      ...this.#loyaltyDateMatch(filters),
+      entryType: { $in: [LOYALTY_ENTRY_TYPE.MANUAL_CREDIT, LOYALTY_ENTRY_TYPE.MANUAL_DEBIT] },
+      points: { $gte: LARGE_ADJUSTMENT_THRESHOLD },
+    })
+      .populate('patientId', 'firstName middleName lastName mrn')
+      .populate('createdBy', 'firstName lastName')
+      .sort({ points: -1 })
+      .limit(500)
+      .lean();
+
+    const highFrequency = await LoyaltyLedgerEntry.aggregate([
+      { $match: { ...this.#loyaltyDateMatch(filters), entryType: LOYALTY_ENTRY_TYPE.DEBIT_REDEEM } },
+      { $group: { _id: '$patientId', redemptions: { $sum: 1 }, totalPoints: { $sum: '$points' } } },
+      { $match: { redemptions: { $gt: HIGH_FREQUENCY_REDEMPTION_COUNT } } },
+      { $sort: { redemptions: -1 } },
+      { $limit: 200 },
+    ]);
+    const highFreqPatientIds = highFrequency.map((r) => r._id).filter(Boolean);
+    const highFreqPatients = highFreqPatientIds.length
+      ? await Patient.find({ _id: { $in: highFreqPatientIds } }).select('firstName middleName lastName mrn').lean()
+      : [];
+    const patientById = new Map(highFreqPatients.map((p) => [p._id.toString(), p]));
+
+    const rows = [
+      ...largeAdjustments.map((e) => ({
+        signal: 'LARGE_MANUAL_ADJUSTMENT',
+        patient: personName(e.patientId),
+        mrn: e.patientId?.mrn || '',
+        detail: `${e.entryType} of ${e.points} points`,
+        actor: personName(e.createdBy) || '',
+        occurredAt: e.createdAt?.toISOString?.() || '',
+      })),
+      ...highFrequency.map((r) => ({
+        signal: 'HIGH_FREQUENCY_REDEMPTION',
+        patient: personName(patientById.get(r._id?.toString())),
+        mrn: patientById.get(r._id?.toString())?.mrn || '',
+        detail: `${r.redemptions} redemptions totalling ${r.totalPoints} points in range`,
+        actor: '',
+        occurredAt: '',
+      })),
+    ];
+
+    return {
+      columns: [
+        { key: 'signal', label: 'Signal' },
+        { key: 'patient', label: 'Patient' },
+        { key: 'mrn', label: 'MRN' },
+        { key: 'detail', label: 'Detail' },
+        { key: 'actor', label: 'Actor' },
+        { key: 'occurredAt', label: 'Occurred At' },
+      ],
+      rows,
+    };
+  }
+
+  /**
+   * Audit view — filters the EXISTING audit log (AuditLog model / AuditService) down to
+   * LOYALTY_* actions, with the same branch/date filters as every other loyalty report. This
+   * deliberately does not duplicate AuditService's query builder; it is a thin re-scoping of the
+   * same collection for the loyalty reports tab. Full metadata is intentionally NOT decrypted/
+   * redacted here — this report exposes actions/actors/timestamps only, matching what
+   * `includeMetadata: false` returns from AuditService.search.
+   */
+  async #reportLoyaltyAudit(filters) {
+    const loyaltyActions = Object.values(AUDIT_ACTIONS).filter((a) => a.startsWith('LOYALTY_'));
+    const match = { action: { $in: loyaltyActions } };
+    if (filters.branchId) match.branchId = filters.branchId;
+    if (filters.dateFrom || filters.dateTo) {
+      match.createdAt = {};
+      if (filters.dateFrom) match.createdAt.$gte = filters.dateFrom;
+      if (filters.dateTo) match.createdAt.$lte = filters.dateTo;
+    }
+
+    const rows = await AuditLog.find(match)
+      .populate('actorId', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .limit(2000)
+      .lean();
+
+    return {
+      columns: [
+        { key: 'action', label: 'Action' },
+        { key: 'actor', label: 'Actor' },
+        { key: 'resourceType', label: 'Resource Type' },
+        { key: 'resourceId', label: 'Resource Id' },
+        { key: 'branchId', label: 'Branch' },
+        { key: 'createdAt', label: 'When' },
+      ],
+      rows: rows.map((r) => ({
+        action: r.action,
+        actor: personName(r.actorId) || r.actorId?.email || '',
+        resourceType: r.resourceType || '',
+        resourceId: r.resourceId?.toString?.() || '',
+        branchId: r.branchId?.toString?.() || '',
         createdAt: r.createdAt?.toISOString?.() || '',
       })),
     };

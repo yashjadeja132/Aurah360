@@ -143,18 +143,57 @@ export function useDuePayments(params = {}) {
 
 /**
  * A.8 — refund a recorded payment. `invoiceId` is only used to refresh that invoice's detail
- * view; the server keys everything off the payment.
+ * view; the server keys everything off the payment. Above the org's refund-approval threshold
+ * the server queues a RefundRequest instead of applying it — `data.status` tells you which.
  */
 export function useRefundPayment(invoiceId) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ paymentId, ...payload }) => billingApi.refundPayment(paymentId, payload),
-    onSuccess: () => {
-      toast.success('Refund recorded');
+    onSuccess: (res) => {
+      toast.success(res?.data?.status === 'PENDING_APPROVAL' ? 'Refund submitted for approval' : 'Refund recorded');
       invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.BILLING_REFUND_APPROVALS({}) });
       if (invoiceId) qc.invalidateQueries({ queryKey: QUERY_KEYS.BILLING_DETAIL(invoiceId) });
     },
     onError: (e) => toast.error(errMsg(e, 'Refund failed')),
+  });
+}
+
+/** A.8 — approver worklist of refund requests above the approval threshold. */
+export function useRefundApprovalQueue(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.BILLING_REFUND_APPROVALS(params),
+    queryFn: async () => {
+      const res = await billingApi.refundApprovalQueue(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
+export function useApproveRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decisionNote }) => billingApi.approveRefund(id, decisionNote),
+    onSuccess: () => {
+      toast.success('Refund approved');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.BILLING_REFUND_APPROVALS({}) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Approve failed')),
+  });
+}
+
+export function useRejectRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decisionNote }) => billingApi.rejectRefund(id, decisionNote),
+    onSuccess: () => {
+      toast.success('Refund rejected');
+      invalidateAll(qc);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.BILLING_REFUND_APPROVALS({}) });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Reject failed')),
   });
 }
 

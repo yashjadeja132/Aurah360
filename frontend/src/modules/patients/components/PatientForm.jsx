@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
@@ -5,8 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import { GENDER_OPTIONS } from '@/constants/rbac';
+import { GENDER_OPTIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
 import { patientFormSchema, toPatientPayload } from '../validation/patientSchema';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES — same reasoning as
+// QuickAddPatientDialog's branch field. A branch-scoped staff member only ever registers/edits
+// patients at their own branch, so the primary-branch field is locked for them here too.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'UNKNOWN'];
 const MARITAL = ['SINGLE', 'MARRIED', 'DIVORCED', 'WIDOWED', 'OTHER'];
@@ -31,6 +38,8 @@ export function PatientForm({
   tagOptions = [],
 }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const {
     register,
     handleSubmit,
@@ -56,11 +65,39 @@ export function PatientForm({
   });
 
   const tags = watch('tags') || [];
+  const primaryBranchId = watch('primaryBranchId');
+  const primaryDoctorId = watch('primaryDoctorId');
 
   const toggleTag = (name) => {
     if (tags.includes(name)) setValue('tags', tags.filter((tag) => tag !== name));
     else setValue('tags', [...tags, name]);
   };
+
+  // The doctor list must reflect who actually practices at the SELECTED branch, not every
+  // doctor in the org — Doctor.branches (an array of branch ids, already returned by
+  // useDoctorList) is the source of truth. Before a branch is picked there's nothing to filter
+  // against yet, so show the full list rather than an empty one.
+  const doctorsForSelectedBranch = useMemo(() => {
+    if (!primaryBranchId) return doctors;
+    return doctors.filter((d) => (d.branches || []).includes(primaryBranchId));
+  }, [doctors, primaryBranchId]);
+
+  // If the branch changes and the currently-selected doctor no longer practices there, clear
+  // it — keeping a doctor selected who doesn't work at the newly-chosen branch would silently
+  // save a mismatched primaryBranchId/primaryDoctorId pair.
+  useEffect(() => {
+    if (primaryDoctorId && !doctorsForSelectedBranch.some((d) => d.id === primaryDoctorId)) {
+      setValue('primaryDoctorId', '');
+    }
+  }, [doctorsForSelectedBranch, primaryDoctorId, setValue]);
+
+  // Branch-scoped roles never get to pick a branch here — pre-fill their own the moment it's
+  // known (registration) and leave an existing patient's branch untouched (edit).
+  useEffect(() => {
+    if (!isGlobalScope && !primaryBranchId && user?.branch) {
+      setValue('primaryBranchId', user.branch);
+    }
+  }, [isGlobalScope, primaryBranchId, user?.branch, setValue]);
 
   return (
     <form
@@ -172,7 +209,7 @@ export function PatientForm({
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={t('patients.form.primaryBranch', 'Primary branch')} error={errors.primaryBranchId?.message}>
-            <Select {...register('primaryBranchId')}>
+            <Select {...register('primaryBranchId')} disabled={!isGlobalScope}>
               <option value="">{t('patients.form.selectBranch', 'Select branch')}</option>
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
@@ -182,7 +219,7 @@ export function PatientForm({
           <Field label={t('patients.form.primaryDoctor', 'Primary doctor')}>
             <Select {...register('primaryDoctorId')}>
               <option value="">{t('patients.form.optional', 'Optional')}</option>
-              {doctors.map((d) => (
+              {doctorsForSelectedBranch.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.user?.fullName || d.doctorCode} ({d.doctorCode})
                 </option>

@@ -183,11 +183,12 @@ export class DispenseRepository extends BaseRepository {
       .exec();
   }
 
-  async list({ branchId, status, patientId, limit = 50, skip = 0 } = {}) {
+  async list({ branchId, status, patientId, saleType, limit = 50, skip = 0 } = {}) {
     const filter = { deletedAt: null };
     if (branchId) filter.branchId = branchId;
     if (status) filter.status = status;
     if (patientId) filter.patientId = patientId;
+    if (saleType) filter.saleType = saleType;
     const [items, total] = await Promise.all([
       this.model
         .find(filter)

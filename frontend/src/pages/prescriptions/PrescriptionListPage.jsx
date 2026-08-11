@@ -5,9 +5,12 @@ import { Plus, Pill } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
+import { useAuth } from '@/contexts/AuthContext';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
+import { useConsultationDetail } from '@/modules/consultations/hooks/useConsultations';
 import {
   useDoctorPrescriptions,
   useCreatePrescription,
@@ -18,18 +21,24 @@ import {
 } from '@/modules/prescriptions/hooks/usePrescriptions';
 import { PRESCRIPTION_STATUS_LABELS } from '@/modules/prescriptions/constants';
 import { prescriptionEditPath, prescriptionPrintPath } from '@/constants/routes';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
 
 export default function PrescriptionListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const consultationId = searchParams.get('consultationId') || '';
+  const { user } = useAuth();
+  // A DOCTOR must never be offered a picker over every other doctor's prescriptions — the
+  // backend (scope.helper.js#resolveDoctorScope, wired via PrescriptionController's
+  // scopedListQuery) already 403s/404s a DOCTOR who requests someone else's doctorId, so this
+  // mirrors the same fix already applied to ConsultationListPage.jsx.
+  const isDoctorRole = user?.role === ROLES.DOCTOR;
 
   const { data: doctorsData } = useDoctorList({ limit: 50 });
-  const doctors = doctorsData?.items || [];
+  const doctors = isDoctorRole ? [] : doctorsData?.items || [];
   const [doctorId, setDoctorId] = useState('');
-  const effectiveDoctorId = doctorId || doctors[0]?.id || '';
+  const effectiveDoctorId = isDoctorRole ? undefined : doctorId || doctors[0]?.id || '';
 
   const { data: prescriptions = [], isLoading } = useDoctorPrescriptions(effectiveDoctorId);
   const { data: templates = [] } = usePrescriptionTemplates(effectiveDoctorId);
@@ -39,6 +48,11 @@ export default function PrescriptionListPage() {
   const applyTemplate = useApplyTemplate();
 
   const [newConsultationId, setNewConsultationId] = useState(consultationId);
+  // Only queried for the URL-provided consultationId (deep-link from the consultation
+  // workspace's "Prescriptions" action) — never for free-typed manual entry, so this doesn't
+  // fire a lookup on every keystroke. Lets the raw ObjectId stay internal-only; the visible
+  // label is the human-readable consultation number + patient name.
+  const { data: linkedConsultation } = useConsultationDetail(consultationId);
 
   const startBlank = async () => {
     if (!newConsultationId) return;
@@ -62,19 +76,38 @@ export default function PrescriptionListPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select value={effectiveDoctorId} onChange={(e) => setDoctorId(e.target.value)}>
-          <option value="">{t('prescriptions.list.selectDoctor', 'Select doctor')}</option>
-          {doctors.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.doctorCode} — {d.user?.fullName || t('prescriptions.list.doctorFallback', 'Doctor')}
-            </option>
-          ))}
-        </Select>
-        <Input
-          placeholder={t('prescriptions.list.consultationIdPlaceholder', 'Consultation ID to create Rx…')}
-          value={newConsultationId}
-          onChange={(e) => setNewConsultationId(e.target.value)}
-        />
+        {!isDoctorRole && (
+          <SearchableCombobox
+            value={effectiveDoctorId}
+            onChange={setDoctorId}
+            options={doctors}
+            filterKeys={['doctorCode']}
+            renderLabel={(d) => d.user?.fullName || t('prescriptions.list.doctorFallback', 'Doctor')}
+            renderSublabel={(d) => `(${d.doctorCode})`}
+            placeholder={t('prescriptions.list.selectDoctor', 'Select doctor')}
+            emptyText={t('prescriptions.list.noDoctorMatch', 'No doctor matches')}
+          />
+        )}
+        {consultationId ? (
+          // Deep-linked from a consultation — show the human-readable reference, never the
+          // raw ObjectId. newConsultationId (used by startBlank/applyTemplate) stays set to
+          // the real id underneath; only the display differs.
+          <div className="flex w-fit max-w-full items-center gap-2 whitespace-nowrap rounded-md border bg-muted/40 px-3 py-2 text-sm sm:col-span-2">
+            <Pill className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="font-medium">
+              {linkedConsultation?.consultationNumber || t('common.loading', 'Loading…')}
+            </span>
+            {linkedConsultation?.patient?.fullName && (
+              <span className="text-muted-foreground">· {linkedConsultation.patient.fullName}</span>
+            )}
+          </div>
+        ) : (
+          <Input
+            placeholder={t('prescriptions.list.consultationIdPlaceholder', 'Consultation ID to create Rx…')}
+            value={newConsultationId}
+            onChange={(e) => setNewConsultationId(e.target.value)}
+          />
+        )}
         <PermissionGuard permissions={[PERMISSIONS.PRESCRIPTION_CREATE, PERMISSIONS.PRESCRIPTION_ALL]}>
           <Button onClick={startBlank} disabled={!newConsultationId || create.isPending}>
             <Plus className="h-4 w-4" />

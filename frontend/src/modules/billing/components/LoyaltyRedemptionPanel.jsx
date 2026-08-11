@@ -22,6 +22,10 @@ import { PERMISSIONS } from '@/constants/rbac';
 export function LoyaltyRedemptionPanel({ invoiceId, patientId, invoice }) {
   const { t } = useTranslation();
   const [points, setPoints] = useState('');
+  // LOY-005 identity-confirmation gate state.
+  const [identityConfirmedChecked, setIdentityConfirmedChecked] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpVerified, setOtpVerified] = useState(false);
 
   const { data: settings, isLoading: settingsLoading } = useLoyaltySettings();
   const { data: balance, isLoading: balanceLoading } = usePatientBalance(patientId);
@@ -76,6 +80,23 @@ export function LoyaltyRedemptionPanel({ invoiceId, patientId, invoice }) {
   if (settings?.programEnabled === false) return null;
   if (!appliedRedemption && redeemableBalance <= 0) return null;
 
+  // LOY-005 — identity confirmation gate. Mirrors the server-side check in
+  // LoyaltyLedgerService.redeem(): IN_PERSON needs a staff tick, OTP needs a verified code.
+  const identityConfirmation = settings?.redemptionIdentityConfirmation || 'NONE';
+  const identityGateSatisfied =
+    identityConfirmation === 'NONE' ||
+    (identityConfirmation === 'IN_PERSON' && identityConfirmedChecked) ||
+    (identityConfirmation === 'OTP' && otpVerified);
+
+  // Real OTP dispatch/verification is out of scope for this pass (see
+  // LoyaltyProgramSettings.model.js's redemptionIdentityConfirmation comment). This "Verify"
+  // affordance only requires a non-empty code client-side and flips otpVerified to satisfy the
+  // server's request-shape check — wiring an actual SMS/WhatsApp send-and-verify flow is a
+  // follow-up for whichever module owns OTP delivery.
+  const handleVerifyOtp = () => {
+    if (otpCode.trim()) setOtpVerified(true);
+  };
+
   return (
     <PermissionGuard permissions={[PERMISSIONS.LOYALTY_REDEEM, PERMISSIONS.BILLING_ALL]}>
       <div className="space-y-3 rounded-xl border p-4">
@@ -107,14 +128,32 @@ export function LoyaltyRedemptionPanel({ invoiceId, patientId, invoice }) {
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <Label>{t('billing.redeem.pointsToRedeem', 'Points to redeem')}</Label>
-              <Input
-                type="number"
-                step={stepPoints}
-                min={0}
-                max={redeemableBalance}
-                value={points}
-                onChange={(e) => setPoints(e.target.value)}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  step={stepPoints}
+                  min={0}
+                  max={redeemableBalance}
+                  value={points}
+                  onChange={(e) => setPoints(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // "Max" — largest redemption the invoice cap and balance both allow, snapped
+                    // down to a whole step (billing.redeem.stepError requires a step multiple).
+                    const capPoints =
+                      clientCapInr != null ? Math.floor(clientCapInr * pointsPerRupee) : redeemableBalance;
+                    const maxPoints = Math.min(redeemableBalance, capPoints);
+                    const stepped = Math.floor(maxPoints / stepPoints) * stepPoints;
+                    setPoints(String(Math.max(stepped, 0)));
+                  }}
+                >
+                  {t('billing.redeem.max', 'Max')}
+                </Button>
+              </div>
             </div>
             <div>
               <Label>{t('billing.redeem.discountPreview', 'Discount preview')}</Label>
@@ -122,11 +161,27 @@ export function LoyaltyRedemptionPanel({ invoiceId, patientId, invoice }) {
             </div>
             <div className="flex items-end">
               <Button
-                disabled={!points || Boolean(clientValidationError) || applyRedemption.isPending}
+                disabled={
+                  !points ||
+                  Boolean(clientValidationError) ||
+                  !identityGateSatisfied ||
+                  applyRedemption.isPending
+                }
                 onClick={() =>
                   applyRedemption.mutate(
-                    { points: Number(points) },
-                    { onSuccess: () => setPoints('') }
+                    {
+                      points: Number(points),
+                      ...(identityConfirmation === 'IN_PERSON' && { identityConfirmed: identityConfirmedChecked }),
+                      ...(identityConfirmation === 'OTP' && { identityConfirmed: true, otpVerified }),
+                    },
+                    {
+                      onSuccess: () => {
+                        setPoints('');
+                        setIdentityConfirmedChecked(false);
+                        setOtpCode('');
+                        setOtpVerified(false);
+                      },
+                    }
                   )
                 }
               >
@@ -135,6 +190,50 @@ export function LoyaltyRedemptionPanel({ invoiceId, patientId, invoice }) {
             </div>
             {clientValidationError && (
               <p className="text-xs text-destructive sm:col-span-3">{clientValidationError}</p>
+            )}
+
+            {identityConfirmation === 'IN_PERSON' && (
+              <div className="flex items-center gap-2 rounded-lg border p-3 sm:col-span-3">
+                <input
+                  id="identityConfirmedInPerson"
+                  type="checkbox"
+                  checked={identityConfirmedChecked}
+                  onChange={(e) => setIdentityConfirmedChecked(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="identityConfirmedInPerson" className="text-sm font-normal">
+                  {t('billing.redeem.identityInPerson', 'Patient identity confirmed in person')}
+                </Label>
+              </div>
+            )}
+
+            {identityConfirmation === 'OTP' && (
+              <div className="flex flex-wrap items-end gap-2 rounded-lg border p-3 sm:col-span-3">
+                <div className="flex-1">
+                  <Label htmlFor="redemptionOtpCode">{t('billing.redeem.otpLabel', 'OTP code')}</Label>
+                  <Input
+                    id="redemptionOtpCode"
+                    value={otpCode}
+                    disabled={otpVerified}
+                    onChange={(e) => {
+                      setOtpCode(e.target.value);
+                      setOtpVerified(false);
+                    }}
+                    placeholder={t('billing.redeem.otpPlaceholder', 'Enter OTP')}
+                  />
+                </div>
+                <Button type="button" variant="outline" disabled={!otpCode.trim() || otpVerified} onClick={handleVerifyOtp}>
+                  {otpVerified ? t('billing.redeem.otpVerified', 'Verified') : t('billing.redeem.otpVerify', 'Verify')}
+                </Button>
+                {!otpVerified && (
+                  <p className="text-xs text-muted-foreground sm:basis-full">
+                    {t(
+                      'billing.redeem.otpHint',
+                      'OTP delivery is not wired up yet — enter any code and verify to proceed.'
+                    )}
+                  </p>
+                )}
+              </div>
             )}
             <p className="text-xs text-muted-foreground sm:col-span-3">
               {t(

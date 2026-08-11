@@ -19,6 +19,24 @@ export function useConsultationWorkspace(id) {
   });
 }
 
+/**
+ * Lightweight consultation fetch — just the consultation document (already carries nested
+ * patient/doctor/branch/appointment). Use this instead of useConsultationWorkspace() for
+ * anything that only needs to DISPLAY a human-readable reference (consultation number, patient
+ * name) — the workspace endpoint additionally loads SOAP, vitals, diagnosis, examination and
+ * photos, which is a meaningfully heavier/slower call for a label that needs none of it.
+ */
+export function useConsultationDetail(id) {
+  return useQuery({
+    queryKey: QUERY_KEYS.CONSULTATION_DETAIL(id),
+    queryFn: async () => {
+      const res = await consultationsApi.getById(id);
+      return res.data.consultation;
+    },
+    enabled: Boolean(id),
+  });
+}
+
 export function usePatientConsultationSummary(patientId) {
   return useQuery({
     queryKey: QUERY_KEYS.CONSULTATION_PATIENT_SUMMARY(patientId),
@@ -65,7 +83,10 @@ export function useDoctorConsultations(doctorId, params = {}) {
       const res = await consultationsApi.listByDoctor({ doctorId, ...params });
       return res.data || [];
     },
-    enabled: Boolean(doctorId),
+    // doctorId === undefined means "omit it — let the backend pin it to the caller's own
+    // doctor profile" (DOCTOR role, see scope.helper.js#resolveDoctorScope); only an explicit
+    // empty string (no doctor picked yet in a non-doctor staff view) disables the query.
+    enabled: doctorId !== '',
   });
 }
 
@@ -102,6 +123,31 @@ export function useLabOrderReviewQueue(params = {}) {
       const res = await consultationsApi.labOrderReviewQueue(params);
       return { items: res.data || [], meta: res.meta };
     },
+  });
+}
+
+/**
+ * §5 — cross-patient Follow-ups due/overdue worklist. Rows already carry populated
+ * patient/doctor/preferred-doctor/branch context, so no per-row follow-up fetch is needed.
+ */
+export function useFollowUpQueue(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.FOLLOW_UP_QUEUE(params),
+    queryFn: async () => {
+      const res = await consultationsApi.followUpQueue(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
+export function useUpdateFollowUpStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...payload }) => consultationsApi.updateFollowUpStatus(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['consultations', 'follow-ups'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Failed to update follow-up')),
   });
 }
 
@@ -152,6 +198,19 @@ export function useLockConsultation(id) {
       invalidate();
     },
     onError: (e) => toast.error(errMsg(e, 'Lock failed')),
+  });
+}
+
+/** §3.7 — classify-then-release; invalidates the workspace so patientFacingSummary/releaseSections refresh. */
+export function useReleaseSummary(id) {
+  const invalidate = useInvalidateWorkspace(id);
+  return useMutation({
+    mutationFn: (payload) => consultationsApi.releaseSummary(id, payload),
+    onSuccess: () => {
+      toast.success('Summary released to patient');
+      invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Release failed')),
   });
 }
 
@@ -259,6 +318,29 @@ export function useUpdateLabOrder(id) {
     onSuccess: () => {
       toast.success('Lab order updated');
       invalidate();
+    },
+    onError: (e) => toast.error(errMsg(e, 'Lab order update failed')),
+  });
+}
+
+/**
+ * A13 — inline "Mark reviewed" from the cross-patient Report Review queue. Unlike
+ * useUpdateLabOrder(id), rows in the queue each belong to a different consultation, so this
+ * mutation takes the consultationId per-call instead of binding it up front, and invalidates the
+ * review queue list (plus that row's consultation caches) on success.
+ */
+export function useUpdateLabOrderFromQueue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ consultationId, labOrderId, ...payload }) =>
+      consultationsApi.updateLabOrder(consultationId, labOrderId, payload),
+    onSuccess: (_data, variables) => {
+      toast.success('Lab order updated');
+      qc.invalidateQueries({ queryKey: ['consultations', 'lab-orders', 'review-queue'] });
+      if (variables?.consultationId) {
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_LAB_ORDERS(variables.consultationId) });
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.CONSULTATION_WORKSPACE(variables.consultationId) });
+      }
     },
     onError: (e) => toast.error(errMsg(e, 'Lab order update failed')),
   });

@@ -4,14 +4,44 @@ import { TREATMENT_SESSION_STATUS_LIST } from '../enums/treatmentSession.js';
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+/**
+ * Device parameters vary by protocol/device type — the commonly-used named fields get real
+ * typed/optional structure (for reporting/validation); anything protocol-specific outside that
+ * set still fits in `customParameters` (free-form), so this stays configurable, not a hard-coded
+ * form.
+ */
+const deviceSettingsSchema = z
+  .object({
+    wavelength: z.coerce.number().optional().nullable(),
+    fluence: z.coerce.number().optional().nullable(),
+    pulseWidth: z.coerce.number().optional().nullable(),
+    spotSize: z.coerce.number().optional().nullable(),
+    coolingSetting: z.string().max(200).optional().nullable(),
+    passes: z.coerce.number().int().optional().nullable(),
+    customParameters: z.record(z.any()).optional(),
+  })
+  .optional();
+
 const deviceUsageSchema = z
   .object({
     device: z.string().max(200).optional().nullable(),
     machine: z.string().max(200).optional().nullable(),
     laserHead: z.string().max(200).optional().nullable(),
-    settings: z.record(z.any()).optional(),
+    settings: deviceSettingsSchema,
   })
   .optional();
+
+/**
+ * Batch/lot-linked consumable actually used on this session — additive alongside the legacy
+ * free-text `consumables` list. `inventoryItemId`/`batchNumber` are optional so a caller can still
+ * send a bare productName and let the service fall back to name-based resolution.
+ */
+const consumableUsedSchema = z.object({
+  inventoryItemId: objectId.optional().nullable(),
+  batchNumber: z.string().max(100).optional().nullable(),
+  quantity: z.coerce.number().min(0).optional(),
+  productName: z.string().max(200).optional().nullable(),
+});
 
 /**
  * TRT-006 — answers to TreatmentProtocol.contraindicationQuestions. `answer: true` means the
@@ -70,6 +100,7 @@ export const updateSessionSchema = z.object({
   complications: z.string().max(2000).optional().nullable(),
   outcome: z.string().max(2000).optional().nullable(),
   consumables: z.union([z.array(z.string()), z.string()]).optional(),
+  consumablesUsed: z.array(consumableUsedSchema).optional(),
   deviceUsage: deviceUsageSchema,
   contraindicationScreening: contraindicationScreeningSchema,
   followUp: followUpSchema,
@@ -80,6 +111,7 @@ export const startSessionSchema = z.object({
   operatorName: z.string().max(200).optional().nullable(),
   deviceUsage: deviceUsageSchema,
   consumables: z.array(z.string()).optional(),
+  consumablesUsed: z.array(consumableUsedSchema).optional(),
   contraindicationScreening: contraindicationScreeningSchema,
   /** TRT-006 — authorized hard-stop override with mandatory reason. */
   override: z.object({ reason: z.string().min(1).max(500) }).optional().nullable(),
@@ -91,8 +123,14 @@ export const completeSessionSchema = z.object({
   outcome: z.string().max(2000).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   consumables: z.array(z.string()).optional(),
+  consumablesUsed: z.array(consumableUsedSchema).optional(),
   deviceUsage: deviceUsageSchema,
   followUp: followUpSchema,
+});
+
+/** Pause requires a mandatory typed reason — same min-length convention as queue.validator.js. */
+export const pauseSessionSchema = z.object({
+  reason: z.string().min(3).max(500),
 });
 
 export const rescheduleSchema = z.object({

@@ -4,6 +4,7 @@ import { AlertTriangle, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -17,12 +18,19 @@ import {
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { usePatientList } from '@/modules/patients/hooks/usePatients';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   useAdverseEvents,
   useReportAdverseEvent,
   useCloseAdverseEvent,
 } from '../hooks/useTreatmentSafety';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. TreatmentSafetyService
+// rejects reportAdverseEvent when payload.branchId differs from the reporter's own branch
+// scope (see #reportAdverseEvent's BRANCH_SCOPE_VIOLATION check) — so DOCTOR/NURSE, who only
+// ever report from their own branch, must never be offered a branch picker here.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 const SEVERITY_VARIANT = {
   MILD: 'secondary',
@@ -59,20 +67,34 @@ const STATUS_LABEL_KEYS = {
  * tracks adverse events, which must never be hidden by completing billing (§10.3).
  * Gates unchanged: adverse_event.create to report, adverse_event.resolve to close.
  */
-export function AdverseEventRegisterPanel() {
+export function AdverseEventRegisterPanel({ patientId: filterPatientId } = {}) {
   const { t } = useTranslation();
-  const { data: patientsData } = usePatientList({ limit: 50 });
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
+  const ownBranchId = !isGlobalScope ? user?.branch || '' : '';
+  const [patientSearch, setPatientSearch] = useState('');
+  const { data: patientsData, isFetching: patientsFetching } = usePatientList({
+    search: patientSearch,
+    limit: 10,
+    page: 1,
+  });
   const patients = patientsData?.items || [];
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
+  const ownBranchName =
+    branches.find((b) => String(b.id) === String(ownBranchId))?.displayName ||
+    branches.find((b) => String(b.id) === String(ownBranchId))?.name ||
+    null;
 
-  const { data: events = [], isLoading } = useAdverseEvents();
+  const { data: events = [], isLoading } = useAdverseEvents(
+    filterPatientId ? { patientId: filterPatientId } : {}
+  );
   const report = useReportAdverseEvent();
   const close = useCloseAdverseEvent();
 
   const [form, setForm] = useState({
-    patientId: '',
-    branchId: '',
+    patientId: filterPatientId || '',
+    branchId: ownBranchId,
     severity: 'MILD',
     onsetAt: new Date().toISOString().slice(0, 16),
     description: '',
@@ -104,32 +126,41 @@ export function AdverseEventRegisterPanel() {
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Select
+              <SearchableCombobox
                 value={form.patientId}
-                onChange={(e) => setForm((f) => ({ ...f, patientId: e.target.value }))}
-              >
-                <option value="">
-                  {t('treatments.safety.reportForm.patientPlaceholder', 'Patient')}
-                </option>
-                {patients.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName}
+                onChange={(id) => setForm((f) => ({ ...f, patientId: id }))}
+                options={patients}
+                search={patientSearch}
+                onSearchChange={setPatientSearch}
+                isLoading={patientsFetching}
+                loadingText={t('common.searching', 'Searching…')}
+                renderLabel={(p) => `${p.firstName} ${p.lastName}`}
+                placeholder={t('treatments.safety.reportForm.patientPlaceholder', 'Patient')}
+                emptyText={t('treatments.safety.reportForm.noPatientMatch', 'No match')}
+              />
+              {isGlobalScope ? (
+                <Select
+                  value={form.branchId}
+                  onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
+                >
+                  <option value="">
+                    {t('treatments.safety.reportForm.branchPlaceholder', 'Branch')}
                   </option>
-                ))}
-              </Select>
-              <Select
-                value={form.branchId}
-                onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
-              >
-                <option value="">
-                  {t('treatments.safety.reportForm.branchPlaceholder', 'Branch')}
-                </option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.displayName || b.name}
-                  </option>
-                ))}
-              </Select>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.displayName || b.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                // Branch-scoped reporters (DOCTOR/NURSE) always report from their own branch —
+                // the backend rejects any other branchId, so no picker is offered.
+                <Input
+                  value={ownBranchName || t('treatments.safety.reportForm.branchPlaceholder', 'Branch')}
+                  disabled
+                  readOnly
+                />
+              )}
               <Select
                 value={form.severity}
                 onChange={(e) => setForm((f) => ({ ...f, severity: e.target.value }))}

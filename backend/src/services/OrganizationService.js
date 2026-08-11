@@ -21,12 +21,23 @@ class OrganizationService {
     const org = await this.organizationRepository.getSingleton();
     const updates = { ...payload };
     if (updates.invoicePrefix) updates.invoicePrefix = updates.invoicePrefix.trim().toUpperCase();
+    // Capture old->new per field before mutating, so the audit entry can show the actual diff
+    // rather than just the list of changed field names.
+    const changedFields = Object.keys(updates);
+    const diff = changedFields.reduce((acc, key) => {
+      acc[key] = { from: org[key] !== undefined ? org[key] : null, to: updates[key] };
+      return acc;
+    }, {});
     Object.assign(org, updates, { updatedBy: actorId });
     await org.save();
     // Push the new timezone / financial-year values into the synchronous runtime mirror straight
     // away, so the very next report request already uses them.
     refreshOrgRuntime(org);
-    await this.auditService.record(AUDIT_ACTIONS.ORGANIZATION_UPDATED, { actorId, req });
+    await this.auditService.record(AUDIT_ACTIONS.ORGANIZATION_UPDATED, {
+      actorId,
+      metadata: { fields: changedFields, diff },
+      req,
+    });
     return org.toSafeObject();
   }
 

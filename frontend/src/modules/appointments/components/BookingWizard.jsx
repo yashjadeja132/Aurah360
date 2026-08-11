@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/contexts/AuthContext';
+import { ROLES } from '@/constants/rbac';
 import { usePatientDetail } from '@/modules/patients/hooks/usePatients';
 import { useBookingSubmit } from '../hooks/useBookingSubmit';
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
@@ -16,18 +18,47 @@ import {
   PatientPicker,
 } from './bookingPickers';
 
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES — every other role is pinned
+// to their own single assigned branch (req.auth.branch server-side).
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
+
 export function BookingWizard({ onCreated, initialPatientId = '' }) {
   const { t } = useTranslation();
-  const STEPS = [
-    t('appointments.wizard.stepBranch', 'Branch'),
-    t('appointments.wizard.stepDoctor', 'Doctor'),
-    t('appointments.wizard.stepService', 'Service'),
-    t('appointments.wizard.stepSlot', 'Slot'),
-    t('appointments.wizard.stepPatient', 'Patient'),
-    t('appointments.wizard.stepConfirm', 'Confirm'),
-  ];
-  const [step, setStep] = useState(0);
-  const [branchId, setBranchId] = useState('');
+  const { user } = useAuth();
+  const STEP_KEYS = ['branch', 'doctor', 'service', 'slot', 'patient', 'confirm'];
+  const STEP_LABELS = {
+    branch: t('appointments.wizard.stepBranch', 'Branch'),
+    doctor: t('appointments.wizard.stepDoctor', 'Doctor'),
+    service: t('appointments.wizard.stepService', 'Service'),
+    slot: t('appointments.wizard.stepSlot', 'Slot'),
+    patient: t('appointments.wizard.stepPatient', 'Patient'),
+    confirm: t('appointments.wizard.stepConfirm', 'Confirm'),
+  };
+
+  // A branch-scoped staff member (everyone except Owner/Admin) already has exactly one branch
+  // they work from — asking them to pick it every time they book is the same "make them choose
+  // something the system already knows" friction as the doctor/patient over-asking fixed
+  // elsewhere this session. Pre-fill it and skip the step entirely; Owner/Admin still choose,
+  // since they genuinely work across branches.
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
+  const ownBranchId = !isGlobalScope ? user?.branch || '' : '';
+  const skipBranchStep = Boolean(ownBranchId);
+  // Pre-filled patient (e.g. recall worklist "Booked" hand-off) auto-satisfies the patient step.
+  const skipPatientStep = Boolean(initialPatientId);
+
+  const visibleSteps = useMemo(
+    () =>
+      STEP_KEYS.filter(
+        (key) => !((key === 'branch' && skipBranchStep) || (key === 'patient' && skipPatientStep))
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [skipBranchStep, skipPatientStep]
+  );
+
+  const [visibleIndex, setVisibleIndex] = useState(0);
+  const currentKey = visibleSteps[visibleIndex];
+
+  const [branchId, setBranchId] = useState(ownBranchId);
   const [doctorId, setDoctorId] = useState('');
   const [serviceId, setServiceId] = useState('');
   const [date, setDate] = useState(todayKey());
@@ -38,47 +69,38 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
   const [notes, setNotes] = useState('');
 
   const { submit, isPending } = useBookingSubmit(onCreated);
-  // Pre-filled patient (e.g. recall worklist "Booked" hand-off) auto-satisfies the patient step.
-  const skipPatientStep = Boolean(initialPatientId);
-  const PATIENT_STEP = 4;
   const { data: prefilledPatient } = usePatientDetail(initialPatientId || undefined);
-  const goNext = () =>
-    setStep((s) => (skipPatientStep && s === PATIENT_STEP - 1 ? s + 2 : s + 1));
-  const goBack = () =>
-    setStep((s) => (skipPatientStep && s === PATIENT_STEP + 1 ? s - 2 : s - 1));
+  const goNext = () => setVisibleIndex((i) => Math.min(i + 1, visibleSteps.length - 1));
+  const goBack = () => setVisibleIndex((i) => Math.max(i - 1, 0));
 
   useEffect(() => {
     setSlot(null);
   }, [doctorId, date, branchId]);
 
   const canNext = () => {
-    if (step === 0) return Boolean(branchId);
-    if (step === 1) return Boolean(doctorId);
-    if (step === 2) return Boolean(serviceId);
-    if (step === 3) return Boolean(slot);
-    if (step === 4) return Boolean(patientId);
+    if (currentKey === 'branch') return Boolean(branchId);
+    if (currentKey === 'doctor') return Boolean(doctorId);
+    if (currentKey === 'service') return Boolean(serviceId);
+    if (currentKey === 'slot') return Boolean(slot);
+    if (currentKey === 'patient') return Boolean(patientId);
     return true;
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
-        {STEPS.map((label, i) => (
-          <Badge
-            key={label}
-            variant={
-              i === step
-                ? 'default'
-                : i < step || (skipPatientStep && i === PATIENT_STEP)
-                  ? 'success'
-                  : 'secondary'
-            }
-          >
-            {i + 1}. {label}
+        {visibleSteps.map((key, i) => (
+          <Badge key={key} variant={i === visibleIndex ? 'default' : i < visibleIndex ? 'success' : 'secondary'}>
+            {i + 1}. {STEP_LABELS[key]}
           </Badge>
         ))}
       </div>
 
+      {skipBranchStep && (
+        <p className="text-sm text-muted-foreground">
+          {t('appointments.wizard.prefilledBranch', 'Booking at your branch — branch step pre-filled.')}
+        </p>
+      )}
       {skipPatientStep && (
         <p className="text-sm text-muted-foreground">
           {t('appointments.wizard.prefilledPatient', 'Booking for {{patient}} — patient step pre-filled.', {
@@ -89,15 +111,15 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
         </p>
       )}
 
-      {step === 0 && <BranchPicker value={branchId} onChange={setBranchId} />}
+      {currentKey === 'branch' && <BranchPicker value={branchId} onChange={setBranchId} />}
 
-      {step === 1 && (
+      {currentKey === 'doctor' && (
         <DoctorPicker value={doctorId} onChange={setDoctorId} branchId={branchId} />
       )}
 
-      {step === 2 && <ServicePicker value={serviceId} onChange={setServiceId} />}
+      {currentKey === 'service' && <ServicePicker value={serviceId} onChange={setServiceId} />}
 
-      {step === 3 && (
+      {currentKey === 'slot' && (
         <SlotPicker
           branchId={branchId}
           doctorId={doctorId}
@@ -108,16 +130,17 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
         />
       )}
 
-      {step === 4 && (
+      {currentKey === 'patient' && (
         <PatientPicker
           value={patientId}
           onChange={setPatientId}
           search={patientSearch}
           onSearchChange={setPatientSearch}
+          branchId={branchId}
         />
       )}
 
-      {step === 5 && (
+      {currentKey === 'confirm' && (
         <div className="space-y-3 rounded-xl border bg-card p-4 text-sm">
           <p><span className="text-muted-foreground">{t('appointments.wizard.date', 'Date:')}</span> {date} {slot?.start}–{slot?.end}</p>
           <Input
@@ -137,15 +160,10 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
       )}
 
       <div className="flex justify-between">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={step === 0}
-          onClick={goBack}
-        >
+        <Button type="button" variant="outline" disabled={visibleIndex === 0} onClick={goBack}>
           {t('common.back', 'Back')}
         </Button>
-        {step < STEPS.length - 1 ? (
+        {visibleIndex < visibleSteps.length - 1 ? (
           <Button type="button" disabled={!canNext()} onClick={goNext}>
             {t('common.next', 'Next')}
           </Button>

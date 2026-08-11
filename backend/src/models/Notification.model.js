@@ -71,6 +71,11 @@ const notificationSchema = new mongoose.Schema(
       default: [],
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    /**
+     * Set when this notification was auto-created by the WhatsApp→SMS→voice fallback
+     * chain after the named channel's send failed (see NotificationService#markFailed).
+     */
+    fallbackFromChannel: { type: String, enum: NOTIFICATION_CHANNEL_LIST, default: null },
   },
   {
     timestamps: true,
@@ -103,6 +108,7 @@ notificationSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
     providerMessageId: this.providerMessageId,
     deliveryEvents: this.deliveryEvents,
     retryCount: this.retryCount,
+    fallbackFromChannel: this.fallbackFromChannel,
     readAt: this.readAt,
     archivedAt: this.archivedAt,
     isRead: Boolean(this.readAt),

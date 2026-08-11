@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   AGING_BUCKET_LIST,
   DISCOUNT_APPROVAL_STATUS_LIST,
+  REFUND_APPROVAL_STATUS_LIST,
   REFUND_METHOD_LIST,
   REFUND_REASON,
   REFUND_REASON_LIST,
@@ -215,6 +216,27 @@ export const refundSchema = z
     }
   });
 
+/**
+ * A.8 — approve/reject a queued refund request. `reason` is accepted as an alias of
+ * `decisionNote` for symmetry with discountDecisionSchema; BillingService reads either.
+ */
+export const refundDecisionSchema = z
+  .object({
+    reason: z.string().min(1).max(500).optional(),
+    decisionNote: z.string().min(1).max(500).optional(),
+  })
+  .refine((v) => Boolean(v.reason?.trim() || v.decisionNote?.trim()), {
+    message: 'A decision note is required',
+    path: ['decisionNote'],
+  });
+
+export const refundApprovalQueueQuerySchema = z.object({
+  status: z.enum(REFUND_APPROVAL_STATUS_LIST).optional(),
+  branchId: objectId.optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 /** A.4 — due-payments worklist filters. */
 export const duePaymentsQuerySchema = z.object({
   branchId: objectId.optional(),
@@ -235,6 +257,13 @@ export const applyLoyaltyRedemptionSchema = z.object({
   /** LOY-005 — a client-generated key so a retried apply (flaky network, double-clicked button)
    *  replays the original redemption instead of spending the patient's points a second time. */
   idempotencyKey: z.string().min(8).max(120).optional(),
+  /** LOY-005 — identity confirmation gate. Required (true) whenever
+   *  LoyaltyProgramSettings.redemptionIdentityConfirmation is not 'NONE'; enforced server-side in
+   *  LoyaltyLedgerService.redeem(), not just here — this is the request-shape check only. */
+  identityConfirmed: z.boolean().optional(),
+  /** Required (true) only when redemptionIdentityConfirmation = 'OTP'. This flags "an OTP was
+   *  verified elsewhere"; actually sending/checking the OTP code is out of scope for this pass. */
+  otpVerified: z.boolean().optional(),
 });
 
 export const applyCreditNoteSchema = z.object({

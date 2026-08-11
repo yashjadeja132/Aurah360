@@ -4,9 +4,16 @@ import { useTranslation } from 'react-i18next';
 import { ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
 import { APP_ROUTES } from '@/constants/routes';
+import { ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. RECEPTIONIST (and other
+// branch-scoped roles reaching this board) is fixed to their own branch, not a picker.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 import {
   QueueBoard,
   DoctorQueueCard,
@@ -31,6 +38,8 @@ function Chip({ label, value }) {
 
 export default function QueueDashboardPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
   const sortedBranches = useMemo(
@@ -41,7 +50,13 @@ export default function QueueDashboardPage() {
   const [doctorFilter, setDoctorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
-  const effectiveBranchId = branchId || sortedBranches[0]?.id || '';
+  const effectiveBranchId = isGlobalScope
+    ? branchId || sortedBranches[0]?.id || ''
+    : user?.branch || '';
+  const branchName =
+    sortedBranches.find((b) => String(b.id) === String(effectiveBranchId))?.displayName ||
+    sortedBranches.find((b) => String(b.id) === String(effectiveBranchId))?.name ||
+    '';
   const today = todayKey();
 
   useQueueSocket({ branchId: effectiveBranchId, enabled: Boolean(effectiveBranchId) });
@@ -85,14 +100,18 @@ export default function QueueDashboardPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select value={effectiveBranchId} onChange={(e) => setBranchId(e.target.value)}>
-          <option value="">{t('reception.filters.selectBranch')}</option>
-          {sortedBranches.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.displayName || b.name}
-            </option>
-          ))}
-        </Select>
+        {isGlobalScope ? (
+          <Select value={effectiveBranchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">{t('reception.filters.selectBranch')}</option>
+            {sortedBranches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.displayName || b.name}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Input value={branchName} disabled readOnly />
+        )}
         <Select value={doctorFilter} onChange={(e) => setDoctorFilter(e.target.value)}>
           <option value="">{t('reception.filters.allDoctors')}</option>
           {doctors.map((d) => (

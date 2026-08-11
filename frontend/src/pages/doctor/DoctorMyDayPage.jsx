@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { CalendarClock, ChevronDown, ChevronRight, Stethoscope } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronRight, ClipboardList, FlaskConical, Stethoscope } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,15 @@ import {
   APPOINTMENT_STATUS_VARIANT,
 } from '@/modules/appointments/constants';
 import { PatientContextPanel } from '@/modules/doctorDay/components/PatientContextPanel';
-import { useMyDayAppointments, useMyDoctorDashboard } from '@/modules/doctorDay/hooks/useDoctorDay';
+import { MyDayColumns } from '@/modules/doctorDay/components/MyDayColumns';
+import { RequestedAppointmentsPanel } from '@/modules/doctorDay/components/RequestedAppointmentsPanel';
+import {
+  useMyDayAppointments,
+  useMyDoctorDashboard,
+  useMyDayColumns,
+  useRequestedApprovals,
+  useReportReviewBacklogCount,
+} from '@/modules/doctorDay/hooks/useDoctorDay';
 
 function formatDay(value) {
   if (!value) return '';
@@ -142,6 +150,11 @@ export default function DoctorMyDayPage() {
   const appointments = useMyDayAppointments(doctorId);
   const summary = dashboard.data?.summary || {};
 
+  const { today = [], upcoming = [] } = appointments.grouped;
+  const { columns, urgentCount } = useMyDayColumns(today);
+  const requestedApprovals = useRequestedApprovals(doctorId);
+  const reportBacklog = useReportReviewBacklogCount();
+
   const firstName = user?.firstName || user?.fullName?.split(' ')[0] || '';
   const canSeeEmr = hasAnyPermission(user?.permissions, [
     PERMISSIONS.CONSULTATION_VIEW,
@@ -150,7 +163,6 @@ export default function DoctorMyDayPage() {
 
   const toggle = (id) => setExpandedId((cur) => (cur === id ? null : id));
 
-  const { today = [], upcoming = [] } = appointments.grouped;
   const isLoading = dashboard.isLoading || (Boolean(doctorId) && appointments.isLoading);
 
   if (!dashboard.isLoading && !doctorId) {
@@ -216,6 +228,34 @@ export default function DoctorMyDayPage() {
         />
       </div>
 
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label={t('doctorDay.kpi.urgentWaiting', 'Waiting > 20 min')}
+          value={urgentCount}
+          icon={ClipboardList}
+          tone={urgentCount ? 'destructive' : 'success'}
+          hint={t('doctorDay.kpi.urgentWaitingHint', 'Patients waiting past the threshold')}
+        />
+        <Link to={APP_ROUTES.REPORT_REVIEW_QUEUE} className="block">
+          <StatCard
+            label={t('doctorDay.kpi.reportBacklog', 'Report review backlog')}
+            value={reportBacklog.count}
+            icon={FlaskConical}
+            tone={reportBacklog.count ? 'warning' : 'success'}
+            hint={t('doctorDay.kpi.reportBacklogHint', 'Results awaiting your review')}
+          />
+        </Link>
+        <StatCard
+          label={t('doctorDay.kpi.requestedApprovals', 'Requests needing approval')}
+          value={requestedApprovals.items.length}
+          icon={CalendarClock}
+          tone={requestedApprovals.items.length ? 'warning' : 'success'}
+          hint={t('doctorDay.kpi.requestedApprovalsHint', 'Accept, propose, or reject below')}
+        />
+      </div>
+
+      <RequestedAppointmentsPanel doctorId={doctorId} />
+
       <p className="text-xs text-muted-foreground">
         {t('doctorDay.expandHint', 'Select a row to see that patient’s history and treatment progress here — no need to leave this screen.')}
       </p>
@@ -236,14 +276,12 @@ export default function DoctorMyDayPage() {
         }}
       >
         <div className="space-y-6">
-          <AppointmentGroup
-            title={t('doctorDay.today', 'Today')}
-            rows={today}
-            showDay={false}
-            expandedId={expandedId}
-            onToggle={toggle}
-            emptyText={t('doctorDay.noneToday', 'No appointments left today.')}
-          />
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('doctorDay.today', 'Today')} <span className="font-normal">({today.length})</span>
+            </h2>
+            <MyDayColumns columns={columns} />
+          </div>
           <AppointmentGroup
             title={t('doctorDay.comingUp', 'Coming up')}
             rows={upcoming}

@@ -85,6 +85,14 @@ router.post(
   masterController.deactivate
 );
 
+// Read-only dependency-warning check the UI calls before committing a deactivation.
+router.get(
+  '/:masterType/:id/dependencies',
+  requirePermission(PERMISSIONS.MASTERS_VIEW, PERMISSIONS.MASTERS_ALL),
+  validate({ params: masterIdParamSchema }),
+  masterController.checkDependencies
+);
+
 router.delete(
   '/:masterType/:id',
   requirePermission(PERMISSIONS.MASTERS_DELETE, PERMISSIONS.MASTERS_ALL),

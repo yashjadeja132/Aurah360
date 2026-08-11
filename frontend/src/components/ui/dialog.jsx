@@ -15,7 +15,7 @@ const DialogOverlay = forwardRef(({ className, ...props }, ref) => (
 ));
 DialogOverlay.displayName = 'DialogOverlay';
 
-function Dialog({ open, onOpenChange, children }) {
+function Dialog({ open, onOpenChange, children, variant = 'center' }) {
   const titleId = useId();
   const triggerRef = useRef(null);
 
@@ -32,11 +32,21 @@ function Dialog({ open, onOpenChange, children }) {
 
   if (!open) return null;
 
+  // `variant="drawer"` docks the panel to the right edge, full viewport height —
+  // used by side-drawer flows (e.g. master detail) instead of a brand-new primitive.
+  const isDrawer = variant === 'drawer';
+  const wrapperClassName = isDrawer
+    ? 'fixed inset-0 z-50 flex justify-end'
+    : 'fixed inset-0 z-50 flex items-center justify-center p-4';
+  const containerClassName = isDrawer
+    ? 'relative z-50 h-full w-full max-w-md sm:max-w-lg'
+    : 'relative z-50 w-full max-w-lg';
+
   return (
     <DialogContext.Provider value={{ titleId, onOpenChange }}>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className={wrapperClassName}>
         <DialogOverlay onClick={() => onOpenChange?.(false)} />
-        <div className="relative z-50 w-full max-w-lg">{children}</div>
+        <div className={containerClassName}>{children}</div>
       </div>
     </DialogContext.Provider>
   );

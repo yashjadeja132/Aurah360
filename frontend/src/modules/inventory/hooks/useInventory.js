@@ -89,6 +89,25 @@ export function useAdjustStock() {
   });
 }
 
+/**
+ * PHARM-DIRECT toggle for `requiresPrescription` on an InventoryItem, exposed on the Direct
+ * sale product list. NOTE: `backend/src/validators/inventory.validator.js` (`updateItemSchema`)
+ * does not currently allow `requiresPrescription` in the PATCH body — zod strips unknown keys
+ * silently, so this call succeeds but the flag will not persist until that validator is
+ * extended. Flagged separately as a backend follow-up; not fixed here per scope (frontend only).
+ */
+export function useUpdateInventoryItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => inventoryApi.updateItem(id, payload),
+    onSuccess: () => {
+      toast.success('Item updated');
+      invalidateInv(qc);
+    },
+    onError: (e) => toast.error(errMsg(e, 'Update failed')),
+  });
+}
+
 export function useCreateSupplier() {
   const qc = useQueryClient();
   return useMutation({
@@ -157,6 +176,30 @@ export function useDispenseItems(id) {
       qc.invalidateQueries({ queryKey: QUERY_KEYS.PHARMACY_DISPENSE(id) });
     },
     onError: (e) => toast.error(errMsg(e, 'Dispense failed')),
+  });
+}
+
+// --- Direct / retail sale (PHARM-DIRECT) ---
+export function useSales(params = {}) {
+  return useQuery({
+    queryKey: QUERY_KEYS.PHARMACY_SALES(params),
+    queryFn: async () => {
+      const res = await pharmacyApi.listSales(params);
+      return { items: res.data || [], meta: res.meta };
+    },
+  });
+}
+
+export function useCreateSale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => pharmacyApi.createSale(payload),
+    onSuccess: () => {
+      toast.success('Sale recorded');
+      invalidateInv(qc);
+      qc.invalidateQueries({ queryKey: ['pharmacy', 'sales'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Sale failed')),
   });
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,11 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useCashCloses, useSubmitCashClose, useApproveCashClose } from '@/modules/billing/hooks/useBillingOps';
-import { PERMISSIONS } from '@/constants/rbac';
+import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { useAuth } from '@/contexts/AuthContext';
+
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
 // and 05:30 IST, so a view opened before dawn silently loaded the wrong day. See '@/utils/date'.
 import { todayKey } from '@/utils/date';
@@ -34,10 +38,23 @@ const emptyForm = {
  */
 export function CashClosePanel() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  // A branch-scoped role (everyone except Owner/Admin) already works at exactly one branch —
+  // the picker below is only meaningful for Owner/Admin, who legitimately close cash across
+  // branches. Everyone else gets it pre-filled and locked to their own branch.
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
+  const ownBranchId = !isGlobalScope ? user?.branch || '' : '';
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
-  const [form, setForm] = useState(emptyForm);
-  const [branchFilter, setBranchFilter] = useState('');
+  const [form, setForm] = useState(() => ({ ...emptyForm, branchId: ownBranchId }));
+  const [branchFilter, setBranchFilter] = useState(ownBranchId);
+
+  useEffect(() => {
+    if (ownBranchId) {
+      setForm((f) => (f.branchId ? f : { ...f, branchId: ownBranchId }));
+      setBranchFilter((v) => v || ownBranchId);
+    }
+  }, [ownBranchId]);
 
   const { data: closes = [], isLoading } = useCashCloses(branchFilter ? { branchId: branchFilter } : {});
   const submit = useSubmitCashClose();
@@ -76,12 +93,20 @@ export function CashClosePanel() {
             <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-2">
                 <Label>{t('billing.cashClose.branch', 'Branch')}</Label>
-                <Select value={form.branchId} onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}>
-                  <option value="">{t('billing.cashClose.selectBranch', 'Select branch')}</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
-                  ))}
-                </Select>
+                {isGlobalScope ? (
+                  <Select value={form.branchId} onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}>
+                    <option value="">{t('billing.cashClose.selectBranch', 'Select branch')}</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    value={branches.find((b) => b.id === ownBranchId)?.displayName || branches.find((b) => b.id === ownBranchId)?.name || ''}
+                    disabled
+                    readOnly
+                  />
+                )}
               </div>
               <div className="space-y-2">
                 <Label>{t('billing.cashClose.closeDate', 'Close date')}</Label>
@@ -139,12 +164,14 @@ export function CashClosePanel() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>{t('billing.cashClose.history', 'History')}</CardTitle>
-          <Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="w-48">
-            <option value="">{t('billing.cashClose.allBranches', 'All branches')}</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
-            ))}
-          </Select>
+          {isGlobalScope && (
+            <Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="w-48">
+              <option value="">{t('billing.cashClose.allBranches', 'All branches')}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.displayName || b.name}</option>
+              ))}
+            </Select>
+          )}
         </CardHeader>
         <CardContent>
           <Table>
@@ -169,19 +196,29 @@ export function CashClosePanel() {
                   <TableCell>₹{c.countedCash}</TableCell>
                   <TableCell className={c.variance !== 0 ? 'text-warning font-semibold' : ''}>₹{c.variance}</TableCell>
                   <TableCell>
-                    <Badge variant={c.status === 'APPROVED' ? 'success' : c.status === 'DISPUTED' ? 'warning' : 'secondary'}>
+                    <Badge variant={c.status === 'APPROVED' ? 'success' : (c.status === 'DISPUTED' || c.status === 'PENDING_OWNER_APPROVAL') ? 'warning' : 'secondary'}>
                       {c.status === 'APPROVED' && <CheckCircle2 className="mr-1 h-3 w-3" />}
-                      {c.status === 'DISPUTED' && <AlertTriangle className="mr-1 h-3 w-3" />}
-                      {c.status}
+                      {(c.status === 'DISPUTED' || c.status === 'PENDING_OWNER_APPROVAL') && <AlertTriangle className="mr-1 h-3 w-3" />}
+                      {c.status === 'PENDING_OWNER_APPROVAL'
+                        ? t('billing.cashClose.pendingOwnerApproval', 'Needs Owner approval')
+                        : c.status}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {c.status !== 'APPROVED' && (
+                    {/* A large-variance close is gated to OWNER server-side (CashCloseService#approve) —
+                        a branch manager holding the generic approve permission would otherwise see a
+                        button that always 403s, so it's hidden for them specifically on this status. */}
+                    {c.status !== 'APPROVED' && (c.status !== 'PENDING_OWNER_APPROVAL' || user?.role === ROLES.OWNER) && (
                       <PermissionGuard permissions={[PERMISSIONS.BILLING_CASH_CLOSE_APPROVE, PERMISSIONS.BILLING_ALL]}>
                         <Button size="sm" variant="outline" onClick={() => approve.mutate(c.id)} disabled={approve.isPending}>
                           {t('billing.cashClose.approve', 'Approve')}
                         </Button>
                       </PermissionGuard>
+                    )}
+                    {c.status === 'PENDING_OWNER_APPROVAL' && user?.role !== ROLES.OWNER && (
+                      <span className="text-xs text-muted-foreground">
+                        {t('billing.cashClose.escalatedToOwner', 'Escalated to Owner')}
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>

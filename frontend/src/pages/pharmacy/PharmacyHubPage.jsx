@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PERMISSIONS } from '@/constants/rbac';
 import { cn } from '@/utils/cn';
 import { PharmacyOverviewPanel } from '@/modules/pharmacy/components/PharmacyOverviewPanel';
 import { PrescriptionQueuePanel } from '@/modules/pharmacy/components/PrescriptionQueuePanel';
+import { SalesPanel } from '@/modules/pharmacy/components/SalesPanel';
+import { APP_ROUTES } from '@/constants/routes';
 
 /**
  * Both /pharmacy and /pharmacy/queue were wrapped in the same
@@ -25,12 +27,14 @@ export const PHARMACY_HUB_PERMISSIONS = PHARMACY_PERMS;
  */
 export default function PharmacyHubPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const TABS = useMemo(
     () => [
       { id: 'overview', label: t('pharmacy.hub.tabs.overview', 'Overview') },
       { id: 'queue', label: t('pharmacy.hub.tabs.queue', 'Prescription queue') },
+      { id: 'sales', label: t('pharmacy.hub.tabs.sales', 'Sales') },
     ],
     [t]
   );
@@ -88,6 +92,11 @@ export default function PharmacyHubPage() {
         {tab === 'queue' && (
           <PermissionGuard permissions={PHARMACY_PERMS}>
             <PrescriptionQueuePanel highlight={searchParams.get('rx')} />
+          </PermissionGuard>
+        )}
+        {tab === 'sales' && (
+          <PermissionGuard permissions={PHARMACY_PERMS}>
+            <SalesPanel onNewSale={() => navigate(APP_ROUTES.PHARMACY_SALES)} />
           </PermissionGuard>
         )}
       </section>

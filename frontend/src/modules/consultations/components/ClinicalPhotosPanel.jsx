@@ -59,6 +59,14 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
 
       {!readOnly && (
         <form onSubmit={onUpload} className="space-y-3 rounded-lg border p-3">
+          {/*
+            Pre-capture gate: consent (and body region, where it applies) must be confirmed
+            BEFORE the file picker / camera trigger unlock. Previously the checkbox sat next to
+            an already-usable file input, so a photo could be picked (and, if the user forgot to
+            tick the box, submitted) before consent was ever considered. Server-side enforcement
+            is unchanged — this is purely about not presenting the capture control as available
+            until the gate in front of it has actually been cleared.
+          */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label>{t('consultations.photos.type', 'Type')}</Label>
@@ -79,16 +87,32 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
             <Label>{t('consultations.photos.titleField', 'Title')}</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
-          <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-          <label className="flex items-center gap-2 text-sm">
+
+          <label className="flex items-center gap-2 text-sm font-medium">
             <input
               type="checkbox"
               checked={consentVerified}
-              onChange={(e) => setConsentVerified(e.target.checked)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setConsentVerified(checked);
+                if (!checked) setFile(null);
+              }}
             />
             {t('consultations.photos.consentVerified', 'Photography consent verified')}
           </label>
-          <Button type="submit" disabled={!file || upload.isPending}>
+
+          {consentVerified ? (
+            <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          ) : (
+            <p className="rounded-md border border-dashed bg-muted/40 p-3 text-xs text-muted-foreground">
+              {t(
+                'consultations.photos.consentGateHint',
+                'Confirm photography consent above to unlock the file picker and camera.'
+              )}
+            </p>
+          )}
+
+          <Button type="submit" disabled={!consentVerified || !file || upload.isPending}>
             {t('common.upload', 'Upload')}
           </Button>
         </form>

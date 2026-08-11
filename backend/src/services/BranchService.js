@@ -190,8 +190,31 @@ class BranchService {
     return updated.toSafeObject();
   }
 
-  async deactivate(id, actorId, req = null, { branchId = null } = {}) {
+  /**
+   * §1 deactivate — reason is mandatory (mirrors queue.validator.js's reason.min(3) pattern) and
+   * the response carries an impact summary (counts of affected active appointments/staff)
+   * computed BEFORE the commit, so the caller sees what they are taking offline.
+   */
+  async deactivate(id, reason, actorId, req = null, { branchId = null } = {}) {
     await this.#findScoped(id, branchId);
+
+    const Appointment = (await import('../models/Appointment.model.js')).default;
+    const User = (await import('../models/User.model.js')).default;
+    const { ACTIVE_APPOINTMENT_STATUSES } = await import('../enums/appointment.js');
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [activeAppointments, activeStaff] = await Promise.all([
+      Appointment.countDocuments({
+        branchId: id,
+        appointmentDate: { $gte: today },
+        status: { $in: ACTIVE_APPOINTMENT_STATUSES },
+      }),
+      User.countDocuments({ branch: id, isActive: true }),
+    ]);
+
+    const impactSummary = { activeAppointments, activeStaff };
 
     const updated = await this.branchRepository.updateById(id, {
       isActive: false,
@@ -201,11 +224,12 @@ class BranchService {
 
     await this.auditService.record(AUDIT_ACTIONS.BRANCH_DEACTIVATED, {
       actorId,
-      metadata: { branchId: id },
+      metadata: { branchId: id, reason, impactSummary },
       req,
     });
 
-    return updated.toSafeObject();
+    const branch = updated.toSafeObject();
+    return { branch, impactSummary, reason };
   }
 
   async softDelete(id, actorId, req = null, { branchId = null } = {}) {
@@ -273,7 +297,7 @@ class BranchService {
       { $addToSet: { branches: toBranchId }, $pull: { branches: fromBranchId } }
     );
 
-    await this.deactivate(fromBranchId, actorId, req);
+    await this.deactivate(fromBranchId, 'Branch transferred to another branch', actorId, req);
 
     await this.auditService.record(AUDIT_ACTIONS.BRANCH_TRANSFERRED, {
       actorId,

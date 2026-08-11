@@ -70,7 +70,7 @@ class PatientDocumentService {
     return docs.filter((d) => d.patientVisibility !== PATIENT_VISIBILITY.HIDDEN);
   }
 
-  async upload(patientId, { file, category, title, notes, clinicalDate, source, relatedVisitId, branchId, supersedesDocumentId }, actorId, req = null) {
+  async upload(patientId, { file, category, title, notes, clinicalDate, source, relatedVisitId, branchId, supersedesDocumentId, patientVisibility }, actorId, req = null) {
     await this.#assertPatient(patientId);
     if (!file?.buffer) throw ApiError.badRequest('File is required');
     if (!clinicalDate) throw ApiError.badRequest('Clinical/report date is required (DOC-001)');
@@ -152,7 +152,13 @@ class PatientDocumentService {
       checksum,
       scanState,
       reviewState: DOCUMENT_REVIEW_STATE.UNREVIEWED,
-      patientVisibility: PATIENT_VISIBILITY.HIDDEN,
+      // §5 — receptionist chooses HIDDEN or RELEASE_ON_APPROVAL at Save; RELEASED can never be
+      // set here (see uploadDocumentSchema), so a doctor/admin action is always required to
+      // actually surface a document to the patient.
+      patientVisibility:
+        patientVisibility === PATIENT_VISIBILITY.RELEASE_ON_APPROVAL
+          ? PATIENT_VISIBILITY.RELEASE_ON_APPROVAL
+          : PATIENT_VISIBILITY.HIDDEN,
       version,
       supersedesDocumentId: supersedes,
       notes: notes || null,

@@ -4,6 +4,7 @@ import { ShieldAlert, FileClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -63,7 +64,12 @@ export default function PrivacyAdminPage() {
 
 function PrivacyRequestsTab() {
   const { t } = useTranslation();
-  const { data: patientsData } = usePatientList({ limit: 50 });
+  const [patientSearch, setPatientSearch] = useState('');
+  const { data: patientsData, isFetching: patientsFetching } = usePatientList({
+    search: patientSearch,
+    limit: 10,
+    page: 1,
+  });
   const patients = patientsData?.items || [];
   const { data: requests = [], isLoading } = usePrivacyRequests();
   const open = useOpenPrivacyRequest();
@@ -86,10 +92,19 @@ function PrivacyRequestsTab() {
                 setForm({ patientId: '', type: 'ACCESS', description: '' });
               }}
             >
-              <Select value={form.patientId} onChange={(e) => setForm((f) => ({ ...f, patientId: e.target.value }))}>
-                <option value="">{t('settings.privacy.requests.patientPlaceholder', 'Patient')}</option>
-                {patients.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.mrn})</option>)}
-              </Select>
+              <SearchableCombobox
+                value={form.patientId}
+                onChange={(id) => setForm((f) => ({ ...f, patientId: id }))}
+                options={patients}
+                search={patientSearch}
+                onSearchChange={setPatientSearch}
+                isLoading={patientsFetching}
+                loadingText={t('common.searching', 'Searching…')}
+                renderLabel={(p) => `${p.firstName} ${p.lastName}`}
+                renderSublabel={(p) => p.mrn}
+                placeholder={t('settings.privacy.requests.patientPlaceholder', 'Patient')}
+                emptyText={t('settings.privacy.requests.noPatientMatch', 'No match')}
+              />
               <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
                 {REQUEST_TYPES.map((rt) => <option key={rt} value={rt}>{rt.replace(/_/g, ' ')}</option>)}
               </Select>

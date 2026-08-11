@@ -1,4 +1,4 @@
-import { timeToMinutes, _minutesToTime, generateWorkingSlots } from './schedule.engine.js';
+import { timeToMinutes, generateWorkingSlots } from './schedule.engine.js';
 import { isOnLeave } from './leave.engine.js';
 import { LEAVE_TYPE } from '../enums/leave.js';
 

@@ -129,6 +129,28 @@ class ConsultationController {
     });
   });
 
+  followUpQueue = asyncHandler(async (req, res) => {
+    const result = await this.consultationService.listFollowUpQueue(
+      await scopedListQuery(req, { branch: true, doctor: true })
+    );
+    return ApiResponse.success(res, {
+      message: 'Follow-ups retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
+  });
+
+  updateFollowUpStatus = asyncHandler(async (req, res) => {
+    const data = await this.consultationService.updateFollowUpStatus(
+      req.params.id,
+      req.body,
+      req.auth.userId,
+      req,
+      await resolveRecordScope(req)
+    );
+    return ApiResponse.success(res, { message: 'Follow-up updated', data });
+  });
+
   updateLabOrder = asyncHandler(async (req, res) => {
     const order = await this.consultationService.updateLabOrder(
       req.params.labOrderId,
@@ -240,6 +262,30 @@ class ConsultationController {
   deleteTemplate = asyncHandler(async (req, res) => {
     await this.clinicalService.deleteTemplate(req.params.id, req.auth.userId);
     return ApiResponse.success(res, { message: 'Template deleted' });
+  });
+
+  /** Settings → Masters admin listing (CONSULTATION_TEMPLATE_MANAGE) — unscoped, paginated. */
+  listAllTemplates = asyncHandler(async (req, res) => {
+    const result = await this.clinicalService.listAllTemplates(req.query);
+    return ApiResponse.success(res, {
+      message: 'Templates retrieved',
+      data: result.items,
+      meta: result.meta,
+    });
+  });
+
+  updateTemplate = asyncHandler(async (req, res) => {
+    const template = await this.clinicalService.updateTemplate(
+      req.params.id,
+      req.body,
+      req.auth.userId
+    );
+    return ApiResponse.success(res, { message: 'Template updated', data: { template } });
+  });
+
+  approveTemplate = asyncHandler(async (req, res) => {
+    const template = await this.clinicalService.approveTemplate(req.params.id, req.auth.userId);
+    return ApiResponse.success(res, { message: 'Template approved', data: { template } });
   });
 
   aiSummarize = asyncHandler(async (req, res) => {

@@ -2,6 +2,8 @@ import ApiError from '../libs/ApiError.js';
 import RecallEntry from '../models/RecallEntry.model.js';
 import Offer from '../models/Offer.model.js';
 import PatientFeedback from '../models/PatientFeedback.model.js';
+import Patient from '../models/Patient.model.js';
+import LoyaltyTier, { PatientTierState } from '../models/LoyaltyTier.model.js';
 import AuditService from './AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 
@@ -102,6 +104,13 @@ class CrmExtensionsService {
     return offer.toSafeObject();
   }
 
+  /**
+   * When listing offers FOR a specific patient (query.patientId), a non-consenting patient must
+   * not see offers that require marketing consent, and tier-targeted offers must not be shown to
+   * a patient outside those tiers. Both checks are skipped when no patientId is supplied (e.g. the
+   * admin offer-board list), same as LoyaltyEarningEngineService.isEligible's consent check only
+   * applying when there is a patient to check.
+   */
   async listOffers(query = {}) {
     const filter = {};
     if (query.activeOnly === 'true') {
@@ -112,8 +121,30 @@ class CrmExtensionsService {
     // `branchIds: []` = every branch, so a scoped caller sees their branch's offers PLUS the
     // org-wide ones — and nothing that belongs only to another site.
     if (query.branchId) filter.$or = [{ branchIds: query.branchId }, { branchIds: { $size: 0 } }];
+
     const rows = await Offer.find(filter).sort({ createdAt: -1 }).exec();
-    return rows.map((r) => r.toSafeObject());
+    let offers = rows.map((r) => r.toSafeObject());
+
+    if (query.patientId) {
+      const [patient, tierState] = await Promise.all([
+        Patient.findById(query.patientId).select('consent').lean(),
+        PatientTierState.findOne({ patientId: query.patientId }).select('currentTierId').lean(),
+      ]);
+      const hasMarketingConsent = Boolean(patient?.consent?.marketingConsent);
+      let tierName = null;
+      if (tierState?.currentTierId) {
+        const tier = await LoyaltyTier.findById(tierState.currentTierId).select('name').lean();
+        tierName = tier?.name || null;
+      }
+
+      offers = offers.filter((offer) => {
+        if (offer.requiresMarketingConsent && !hasMarketingConsent) return false;
+        if (offer.targetTiers?.length && !(tierName && offer.targetTiers.includes(tierName))) return false;
+        return true;
+      });
+    }
+
+    return offers;
   }
 
   // --- Feedback / NPS / complaint escalation -------------------------------------------------------------

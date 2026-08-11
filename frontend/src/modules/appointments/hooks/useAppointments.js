@@ -43,7 +43,10 @@ export function useDoctorCalendar(params, enabled = true) {
       const res = await appointmentsApi.doctorCalendar(params);
       return res.data || [];
     },
-    enabled: Boolean(params?.doctorId && params?.from && params?.to && enabled),
+    // doctorId === undefined means "omit it — let the backend pin it to the caller's own
+    // doctor profile" (DOCTOR role); only an explicit '' (no doctor picked yet, non-doctor
+    // staff view) disables the query. See ConsultationListPage.jsx for the reference fix.
+    enabled: Boolean(params?.doctorId !== '' && params?.from && params?.to && enabled),
   });
 }
 
@@ -74,7 +77,11 @@ export function useAppointmentMutations() {
         appointmentsApi.cancel(id, { reasonCode, reason }),
       onSuccess: invalidate,
     }),
-    noShow: useMutation({ mutationFn: appointmentsApi.noShow, onSuccess: invalidate }),
+    noShow: useMutation({
+      mutationFn: ({ id, reason, addToRecallWorklist } = {}) =>
+        appointmentsApi.noShow(id, { reason, addToRecallWorklist }),
+      onSuccess: invalidate,
+    }),
     complete: useMutation({ mutationFn: appointmentsApi.complete, onSuccess: invalidate }),
     reschedule: useMutation({
       mutationFn: ({ id, payload }) => appointmentsApi.reschedule(id, payload),
@@ -82,6 +89,14 @@ export function useAppointmentMutations() {
     }),
     followUp: useMutation({
       mutationFn: ({ id, payload }) => appointmentsApi.followUp(id, payload),
+      onSuccess: invalidate,
+    }),
+    decideApproval: useMutation({
+      mutationFn: ({ id, payload }) => appointmentsApi.decideApproval(id, payload),
+      onSuccess: invalidate,
+    }),
+    acceptAlternative: useMutation({
+      mutationFn: (id) => appointmentsApi.acceptAlternative(id),
       onSuccess: invalidate,
     }),
     remove: useMutation({ mutationFn: appointmentsApi.remove, onSuccess: invalidate }),

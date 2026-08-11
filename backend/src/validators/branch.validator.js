@@ -80,3 +80,7 @@ export const idParamSchema = z.object({
 export const transferBranchSchema = z.object({
   toBranchId: objectId,
 });
+
+export const deactivateBranchSchema = z.object({
+  reason: z.string().min(3).max(500),
+});

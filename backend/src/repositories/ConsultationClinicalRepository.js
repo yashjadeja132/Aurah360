@@ -5,6 +5,7 @@ import ConsultationDiagnosis from '../models/ConsultationDiagnosis.model.js';
 import ConsultationExamination from '../models/ConsultationExamination.model.js';
 import ClinicalPhoto from '../models/ClinicalPhoto.model.js';
 import ConsultationTemplate from '../models/ConsultationTemplate.model.js';
+import { paginateModel } from '../helpers/paginate.helper.js';
 
 class ConsultationSoapRepository extends BaseRepository {
   constructor() {
@@ -79,6 +80,28 @@ class ConsultationTemplateRepository extends BaseRepository {
 
   async findByIdNotDeleted(id) {
     return this.model.findOne({ _id: id, deletedAt: null }).exec();
+  }
+
+  /**
+   * Admin listing for Settings → Masters — unlike `findForDoctor` (which scopes to one doctor
+   * plus shared templates for the live consultation-session picker), this is the unscoped,
+   * paginated/searchable list an admin/medical-lead needs to manage the whole library.
+   */
+  async searchAll({ templateType = null, status = null, doctorId = null, search = '', page = 1, limit = 20 } = {}) {
+    const filter = {};
+    if (templateType) filter.templateType = templateType;
+    if (status) filter.status = status;
+    if (doctorId) filter.doctorId = doctorId;
+    return paginateModel(this.model, {
+      filter,
+      page,
+      limit,
+      search,
+      searchFields: ['name'],
+      sortBy: 'updatedAt',
+      sortOrder: 'desc',
+      allowedSort: ['updatedAt', 'createdAt', 'name'],
+    });
   }
 }
 

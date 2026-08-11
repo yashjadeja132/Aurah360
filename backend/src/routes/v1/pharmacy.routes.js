@@ -9,6 +9,7 @@ import {
   startDispenseSchema,
   dispenseItemsSchema,
   dispenseListQuerySchema,
+  createDirectSaleSchema,
 } from '../../validators/inventory.validator.js';
 
 const router = Router();
@@ -55,5 +56,19 @@ router.post(
   controller.cancelDispense
 );
 router.get('/reports/dispense', requirePermission(...view), controller.dispenseReport);
+
+// Direct / retail sale (PHARM-DIRECT) — no prescription behind it.
+router.get(
+  '/sales',
+  requirePermission(...view),
+  validate({ query: dispenseListQuerySchema }),
+  controller.listDirectSales
+);
+router.post(
+  '/sales',
+  requirePermission(...dispense),
+  validate({ body: createDirectSaleSchema }),
+  controller.createDirectSale
+);
 
 export default router;

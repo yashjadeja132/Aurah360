@@ -1,27 +1,42 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { ArrowLeft, Printer, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import {
   useSession,
   useCheckInSession,
   useStartSession,
+  usePauseSession,
+  useResumeSession,
   useCompleteSession,
   useCancelSession,
   useSkipSession,
   useRescheduleSession,
   useUploadSessionPhoto,
 } from '@/modules/treatmentSessions/hooks/useTreatmentSessions';
+import { useInventoryItems } from '@/modules/inventory/hooks/useInventory';
 import { SessionPreflightPanel } from '@/modules/treatmentSessions/components/SessionPreflightPanel';
 import { SESSION_STATUS_LABELS } from '@/modules/treatmentSessions/constants';
 import { APP_ROUTES, treatmentSessionPrintPath } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 import { APP_CONFIG } from '@/constants/config';
+
+/** Empty typed-settings row used both for the "current settings" panel and each consumable line. */
+const EMPTY_SETTINGS = {
+  wavelength: '',
+  fluence: '',
+  pulseWidth: '',
+  spotSize: '',
+  coolingSetting: '',
+  passes: '',
+};
 
 export default function SessionExecutionPage() {
   const { t } = useTranslation();
@@ -29,16 +44,35 @@ export default function SessionExecutionPage() {
   const { data: session, isLoading, isError, error } = useSession(id);
   const checkIn = useCheckInSession(id);
   const start = useStartSession(id);
+  const pause = usePauseSession(id);
+  const resume = useResumeSession(id);
   const complete = useCompleteSession(id);
   const cancel = useCancelSession(id);
   const skip = useSkipSession(id);
   const reschedule = useRescheduleSession(id);
   const upload = useUploadSessionPhoto(id);
 
+  // Consumables picker draws from the CONSUMABLE inventory slice — same source pharmacy dispense
+  // uses for MEDICINE, just filtered to the other item type.
+  const { data: invData } = useInventoryItems({ itemType: 'CONSUMABLE', limit: 100 });
+  const invItems = invData?.items || [];
+
   const [outcome, setOutcome] = useState('');
   const [device, setDevice] = useState('');
   const [nextDate, setNextDate] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
+
+  const [showPauseDialog, setShowPauseDialog] = useState(false);
+  const [pauseReason, setPauseReason] = useState('');
+
+  // Typed device-parameter fields (protocol-driven — all optional, mirrors deviceSettingsSchema).
+  const [settings, setSettings] = useState(EMPTY_SETTINGS);
+  const [customParams, setCustomParams] = useState([]); // [{key, value}]
+
+  // Consumables at complete time: batch-linked lines (preferred) plus a legacy free-text fallback
+  // for anything not tracked in inventory. Both are additive — see SessionCompletePayload below.
+  const [consumableLines, setConsumableLines] = useState([]);
+  const [freeTextConsumables, setFreeTextConsumables] = useState('');
 
   if (isLoading)
     return (
@@ -54,6 +88,49 @@ export default function SessionExecutionPage() {
 
   const progress = session.progress || {};
   const pct = progress.completionPercent || 0;
+
+  const buildDeviceUsage = () => {
+    const customParameters = customParams.reduce((acc, { key, value }) => {
+      if (key.trim()) acc[key.trim()] = value;
+      return acc;
+    }, {});
+    return {
+      device: device || session.deviceUsage?.device,
+      machine: session.deviceUsage?.machine,
+      laserHead: session.deviceUsage?.laserHead,
+      settings: {
+        wavelength: settings.wavelength === '' ? null : Number(settings.wavelength),
+        fluence: settings.fluence === '' ? null : Number(settings.fluence),
+        pulseWidth: settings.pulseWidth === '' ? null : Number(settings.pulseWidth),
+        spotSize: settings.spotSize === '' ? null : Number(settings.spotSize),
+        coolingSetting: settings.coolingSetting || null,
+        passes: settings.passes === '' ? null : Number(settings.passes),
+        customParameters,
+      },
+    };
+  };
+
+  const buildConsumablesUsed = () =>
+    consumableLines
+      .filter((l) => l.inventoryItemId && Number(l.quantity) > 0)
+      .map((l) => {
+        const item = invItems.find((i) => i.id === l.inventoryItemId);
+        return {
+          inventoryItemId: l.inventoryItemId,
+          batchNumber: l.batchNumber || undefined,
+          quantity: Number(l.quantity),
+          productName: item?.name,
+        };
+      });
+
+  const addConsumableLine = () =>
+    setConsumableLines((lines) => [...lines, { inventoryItemId: '', batchNumber: '', quantity: 1 }]);
+
+  const updateConsumableLine = (idx, patch) =>
+    setConsumableLines((lines) => lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+
+  const removeConsumableLine = (idx) =>
+    setConsumableLines((lines) => lines.filter((_, i) => i !== idx));
 
   return (
     <section className="mx-auto max-w-4xl space-y-6">
@@ -154,6 +231,16 @@ export default function SessionExecutionPage() {
               {t('treatmentSessions.execution.checkIn', 'Check in')}
             </Button>
           )}
+          {session.status === 'IN_PROGRESS' && (
+            <Button variant="outline" disabled={pause.isPending} onClick={() => setShowPauseDialog(true)}>
+              {t('treatmentSessions.execution.pause', 'Pause')}
+            </Button>
+          )}
+          {session.status === 'PAUSED' && (
+            <Button disabled={resume.isPending} onClick={() => resume.mutate()}>
+              {t('treatmentSessions.execution.resume', 'Resume')}
+            </Button>
+          )}
         </PermissionGuard>
         <PermissionGuard
           permissions={[
@@ -167,12 +254,11 @@ export default function SessionExecutionPage() {
               onClick={() =>
                 complete.mutate({
                   outcome: outcome || t('treatmentSessions.execution.completedSuccessfully', 'Completed successfully'),
-                  deviceUsage: {
-                    device: device || session.deviceUsage?.device,
-                    machine: session.deviceUsage?.machine,
-                    laserHead: session.deviceUsage?.laserHead,
-                    settings: session.deviceUsage?.settings || {},
-                  },
+                  deviceUsage: buildDeviceUsage(),
+                  consumablesUsed: buildConsumablesUsed(),
+                  consumables: freeTextConsumables
+                    ? freeTextConsumables.split(',').map((s) => s.trim()).filter(Boolean)
+                    : undefined,
                   followUp: nextDate
                     ? { nextSessionDate: nextDate, notes: t('treatmentSessions.execution.nextAsPlanned', 'Next as planned') }
                     : undefined,
@@ -198,6 +284,45 @@ export default function SessionExecutionPage() {
           )}
         </PermissionGuard>
       </div>
+
+      {/* Pause reason dialog — mirrors the mandatory-reason modal pattern used by the reception
+          queue's transfer/move-up dialogs (QueueBoard.jsx). */}
+      {showPauseDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md space-y-3 rounded-xl border bg-card p-5 shadow-lg">
+            <h3 className="font-semibold">{t('treatmentSessions.execution.pauseTitle', 'Pause session')}</h3>
+            <p className="text-sm text-muted-foreground">
+              {t('treatmentSessions.execution.pauseReasonRequired', 'A reason is required to pause (min 3 characters).')}
+            </p>
+            <Input
+              placeholder={t('treatmentSessions.execution.pauseReasonPlaceholder', 'Reason for pausing')}
+              value={pauseReason}
+              onChange={(e) => setPauseReason(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowPauseDialog(false);
+                  setPauseReason('');
+                }}
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                disabled={pauseReason.trim().length < 3 || pause.isPending}
+                onClick={async () => {
+                  await pause.mutateAsync({ reason: pauseReason.trim() });
+                  setShowPauseDialog(false);
+                  setPauseReason('');
+                }}
+              >
+                {t('treatmentSessions.execution.pause', 'Pause')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-3 rounded-xl border p-4 sm:grid-cols-2">
         <div>
@@ -236,6 +361,173 @@ export default function SessionExecutionPage() {
               {t('treatmentSessions.execution.save', 'Save')}
             </Button>
           </PermissionGuard>
+        </div>
+      </div>
+
+      {/* Device parameters — typed fields backed by deviceUsage.settings; all optional since not
+          every protocol/device uses every field. Anything outside this common set goes in the
+          generic "Other parameters" key-value area (customParameters). */}
+      <div className="space-y-3 rounded-xl border p-4">
+        <h2 className="font-semibold">{t('treatmentSessions.execution.deviceParameters', 'Device parameters')}</h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <Label>{t('treatmentSessions.execution.wavelength', 'Wavelength (nm)')}</Label>
+            <Input
+              type="number"
+              value={settings.wavelength}
+              onChange={(e) => setSettings((s) => ({ ...s, wavelength: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label>{t('treatmentSessions.execution.fluence', 'Fluence (J/cm²)')}</Label>
+            <Input
+              type="number"
+              value={settings.fluence}
+              onChange={(e) => setSettings((s) => ({ ...s, fluence: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label>{t('treatmentSessions.execution.pulseWidth', 'Pulse width (ms)')}</Label>
+            <Input
+              type="number"
+              value={settings.pulseWidth}
+              onChange={(e) => setSettings((s) => ({ ...s, pulseWidth: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label>{t('treatmentSessions.execution.spotSize', 'Spot size (mm)')}</Label>
+            <Input
+              type="number"
+              value={settings.spotSize}
+              onChange={(e) => setSettings((s) => ({ ...s, spotSize: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label>{t('treatmentSessions.execution.coolingSetting', 'Cooling setting')}</Label>
+            <Input
+              value={settings.coolingSetting}
+              onChange={(e) => setSettings((s) => ({ ...s, coolingSetting: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label>{t('treatmentSessions.execution.passes', 'Passes')}</Label>
+            <Input
+              type="number"
+              value={settings.passes}
+              onChange={(e) => setSettings((s) => ({ ...s, passes: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>{t('treatmentSessions.execution.otherParameters', 'Other parameters')}</Label>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCustomParams((rows) => [...rows, { key: '', value: '' }])}
+            >
+              <Plus className="h-4 w-4" />
+              {t('treatmentSessions.execution.addParameter', 'Add')}
+            </Button>
+          </div>
+          {customParams.map((row, idx) => (
+            <div key={idx} className="flex gap-2">
+              <Input
+                placeholder={t('treatmentSessions.execution.parameterKey', 'Name')}
+                value={row.key}
+                onChange={(e) =>
+                  setCustomParams((rows) => rows.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r)))
+                }
+              />
+              <Input
+                placeholder={t('treatmentSessions.execution.parameterValue', 'Value')}
+                value={row.value}
+                onChange={(e) =>
+                  setCustomParams((rows) => rows.map((r, i) => (i === idx ? { ...r, value: e.target.value } : r)))
+                }
+              />
+              <Button variant="ghost" size="sm" onClick={() => setCustomParams((rows) => rows.filter((_, i) => i !== idx))}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Consumables used at completion. Batch-linked lines are preferred (decrement real stock,
+          FEFO-suggested batch first — same idea as the pharmacy dispense screen's "Auto FEFO");
+          the free-text field stays as a simple fallback for anything not tracked in inventory. */}
+      <div className="space-y-3 rounded-xl border p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">{t('treatmentSessions.execution.consumablesUsed', 'Consumables used')}</h2>
+          <PermissionGuard
+            permissions={[PERMISSIONS.TREATMENT_SESSION_COMPLETE, PERMISSIONS.TREATMENT_SESSION_ALL]}
+          >
+            <Button variant="ghost" size="sm" onClick={addConsumableLine}>
+              <Plus className="h-4 w-4" />
+              {t('treatmentSessions.execution.addConsumable', 'Add consumable')}
+            </Button>
+          </PermissionGuard>
+        </div>
+
+        {consumableLines.map((line, idx) => {
+          const selected = invItems.find((i) => i.id === line.inventoryItemId);
+          const batches = selected?.batches || [];
+          return (
+            <div key={idx} className="grid gap-2 sm:grid-cols-[2fr_2fr_1fr_auto] sm:items-end">
+              <div>
+                <Label>{t('treatmentSessions.execution.consumableItem', 'Item')}</Label>
+                <SearchableCombobox
+                  value={line.inventoryItemId}
+                  onChange={(id) => updateConsumableLine(idx, { inventoryItemId: id, batchNumber: '' })}
+                  options={invItems}
+                  filterKeys={['name']}
+                  renderLabel={(i) => i.name}
+                  renderSublabel={(i) => `${t('treatmentSessions.execution.stock', 'stock')} ${i.currentStock}`}
+                  placeholder={t('treatmentSessions.execution.selectConsumable', 'Select item')}
+                  emptyText={t('treatmentSessions.execution.selectConsumable', 'Select item')}
+                />
+              </div>
+              <div>
+                <Label>{t('treatmentSessions.execution.consumableBatch', 'Batch')}</Label>
+                <Select
+                  value={line.batchNumber}
+                  onChange={(e) => updateConsumableLine(idx, { batchNumber: e.target.value })}
+                >
+                  <option value="">{t('treatmentSessions.execution.autoFefo', 'Auto FEFO')}</option>
+                  {batches.map((b) => (
+                    <option key={b.batchNumber} value={b.batchNumber}>
+                      {b.batchNumber} · {t('treatmentSessions.execution.qty', 'qty')} {b.quantity} ·{' '}
+                      {t('treatmentSessions.execution.exp', 'exp')}{' '}
+                      {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : '—'}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label>{t('treatmentSessions.execution.consumableQty', 'Qty')}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={line.quantity}
+                  onChange={(e) => updateConsumableLine(idx, { quantity: e.target.value })}
+                />
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => removeConsumableLine(idx)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          );
+        })}
+
+        <div>
+          <Label>{t('treatmentSessions.execution.consumablesFreeText', 'Other consumables (free text, comma separated)')}</Label>
+          <Input
+            value={freeTextConsumables}
+            placeholder={t('treatmentSessions.execution.consumablesFreeTextPlaceholder', 'e.g. gauze, cooling gel')}
+            onChange={(e) => setFreeTextConsumables(e.target.value)}
+          />
         </div>
       </div>
 
@@ -297,6 +589,38 @@ export default function SessionExecutionPage() {
           </div>
         </div>
       </div>
+
+      {/* Pause history */}
+      {(session.pauseHistory || []).length > 0 && (
+        <div className="space-y-2 rounded-xl border p-4">
+          <h2 className="font-semibold">{t('treatmentSessions.execution.pauseHistory', 'Pause history')}</h2>
+          {session.pauseHistory.map((p, idx) => (
+            <div key={idx} className="border-b border-dashed py-2 text-sm last:border-0">
+              <p>
+                {p.pausedAt ? new Date(p.pausedAt).toLocaleString() : '—'}
+                {p.resumedAt ? ` → ${new Date(p.resumedAt).toLocaleString()}` : ` (${t('treatmentSessions.execution.stillPaused', 'still paused')})`}
+              </p>
+              <p className="text-muted-foreground">{p.reason}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Consumables actually used (batch-linked) */}
+      {(session.consumablesUsed || []).length > 0 && (
+        <div className="space-y-2 rounded-xl border p-4">
+          <h2 className="font-semibold">{t('treatmentSessions.execution.consumablesUsedRecord', 'Consumables used (record)')}</h2>
+          {session.consumablesUsed.map((c, idx) => (
+            <div key={idx} className="flex items-center justify-between border-b border-dashed py-2 text-sm last:border-0">
+              <span>{c.productName || '—'}</span>
+              <span className="text-muted-foreground">
+                {c.batchNumber ? `${t('treatmentSessions.execution.consumableBatch', 'Batch')} ${c.batchNumber} · ` : ''}
+                {t('treatmentSessions.execution.qty', 'qty')} {c.quantity ?? '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Session log */}
       <div className="space-y-2 rounded-xl border p-4">

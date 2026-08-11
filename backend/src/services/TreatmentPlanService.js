@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import ApiError from '../libs/ApiError.js';
 import {
   TreatmentPlanRepository,
@@ -6,6 +7,8 @@ import {
   ConsentRecordRepository,
 } from '../repositories/TreatmentPlanRepository.js';
 import ConsultationRepository from '../repositories/ConsultationRepository.js';
+import TreatmentSession from '../models/TreatmentSession.model.js';
+import { TREATMENT_SESSION_STATUS } from '../enums/treatmentSession.js';
 import AuditService from './AuditService.js';
 import {
   generateTreatmentPlanNumber,
@@ -261,7 +264,106 @@ class TreatmentPlanService {
 
   async listByDoctor(doctorId, opts = {}) {
     const rows = await this.planRepository.findByDoctor(doctorId, opts);
-    return Promise.all(rows.map((r) => this.getById(r._id.toString())));
+    const plans = await Promise.all(rows.map((r) => this.getById(r._id.toString())));
+    return this.#attachSessionProgress(plans);
+  }
+
+  /**
+   * §5 — "view session progress / package balance" for the Treatment plans list. Session
+   * completion isn't stored on the plan itself (TreatmentSession is its own collection keyed by
+   * treatmentPlanId), so it's aggregated here in one grouped query rather than N+1 per plan.
+   * Package balance already exists on `packageSnapshot` (maximumSessions/unusedSessions) and is
+   * returned as-is — no new backend field needed for that half.
+   */
+  async #attachSessionProgress(plans) {
+    const ids = plans.filter(Boolean).map((p) => p.id);
+    if (!ids.length) return plans;
+    const counts = await TreatmentSession.aggregate([
+      { $match: { treatmentPlanId: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) } } },
+      { $group: { _id: { planId: '$treatmentPlanId', status: '$status' }, count: { $sum: 1 } } },
+    ]);
+    const byPlan = new Map();
+    for (const row of counts) {
+      const planId = row._id.planId.toString();
+      const entry = byPlan.get(planId) || { total: 0, completed: 0 };
+      entry.total += row.count;
+      if (row._id.status === TREATMENT_SESSION_STATUS.COMPLETED) entry.completed += row.count;
+      byPlan.set(planId, entry);
+    }
+    return plans.map((plan) => {
+      if (!plan) return plan;
+      const progress = byPlan.get(plan.id) || { total: 0, completed: 0 };
+      return {
+        ...plan,
+        sessionsCompleted: progress.completed,
+        sessionsScheduled: progress.total,
+        packageBalance: plan.packageSnapshot
+          ? {
+              maximumSessions: plan.packageSnapshot.maximumSessions,
+              unusedSessions: plan.packageSnapshot.unusedSessions,
+            }
+          : null,
+      };
+    });
+  }
+
+  /**
+   * Cross-patient "Treatment plans awaiting approval" queue (workspace §3.5 approval gap). Mirrors
+   * ConsultationService#listLabOrderReviewQueue's {items, meta} shape so ReportReviewQueuePage's
+   * list pattern can be reused directly on the frontend.
+   */
+  async listPendingApproval({ doctorId, branchId, onHold, page = 1, limit = 25 } = {}) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 25));
+    const { rows, total } = await this.planRepository.findPendingApproval({
+      doctorId: doctorId || null,
+      branchId: branchId || null,
+      onHold: onHold === undefined ? null : onHold,
+      page: safePage,
+      limit: safeLimit,
+    });
+
+    const items = rows.map((row) => ({
+      id: row._id.toString(),
+      planNumber: row.planNumber,
+      title: row.title,
+      status: row.status,
+      priority: row.priority,
+      estimatedSessions: row.estimatedSessions,
+      onHold: row.onHold,
+      holdNote: row.holdNote,
+      escalatedTo: row.escalatedTo ? row.escalatedTo.toString() : null,
+      escalatedAt: row.escalatedAt,
+      createdAt: row.createdAt,
+      patient: row.patientId
+        ? {
+            id: row.patientId._id?.toString?.(),
+            mrn: row.patientId.mrn,
+            fullName: [row.patientId.firstName, row.patientId.lastName].filter(Boolean).join(' '),
+          }
+        : null,
+      doctor: row.doctorId
+        ? {
+            id: row.doctorId._id?.toString?.(),
+            name: [row.doctorId.userId?.firstName, row.doctorId.userId?.lastName]
+              .filter(Boolean)
+              .join(' '),
+          }
+        : null,
+      branch: row.branchId
+        ? { id: row.branchId._id?.toString?.(), name: row.branchId.displayName || row.branchId.name }
+        : null,
+    }));
+
+    return {
+      items,
+      meta: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        pages: Math.max(1, Math.ceil(total / safeLimit)),
+      },
+    };
   }
 
   async update(id, payload, actorId, _req = null) {
@@ -509,6 +611,8 @@ class TreatmentPlanService {
       status: TREATMENT_PLAN_STATUS.APPROVED,
       approvedAt: new Date(),
       approvedBy: actorId,
+      // Approving out of the queue clears any earlier Hold — it is no longer "parked".
+      onHold: false,
       updatedBy: actorId,
     });
 
@@ -567,6 +671,66 @@ class TreatmentPlanService {
       rejectedAt: new Date(),
       rejectionReason: reason,
       updatedBy: actorId,
+    });
+    return this.getById(id);
+  }
+
+  /**
+   * Approve-queue "Hold" — parks a pending plan with a note; it stays DRAFT/RECOMMENDED (still
+   * shows up in the queue) so the approver comes back to it rather than losing it.
+   */
+  async hold(id, { note = null } = {}, actorId, req = null) {
+    const plan = await this.planRepository.findByIdNotDeleted(id);
+    if (!plan) throw ApiError.notFound('Treatment plan not found');
+    if (
+      ![TREATMENT_PLAN_STATUS.DRAFT, TREATMENT_PLAN_STATUS.RECOMMENDED].includes(plan.status)
+    ) {
+      throw ApiError.badRequest('Only draft or recommended plans can be held');
+    }
+    await this.planRepository.updateById(id, {
+      onHold: true,
+      holdNote: note,
+      heldAt: new Date(),
+      heldBy: actorId,
+      updatedBy: actorId,
+    });
+    await this.auditService.record(AUDIT_ACTIONS.TREATMENT_PLAN_HELD, {
+      actorId,
+      metadata: { treatmentPlanId: id, planNumber: plan.planNumber, note },
+      req,
+    });
+    return this.getById(id);
+  }
+
+  /** Clears a Hold without approving/rejecting — puts the plan back in the ordinary queue flow. */
+  async unhold(id, actorId) {
+    const plan = await this.planRepository.findByIdNotDeleted(id);
+    if (!plan) throw ApiError.notFound('Treatment plan not found');
+    await this.planRepository.updateById(id, {
+      onHold: false,
+      updatedBy: actorId,
+    });
+    return this.getById(id);
+  }
+
+  /**
+   * Approve-queue "Escalate" — flags the plan for senior/owner review. Mirrors the
+   * PatientFeedback complaint-escalation pattern (escalatedTo/escalatedAt + an audit record);
+   * there is no dedicated escalation notification service in this codebase to hook into yet.
+   */
+  async escalate(id, { escalatedTo = null, reason = null } = {}, actorId, req = null) {
+    const plan = await this.planRepository.findByIdNotDeleted(id);
+    if (!plan) throw ApiError.notFound('Treatment plan not found');
+    await this.planRepository.updateById(id, {
+      escalatedTo: escalatedTo || null,
+      escalatedAt: new Date(),
+      escalationReason: reason,
+      updatedBy: actorId,
+    });
+    await this.auditService.record(AUDIT_ACTIONS.TREATMENT_PLAN_ESCALATED, {
+      actorId,
+      metadata: { treatmentPlanId: id, planNumber: plan.planNumber, escalatedTo, reason },
+      req,
     });
     return this.getById(id);
   }

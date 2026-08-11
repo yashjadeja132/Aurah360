@@ -25,6 +25,13 @@ export function useMasterActive(slug, enabled = true) {
   });
 }
 
+/** Dependency-warning check, run on demand right before a deactivate is confirmed. */
+export function useMasterDependencies(slug) {
+  return useMutation({
+    mutationFn: (id) => mastersApi.checkDependencies(slug, id),
+  });
+}
+
 export function useMasterMutations(slug) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ['masters', slug] });

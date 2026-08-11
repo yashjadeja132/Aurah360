@@ -17,8 +17,14 @@ import {
 } from '@/modules/billing/hooks/useBilling';
 import { formatMoney } from '@/modules/billing/constants';
 import { invoiceDetailPath } from '@/constants/routes';
+import { useAuth } from '@/contexts/AuthContext';
+import { ROLES } from '@/constants/rbac';
 
 const STATUS_FILTERS = ['PENDING_APPROVAL', 'APPROVED', 'REJECTED'];
+// Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. A branch-scoped approver
+// (e.g. Branch Manager) only ever has decisions from their own branch to see, so the
+// cross-branch filter below is Owner/Admin-only.
+const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
 
 /**
  * A.5 — the approver's queue. A draft invoice whose staff-granted discount exceeds the
@@ -30,6 +36,8 @@ const STATUS_FILTERS = ['PENDING_APPROVAL', 'APPROVED', 'REJECTED'];
  */
 export function DiscountApprovalPanel() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isGlobalScope = GLOBAL_SCOPE_ROLES.includes(user?.role);
   const { data: branchesData } = useBranchList({ limit: 50 });
   const branches = branchesData?.items || [];
 
@@ -65,14 +73,16 @@ export function DiscountApprovalPanel() {
               </option>
             ))}
           </Select>
-          <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-48">
-            <option value="">{t('billing.discountApprovals.allBranches', 'All branches')}</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.displayName || b.name}
-              </option>
-            ))}
-          </Select>
+          {isGlobalScope && (
+            <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-48">
+              <option value="">{t('billing.discountApprovals.allBranches', 'All branches')}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.displayName || b.name}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
       </CardHeader>
       <CardContent>

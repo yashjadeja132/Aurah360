@@ -4,6 +4,7 @@ import {
   STOCK_TX_TYPE_LIST,
   DISPENSE_STATUS_LIST,
   PO_STATUS_LIST,
+  SALE_TYPE_LIST,
 } from '../enums/inventory.js';
 
 const objectId = z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid id');
@@ -39,6 +40,10 @@ export const createItemSchema = z.object({
   reorderLevel: z.number().min(0).optional(),
   location: z.string().optional().nullable(),
   unit: z.string().optional(),
+  // Direct/retail sale hard-stop (PharmacyService.createDirectSale) — items flagged true here
+  // cannot be sold outside a linked prescription. Defaults false so existing OTC items are
+  // unaffected until a pharmacist/admin explicitly marks a product prescription-only.
+  requiresPrescription: z.boolean().optional(),
 });
 
 export const updateItemSchema = createItemSchema.partial().omit({ branchId: true, itemType: true });
@@ -191,6 +196,18 @@ export const startDispenseSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
+/**
+ * PHARM-SUBST — `reason` and `substitutedMedicineId` are enforced as mandatory in
+ * PharmacyService (not here) because they are only REQUIRED when `isSubstituted: true`; zod's
+ * `.refine` would work too, but the service already owns the permission check for the same flag,
+ * so both conditions live together at one call site.
+ */
+const substitutionInputSchema = z.object({
+  isSubstituted: z.boolean().optional(),
+  substitutedMedicineId: objectId.optional(),
+  reason: z.string().max(500).optional().nullable(),
+});
+
 export const dispenseItemsSchema = z.object({
   notes: z.string().optional().nullable(),
   items: z
@@ -201,6 +218,7 @@ export const dispenseItemsSchema = z.object({
         inventoryItemId: objectId.optional(),
         batchNumber: z.string().optional().nullable(),
         quantity: z.number().positive(),
+        substitution: substitutionInputSchema.optional(),
       })
     )
     .min(1),
@@ -210,8 +228,25 @@ export const dispenseListQuerySchema = z.object({
   branchId: objectId.optional(),
   status: z.enum(DISPENSE_STATUS_LIST).optional(),
   patientId: objectId.optional(),
+  saleType: z.enum(SALE_TYPE_LIST).optional(),
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
+});
+
+/** PHARM-DIRECT — counter/retail sale with no prescription behind it. */
+export const createDirectSaleSchema = z.object({
+  branchId: objectId.optional(),
+  patientId: objectId.optional().nullable(),
+  notes: z.string().optional().nullable(),
+  items: z
+    .array(
+      z.object({
+        inventoryItemId: objectId,
+        batchNumber: z.string().optional().nullable(),
+        quantity: z.number().positive(),
+      })
+    )
+    .min(1),
 });
 
 export const poListQuerySchema = z.object({

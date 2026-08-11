@@ -3,6 +3,8 @@ import CashClose from '../models/CashClose.model.js';
 import AuditService from './AuditService.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import { CASH_CLOSE_STATUS } from '../enums/billing.js';
+import { ROLES } from '../constants/roles.js';
+import config from '../config/index.js';
 
 /** Daily branch cash close (BIL-003, §11.3). */
 class CashCloseService {
@@ -36,6 +38,17 @@ class CashCloseService {
       throw ApiError.badRequest('A variance reason is required when counted cash differs from expected cash');
     }
 
+    // CC-07 — a variance beyond the configured threshold escalates straight to Owner, regardless
+    // of whether a reason was supplied. A reason explains the variance; it doesn't authorize a
+    // branch manager to self-clear a large one.
+    const escalationThreshold = Math.abs(config.billing.cashCloseVarianceEscalationThresholdAmount);
+    const needsOwnerApproval = Math.abs(variance) > escalationThreshold;
+    const status = variance !== 0 && !varianceReason
+      ? CASH_CLOSE_STATUS.DISPUTED
+      : needsOwnerApproval
+        ? CASH_CLOSE_STATUS.PENDING_OWNER_APPROVAL
+        : CASH_CLOSE_STATUS.SUBMITTED;
+
     const close = await CashClose.findOneAndUpdate(
       { branchId: payload.branchId, closeDate: payload.closeDate },
       {
@@ -43,7 +56,7 @@ class CashCloseService {
         varianceReason: varianceReason || null,
         expectedCash,
         variance,
-        status: variance !== 0 && !varianceReason ? CASH_CLOSE_STATUS.DISPUTED : CASH_CLOSE_STATUS.SUBMITTED,
+        status,
         submittedBy: actorId,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -64,6 +77,12 @@ class CashCloseService {
     if (!close) throw ApiError.notFound('Cash close record not found');
     if (scopedBranchId && String(close.branchId || '') !== String(scopedBranchId)) {
       throw ApiError.notFound('Cash close record not found');
+    }
+    // CC-07 — a large-variance close is gated to OWNER only; BRANCH_MANAGER holds
+    // BILLING_CASH_CLOSE_APPROVE generally but must escalate this specific record rather than
+    // clear it themselves.
+    if (close.status === CASH_CLOSE_STATUS.PENDING_OWNER_APPROVAL && req?.auth?.role !== ROLES.OWNER) {
+      throw ApiError.forbidden('This variance requires Owner approval', null, 'CASH_CLOSE_OWNER_APPROVAL_REQUIRED');
     }
     close.status = CASH_CLOSE_STATUS.APPROVED;
     close.approvedBy = actorId;

@@ -20,12 +20,16 @@ import {
   templateCreateSchema,
   doctorListQuerySchema,
   templateListQuerySchema,
+  templateAdminListQuerySchema,
+  templateUpdateSchema,
   amendConsultationSchema,
   releaseSummarySchema,
   createLabOrderSchema,
   updateLabOrderSchema,
   labOrderIdParamSchema,
   labOrderReviewQueueQuerySchema,
+  followUpQueueQuerySchema,
+  followUpActionSchema,
 } from '../../validators/consultation.validator.js';
 
 const router = Router();
@@ -54,11 +58,38 @@ router.get(
   controller.listTemplates
 );
 
+/**
+ * Settings → Masters admin listing — must stay above `/templates/:id`-shaped routes so 'all' is
+ * never swallowed as a template id. Gated to CONSULTATION_TEMPLATE_MANAGE only: unlike the
+ * consultation-session-scoped `/templates` above (any CONSULTATION_VIEW holder, doctor-filtered),
+ * this is the unscoped, org-wide template-library admin surface.
+ */
+router.get(
+  '/templates/all',
+  requirePermission(PERMISSIONS.CONSULTATION_TEMPLATE_MANAGE),
+  validate({ query: templateAdminListQuerySchema }),
+  controller.listAllTemplates
+);
+
 router.post(
   '/templates',
   requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
   validate({ body: templateCreateSchema }),
   controller.createTemplate
+);
+
+router.patch(
+  '/templates/:id',
+  requirePermission(PERMISSIONS.CONSULTATION_TEMPLATE_MANAGE),
+  validate({ params: consultationIdParamSchema, body: templateUpdateSchema }),
+  controller.updateTemplate
+);
+
+router.post(
+  '/templates/:id/approve',
+  requirePermission(PERMISSIONS.CONSULTATION_TEMPLATE_MANAGE),
+  validate({ params: consultationIdParamSchema }),
+  controller.approveTemplate
 );
 
 router.delete(
@@ -75,6 +106,15 @@ router.get(
   requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
   validate({ query: labOrderReviewQueueQuerySchema }),
   controller.labOrderReviewQueue
+);
+
+// §5 — cross-patient Follow-ups due/overdue worklist. Must stay above '/:id' for the same
+// reason as '/lab-orders/review-queue' — otherwise 'follow-ups' is swallowed as a consultation id.
+router.get(
+  '/follow-ups',
+  requirePermission(PERMISSIONS.CONSULTATION_VIEW, PERMISSIONS.CONSULTATION_ALL),
+  validate({ query: followUpQueueQuerySchema }),
+  controller.followUpQueue
 );
 
 router.get(
@@ -159,6 +199,13 @@ router.post(
   requirePermission(PERMISSIONS.CONSULTATION_SIGN, PERMISSIONS.CONSULTATION_ALL),
   validate({ params: consultationIdParamSchema, body: releaseSummarySchema }),
   controller.releaseSummary
+);
+
+router.patch(
+  '/:id/follow-up-status',
+  requirePermission(PERMISSIONS.CONSULTATION_EDIT, PERMISSIONS.CONSULTATION_ALL),
+  validate({ params: consultationIdParamSchema, body: followUpActionSchema }),
+  controller.updateFollowUpStatus
 );
 
 router.post(

@@ -67,6 +67,16 @@ class TreatmentSessionController {
     return ApiResponse.success(res, { message: 'Session started', data: { session } });
   });
 
+  pause = asyncHandler(async (req, res) => {
+    const session = await this.service.pause(req.params.id, { reason: req.body.reason }, req.auth.userId, req);
+    return ApiResponse.success(res, { message: 'Session paused', data: { session } });
+  });
+
+  resume = asyncHandler(async (req, res) => {
+    const session = await this.service.resume(req.params.id, req.auth.userId, req);
+    return ApiResponse.success(res, { message: 'Session resumed', data: { session } });
+  });
+
   complete = asyncHandler(async (req, res) => {
     const session = await this.service.complete(req.params.id, req.body, req.auth.userId, req);
     return ApiResponse.success(res, { message: 'Session completed', data: { session } });

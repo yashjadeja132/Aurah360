@@ -34,6 +34,15 @@ export const DISPENSE_ITEM_STATUS = Object.freeze({
 
 export const DISPENSE_ITEM_STATUS_LIST = Object.freeze(Object.values(DISPENSE_ITEM_STATUS));
 
+/** PHARM-DIRECT — whether a Dispense record is anchored to a signed prescription or is a
+ * standalone retail/counter sale. */
+export const SALE_TYPE = Object.freeze({
+  PRESCRIPTION: 'PRESCRIPTION',
+  DIRECT: 'DIRECT',
+});
+
+export const SALE_TYPE_LIST = Object.freeze(Object.values(SALE_TYPE));
+
 export const PO_STATUS = Object.freeze({
   DRAFT: 'DRAFT',
   ORDERED: 'ORDERED',
@@ -72,11 +81,14 @@ export const INVENTORY_EVENTS = Object.freeze({
   NEAR_EXPIRY_DETECTED: 'NearExpiryDetected',
   GOODS_RECEIVED: 'GoodsReceived',
   STOCK_CONSUMED: 'StockConsumed',
+  /** PHARM-DIRECT — same "billing hears about it" hook that MEDICINE_DISPENSED already provides. */
+  DIRECT_SALE_CREATED: 'DirectSaleCreated',
 });
 
 export default {
   INVENTORY_ITEM_TYPE,
   STOCK_TX_TYPE,
   DISPENSE_STATUS,
+  SALE_TYPE,
   INVENTORY_EVENTS,
 };

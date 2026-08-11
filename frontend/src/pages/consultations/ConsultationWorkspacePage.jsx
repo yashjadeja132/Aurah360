@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { cn } from '@/utils/cn';
+import { useQuery } from '@tanstack/react-query';
 import {
   useConsultationWorkspace,
   usePatientConsultationSummary,
@@ -15,17 +17,17 @@ import {
   useLockConsultation,
   useUpdateConsultation,
 } from '@/modules/consultations/hooks/useConsultations';
+import consentApi from '@/modules/reception/api/consentApi';
 import { useInsertTarget } from '@/modules/consultations/hooks/useInsertTarget';
 import { INSERT_TARGETS, appendText, resetInsertQueue } from '@/modules/consultations/insertBus';
 import { SoapEditor } from '@/modules/consultations/components/SoapEditor';
 import { VitalsForm } from '@/modules/consultations/components/VitalsForm';
-import {
-  DiagnosisForm,
-  ExaminationForm,
-} from '@/modules/consultations/components/DiagnosisExamForms';
+import { ExaminationForm } from '@/modules/consultations/components/DiagnosisExamForms';
 import { ClinicalPhotosPanel } from '@/modules/consultations/components/ClinicalPhotosPanel';
 import { LabOrdersPanel } from '@/modules/consultations/components/LabOrdersPanel';
+import { TreatmentOrderPanel } from '@/modules/consultations/components/TreatmentOrderPanel';
 import { AiCopilotPanel } from '@/modules/consultations/components/AiCopilotPanel';
+import { ReleaseSummaryPanel } from '@/modules/consultations/components/ReleaseSummaryPanel';
 import { PrescriptionDraftPanel } from '@/modules/consultations/components/PrescriptionDraftPanel';
 import {
   PatientSummarySidebar,
@@ -37,8 +39,11 @@ import {
 import {
   CONTEXT_SECTIONS,
   FOLLOW_UP_UNITS,
+  FOLLOW_UP_PRIORITIES,
   RECORD_SECTIONS,
 } from '@/modules/consultations/constants';
+import { useDoctorList } from '@/modules/doctors/hooks/useDoctors';
+import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { APP_ROUTES } from '@/constants/routes';
 import { PERMISSIONS } from '@/constants/rbac';
 import { useAuth } from '@/contexts/AuthContext';
@@ -49,7 +54,8 @@ const TARGET_SECTION = {
   [INSERT_TARGETS.SOAP_OBJECTIVE]: 'soap',
   [INSERT_TARGETS.SOAP_ASSESSMENT]: 'soap',
   [INSERT_TARGETS.SOAP_PLAN]: 'soap',
-  [INSERT_TARGETS.DIAGNOSIS]: 'diagnosis',
+  // Diagnosis now lives inside the SOAP tab's Assessment section (§3.1) — flag the same tab.
+  [INSERT_TARGETS.DIAGNOSIS]: 'soap',
   [INSERT_TARGETS.FOLLOW_UP_INSTRUCTIONS]: 'followup',
   [INSERT_TARGETS.LAB_ORDER]: 'labs',
   [INSERT_TARGETS.PRESCRIPTION_LINE]: 'rx',
@@ -166,6 +172,107 @@ function Panel({ active, children }) {
 }
 
 /**
+ * Mirrors `Patient.model.js#computeAge` (whole-years-as-of-today, DOB-month/day aware). The
+ * consultation workspace's embedded `patient` sub-document (see ConsultationService#map) only
+ * carries `dateOfBirth`, not the `age` virtual `toSafeObject()` adds elsewhere — so it's
+ * recomputed here rather than pulling in a heavier patient-record fetch just for one number.
+ */
+function computeAgeFromDob(dateOfBirth) {
+  if (!dateOfBirth) return null;
+  const dob = new Date(dateOfBirth);
+  if (Number.isNaN(dob.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+/**
+ * §3 sticky patient-context header — MRN · age · allergies/warnings · branch · reason ·
+ * follow-up · consent. Pinned above the tab strip (not inside any tab), so it stays visible no
+ * matter which of the ten sections the doctor is on. Kept to a single dense badge row rather than
+ * a card, matching the `Badge`-pill language used elsewhere in this module (StatusBadges.jsx).
+ */
+function PatientContextHeader({ consultation, patientId }) {
+  const { t } = useTranslation();
+  const patient = consultation?.patient;
+  const age = computeAgeFromDob(patient?.dateOfBirth);
+  const allergies = patient?.allergies;
+  const hasAllergies = Boolean(allergies && String(allergies).trim());
+
+  // Lightest existing read for consent — same per-patient endpoint the reception desk uses
+  // (GET /consent/patients/:patientId); no bulk fetch or new plumbing added.
+  const consentQuery = useQuery({
+    queryKey: ['consent', 'patient', patientId],
+    queryFn: () => consentApi.currentStates(patientId),
+    enabled: Boolean(patientId),
+    staleTime: 60_000,
+  });
+  const consentStates = consentQuery.data?.data?.states || [];
+  const relevantConsents = consentStates.filter((c) => c.state && c.state !== 'NOT_SET');
+  const hasConsentGranted = relevantConsents.length > 0 && relevantConsents.every((c) => c.state === 'GRANTED');
+  const consentLabel = consentQuery.isLoading
+    ? t('common.loading', 'Loading…')
+    : relevantConsents.length
+      ? hasConsentGranted
+        ? t('consultations.workspace.consentOnFile', 'On file')
+        : t('consultations.workspace.consentPending', 'Pending')
+      : t('consultations.workspace.consentNone', 'Not recorded');
+
+  const followUp = consultation?.followUp;
+  const followUpLabel = followUp?.value
+    ? `${followUp.value} ${(followUp.unit || '').toLowerCase()}`
+    : t('consultations.workspace.followUpNotSet', 'Not set');
+
+  return (
+    <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-1.5 rounded-lg border bg-card/95 px-3 py-2 text-xs backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <HeaderField label={t('consultations.workspace.mrn', 'MRN')}>
+        {patient?.mrn || '—'}
+      </HeaderField>
+      <HeaderField label={t('consultations.workspace.age', 'Age')}>
+        {age != null ? age : '—'}
+      </HeaderField>
+      <Badge
+        variant={hasAllergies ? 'destructive' : 'outline'}
+        className="px-2 py-0.5 text-[11px] font-medium"
+        title={hasAllergies ? String(allergies) : undefined}
+      >
+        {hasAllergies
+          ? `${t('consultations.workspace.allergies', 'Allergies')}: ${allergies}`
+          : t('consultations.workspace.noAllergies', 'No known allergies')}
+      </Badge>
+      <HeaderField label={t('consultations.workspace.branch', 'Branch')}>
+        {consultation?.branch?.name || '—'}
+      </HeaderField>
+      <HeaderField label={t('consultations.workspace.reason', 'Reason')}>
+        <span className="max-w-[16rem] truncate" title={consultation?.chiefComplaint || undefined}>
+          {consultation?.chiefComplaint || '—'}
+        </span>
+      </HeaderField>
+      <Badge variant="outline" className="px-2 py-0.5 text-[11px] font-medium">
+        {t('consultations.workspace.followUp', 'Follow-up')}: {followUpLabel}
+      </Badge>
+      <Badge
+        variant={hasConsentGranted ? 'success' : relevantConsents.length ? 'warning' : 'outline'}
+        className="px-2 py-0.5 text-[11px] font-medium"
+      >
+        {t('consultations.workspace.consent', 'Consent')}: {consentLabel}
+      </Badge>
+    </div>
+  );
+}
+
+function HeaderField({ label, children }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-0.5 font-medium text-muted-foreground">
+      <span className="uppercase tracking-wide text-[10px] text-muted-foreground/70">{label}</span>
+      <span className="text-foreground">{children}</span>
+    </span>
+  );
+}
+
+/**
  * The in-cabin consultation cockpit.
  *
  * Two halves on desktop: the AI copilot on the left, and ONE tabbed section on the right holding
@@ -213,6 +320,11 @@ export default function ConsultationWorkspacePage() {
     unit: 'WEEKS',
     reason: '',
     instructions: '',
+    priority: 'NORMAL',
+    preferredDoctorId: '',
+    preferredBranchId: '',
+    reminderDate: '',
+    reminderNote: '',
   });
 
   useEffect(() => {
@@ -222,9 +334,22 @@ export default function ConsultationWorkspacePage() {
         unit: consultation.followUp.unit || 'WEEKS',
         reason: consultation.followUp.reason || '',
         instructions: consultation.followUp.instructions || '',
+        priority: consultation.followUp.priority || 'NORMAL',
+        preferredDoctorId: consultation.followUp.preferredDoctorId || '',
+        preferredBranchId: consultation.followUp.preferredBranchId || '',
+        reminderDate: consultation.followUp.reminderDate
+          ? new Date(consultation.followUp.reminderDate).toISOString().slice(0, 10)
+          : '',
+        reminderNote: consultation.followUp.reminderNote || '',
       });
     }
   }, [consultation?.id]);
+
+  // §3.6 — preferred doctor/branch pickers for the follow-up order.
+  const { data: followUpDoctorsData } = useDoctorList({ limit: 100 });
+  const followUpDoctors = followUpDoctorsData?.items || [];
+  const { data: followUpBranchesData } = useBranchList({ limit: 100 });
+  const followUpBranches = followUpBranchesData?.items || [];
 
   /** Patient-instruction inserts append to the follow-up instructions box, unsaved and editable. */
   useInsertTarget(
@@ -338,6 +463,8 @@ export default function ConsultationWorkspacePage() {
         </div>
       </div>
 
+      <PatientContextHeader consultation={consultation} patientId={patientId} />
+
       <div className="grid gap-4 lg:grid-cols-2">
         {/* PRIMARY half — the copilot is always on screen, never behind a tab. */}
         <div className="min-h-0 lg:h-[calc(100vh-13rem)]">
@@ -365,7 +492,12 @@ export default function ConsultationWorkspacePage() {
               <TimelinePanel summary={summaryQuery.data} loading={summaryQuery.isLoading} />
             </Panel>
             <Panel active={tab === 'soap'}>
-              <SoapEditor consultationId={id} soap={data.soap} readOnly={readOnly} />
+              <SoapEditor
+                consultationId={id}
+                soap={data.soap}
+                diagnosis={data.diagnosis}
+                readOnly={readOnly}
+              />
             </Panel>
             <Panel active={tab === 'vitals'}>
               <VitalsForm consultationId={id} vitals={data.vitals} readOnly={readOnly} />
@@ -374,13 +506,6 @@ export default function ConsultationWorkspacePage() {
               <ExaminationForm
                 consultationId={id}
                 examination={data.examination}
-                readOnly={readOnly}
-              />
-            </Panel>
-            <Panel active={tab === 'diagnosis'}>
-              <DiagnosisForm
-                consultationId={id}
-                diagnosis={data.diagnosis}
                 readOnly={readOnly}
               />
             </Panel>
@@ -397,11 +522,17 @@ export default function ConsultationWorkspacePage() {
             <Panel active={tab === 'labs'}>
               <LabOrdersPanel consultationId={id} readOnly={readOnly} />
             </Panel>
+            <Panel active={tab === 'treatment'}>
+              <TreatmentOrderPanel consultationId={id} patientId={patientId} readOnly={readOnly} />
+            </Panel>
             <Panel active={tab === 'followup'}>
               <div className="space-y-3">
                 <h3 className="font-semibold">{t('consultations.followUp.title', 'Follow-up recommendation')}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {t('consultations.followUp.hint', 'Appointment module will consume this later.')}
+                  {t(
+                    'consultations.followUp.hint',
+                    'Structured follow-up order — a reminder date/note is set here; the appointment module will own actual scheduling and delivery later.'
+                  )}
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
@@ -436,6 +567,71 @@ export default function ConsultationWorkspacePage() {
                     onChange={(e) => setFollowUp((p) => ({ ...p, reason: e.target.value }))}
                   />
                 </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.priority', 'Priority')}</Label>
+                    <Select
+                      value={followUp.priority}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, priority: e.target.value }))}
+                    >
+                      {FOLLOW_UP_PRIORITIES.map((p) => (
+                        <option key={p.value} value={p.value}>
+                          {t(`consultations.followUp.priorities.${p.value}`, p.label)}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.preferredDoctor', 'Preferred doctor')}</Label>
+                    <Select
+                      value={followUp.preferredDoctorId}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, preferredDoctorId: e.target.value }))}
+                    >
+                      <option value="">{t('consultations.followUp.anyDoctor', 'Any')}</option>
+                      {followUpDoctors.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.doctorCode} — {d.user?.fullName || t('consultations.followUp.doctorFallback', 'Doctor')}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.preferredBranch', 'Preferred branch')}</Label>
+                    <Select
+                      value={followUp.preferredBranchId}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, preferredBranchId: e.target.value }))}
+                    >
+                      <option value="">{t('consultations.followUp.anyBranch', 'Any')}</option>
+                      {followUpBranches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.displayName || b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.reminderDate', 'Reminder date')}</Label>
+                    <Input
+                      type="date"
+                      value={followUp.reminderDate}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, reminderDate: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('consultations.followUp.reminderNote', 'Reminder note')}</Label>
+                    <Input
+                      value={followUp.reminderNote}
+                      disabled={readOnly}
+                      onChange={(e) => setFollowUp((p) => ({ ...p, reminderNote: e.target.value }))}
+                    />
+                  </div>
+                </div>
                 <div className="space-y-1">
                   <Label>
                     {t('consultations.followUp.instructions', 'Instructions')}{' '}
@@ -462,6 +658,11 @@ export default function ConsultationWorkspacePage() {
                           unit: followUp.unit,
                           reason: followUp.reason || null,
                           instructions: followUp.instructions || null,
+                          priority: followUp.priority || null,
+                          preferredDoctorId: followUp.preferredDoctorId || null,
+                          preferredBranchId: followUp.preferredBranchId || null,
+                          reminderDate: followUp.reminderDate || null,
+                          reminderNote: followUp.reminderNote || null,
                         },
                       })
                     }
@@ -475,6 +676,15 @@ export default function ConsultationWorkspacePage() {
                   </p>
                 )}
               </div>
+            </Panel>
+            <Panel active={tab === 'release'}>
+              <ReleaseSummaryPanel
+                consultationId={id}
+                soap={data.soap}
+                diagnosis={data.diagnosis}
+                followUp={followUp}
+                consultation={consultation}
+              />
             </Panel>
           </div>
         </div>

@@ -35,8 +35,11 @@ import {
   PAYMENT_RECORD_STATUS,
   PAYMENT_STATUS,
   paymentMethodRequiresReference,
+  REFUND_APPROVAL_STATUS,
+  REFUND_APPROVAL_STATUS_LIST,
   WRITE_OFF_REASON_LIST,
 } from '../enums/billing.js';
+import RefundRequest from '../models/RefundRequest.model.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
 import CreditNote from '../models/CreditNote.model.js';
 import LoyaltyLedgerEntry from '../models/LoyaltyLedgerEntry.model.js';
@@ -1004,6 +1007,79 @@ class BillingService {
   }
 
   /**
+   * LOY-006 — the missing counterpart to #clawbackEarnedLoyaltyPoints: when a paid invoice that
+   * had a loyalty redemption is refunded, the points the patient spent on it are re-credited as
+   * CREDIT_REVERSAL, not left gone forever. Restores each DEBIT_REDEEM row's ORIGINAL earn-lot
+   * expiry (via `consumesEntryId`) if that lot is still open; a lot that already expired is
+   * handled per `LoyaltyProgramSettings.expiredRedemptionRestorePolicy` — RESTORE_SHORT_EXPIRY
+   * grants a fresh short window instead of the full standard period (a refund should not hand
+   * back MORE runway than the points ever had), FORFEIT re-credits nothing for that lot.
+   *
+   * One CREDIT_REVERSAL per DEBIT_REDEEM row (not a lump sum) because different rows can trace
+   * to different earn lots with different original expiries. Idempotent per debit row via
+   * `refund-recredit:<debitEntryId>` so repeated/partial refunds on the same invoice never
+   * double-restore a row already reversed. Best-effort/non-blocking, same try/catch shape as
+   * #clawbackEarnedLoyaltyPoints — a re-credit failure must never fail the refund itself.
+   */
+  async #recreditRedeemedLoyaltyPoints(invoice, reasonNote, actorId, req) {
+    try {
+      const debitEntries = await LoyaltyLedgerEntry.find({
+        sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
+        sourceRefId: invoice._id,
+        entryType: LOYALTY_ENTRY_TYPE.DEBIT_REDEEM,
+      }).lean();
+      if (!debitEntries.length) return;
+
+      const settings = await this.loyaltyLedgerService.getSettings();
+      const restorePolicy = settings?.expiredRedemptionRestorePolicy || 'RESTORE_SHORT_EXPIRY';
+      const now = new Date();
+
+      for (const debit of debitEntries) {
+        const idempotencyKey = `refund-recredit:${debit._id}`;
+        const already = await LoyaltyLedgerEntry.exists({ patientId: invoice.patientId, idempotencyKey });
+        if (already) continue;
+
+        let earnLotExpiryDateOverride; // undefined = let credit() compute a fresh standard expiry
+        if (debit.consumesEntryId) {
+          const originalLot = await LoyaltyLedgerEntry.findById(debit.consumesEntryId)
+            .select('earnLotExpiryDate')
+            .lean();
+          const originalExpiry = originalLot?.earnLotExpiryDate || null;
+          if (!originalExpiry || originalExpiry > now) {
+            // Never expires, or still open — hand back exactly what the patient had.
+            earnLotExpiryDateOverride = originalExpiry;
+          } else if (restorePolicy === 'FORFEIT') {
+            continue; // that lot's window is gone and policy says don't restore it
+          } else {
+            const shortExpiry = new Date(now);
+            shortExpiry.setDate(shortExpiry.getDate() + 30);
+            earnLotExpiryDateOverride = shortExpiry;
+          }
+        }
+
+        await this.loyaltyLedgerService.credit({
+          branchId: invoice.branchId,
+          patientId: invoice.patientId,
+          points: debit.points,
+          entryType: LOYALTY_ENTRY_TYPE.CREDIT_REVERSAL,
+          sourceRefType: LOYALTY_SOURCE_REF_TYPE.INVOICE,
+          sourceRefId: invoice._id,
+          note: reasonNote,
+          idempotencyKey,
+          createdBy: actorId,
+          actorReq: req,
+          earnLotExpiryDateOverride,
+        });
+      }
+    } catch (err) {
+      logger.error('BillingService: loyalty redeemed-points re-credit failed (non-blocking)', {
+        invoiceId: invoice._id.toString(),
+        error: err.message,
+      });
+    }
+  }
+
+  /**
    * LOY-005 — apply a loyalty-points redemption to a DRAFT invoice as a discount, capped by the
    * program's redemption caps computed against the redeemable base
    * (excludedRedemptionCategories line items are excluded from that base).
@@ -1100,6 +1176,12 @@ class BillingService {
         idempotencyKey: operationKey,
         createdBy: actorId,
         actorReq: req,
+        // LOY-005 — front-desk/portal must positively confirm patient identity (and, in OTP mode,
+        // that the OTP was verified) before points leave the balance; redeem() throws if the
+        // configured LoyaltyProgramSettings.redemptionIdentityConfirmation mode requires it and
+        // this wasn't supplied.
+        identityConfirmed: Boolean(payload.identityConfirmed),
+        otpVerified: Boolean(payload.otpVerified),
       });
     } catch (err) {
       // Release the claim: no points were spent, so the invoice must not keep showing a
@@ -1841,16 +1923,16 @@ class BillingService {
 
     eventBus.emitDomain(BILLING_EVENTS.PAYMENT_REFUNDED, { paymentId, refundAmount, refundMethod });
 
-    // LOY-006 — best-effort/non-blocking: claw back only points EARNED (CREDIT) from this
-    // invoice, never REDEEMED (DEBIT_REDEEM) points — a refund does not auto-reverse a
-    // redemption the patient already made.
+    // LOY-006 — best-effort/non-blocking, both halves of a refund's loyalty impact:
+    //  1. claw back points EARNED (CREDIT) from this invoice — the invoice being refunded no
+    //     longer justifies the reward it paid for.
+    //  2. re-credit points REDEEMED (DEBIT_REDEEM) against it — the patient's own points that
+    //     paid part of this invoice are given back, since the invoice they bought is now
+    //     (partially) unwound. See #recreditRedeemedLoyaltyPoints for expiry-restoration rules.
     if (invoice) {
-      await this.#clawbackEarnedLoyaltyPoints(
-        invoice,
-        `Refund of payment ${paymentId} — ${payload.reason}`,
-        actorId,
-        req
-      );
+      const reasonNote = `Refund of payment ${paymentId} — ${payload.reason}`;
+      await this.#clawbackEarnedLoyaltyPoints(invoice, reasonNote, actorId, req);
+      await this.#recreditRedeemedLoyaltyPoints(invoice, reasonNote, actorId, req);
     }
 
     return {
@@ -1862,6 +1944,191 @@ class BillingService {
   /** @deprecated use refund() — kept so any un-migrated caller does not hard-crash. */
   async refundPlaceholder(paymentId, payload, actorId, req = null) {
     return this.refund(paymentId, { ...payload, reason: payload.notes || 'Refund' }, actorId, req);
+  }
+
+  /**
+   * A.8 — the front door for a refund. Below config.billing.refundApprovalThresholdAmount (or
+   * for an actor who already holds BILLING_REFUND_APPROVE), the refund applies immediately via
+   * refund() — same behaviour as before this queue existed. Above it, a RefundRequest is created
+   * PENDING_APPROVAL instead and no money moves until an approver decides. Mirrors
+   * LoyaltyAdminService#createPatientAdjustment's canAutoApply split.
+   */
+  async requestRefund(paymentId, payload, actor, req = null, canAutoApply = false) {
+    const actorId = actor?.userId || actor;
+    const payment = await this.paymentRepository.findByIdNotDeleted(paymentId);
+    if (!payment) throw ApiError.notFound('Payment not found');
+    if (payment.status === PAYMENT_RECORD_STATUS.VOID) {
+      throw ApiError.badRequest('A voided payment cannot be refunded');
+    }
+    if (!payload.reason) throw ApiError.badRequest('Refund reason is required');
+
+    const paymentPaise = toPaise(payment.amount);
+    const alreadyRefundedPaise = toPaise(payment.refundedAmount || 0);
+    const refundablePaise = paymentPaise - alreadyRefundedPaise;
+    if (refundablePaise <= 0) throw ApiError.badRequest('Payment has already been refunded');
+    const refundPaise = payload.amount === undefined || payload.amount === null
+      ? refundablePaise
+      : toPaise(payload.amount);
+    if (refundPaise <= 0) throw ApiError.badRequest('Refund amount must be greater than zero');
+    if (refundPaise > refundablePaise) {
+      throw ApiError.badRequest('Refund amount cannot exceed the amount still refundable on this payment');
+    }
+    const amount = fromPaise(refundPaise);
+
+    const threshold = Number(config.billing.refundApprovalThresholdAmount) || 0;
+    if (canAutoApply || amount <= threshold) {
+      const result = await this.refund(paymentId, payload, actorId, req);
+      return { status: 'APPLIED', ...result };
+    }
+
+    const request = await RefundRequest.create({
+      branchId: payment.branchId,
+      invoiceId: payment.invoiceId,
+      paymentId: payment._id,
+      patientId: payment.patientId || null,
+      amount,
+      method: payload.method || 'ORIGINAL_MODE',
+      reason: payload.reason,
+      notes: payload.notes || null,
+      creditNoteExpiresAt: payload.creditNoteExpiresAt || null,
+      requestedBy: actorId,
+    });
+
+    await this.auditService.record(AUDIT_ACTIONS.PAYMENT_REFUND_REQUESTED || AUDIT_ACTIONS.PAYMENT_REFUNDED, {
+      actorId,
+      metadata: { paymentId, amount, reason: payload.reason, refundRequestId: request._id.toString() },
+      branchId: payment.branchId,
+      resourceType: 'RefundRequest',
+      resourceId: request._id,
+      req,
+    });
+
+    return { status: 'PENDING_APPROVAL', refundRequest: request.toSafeObject() };
+  }
+
+  /**
+   * A.8 — the approver's worklist: refund requests above threshold, awaiting a decision.
+   * Permission-gated at the route layer via BILLING_REFUND_APPROVE.
+   */
+  async listRefundApprovalQueue(query = {}) {
+    const limit = Math.min(Number(query.limit) || 50, 100);
+    const page = Math.max(Number(query.page) || 1, 1);
+    const status = REFUND_APPROVAL_STATUS_LIST.includes(query.status)
+      ? query.status
+      : REFUND_APPROVAL_STATUS.PENDING_APPROVAL;
+    const filter = { status };
+    if (query.branchId) filter.branchId = query.branchId;
+
+    const [items, total] = await Promise.all([
+      RefundRequest.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('patientId', 'firstName lastName mobile')
+        .populate('requestedBy', 'name email')
+        .populate('invoiceId', 'invoiceNumber')
+        .lean(),
+      RefundRequest.countDocuments(filter),
+    ]);
+
+    const mapped = items.map((row) => ({
+      id: row._id.toString(),
+      branchId: row.branchId?.toString?.() || row.branchId,
+      invoiceId: row.invoiceId?._id?.toString?.() || row.invoiceId?.toString?.() || row.invoiceId,
+      invoiceNumber: row.invoiceId?.invoiceNumber || null,
+      paymentId: row.paymentId?.toString?.() || row.paymentId,
+      patientId: row.patientId?._id?.toString?.() || null,
+      patientName: row.patientId ? `${row.patientId.firstName || ''} ${row.patientId.lastName || ''}`.trim() : null,
+      amount: row.amount,
+      method: row.method,
+      reason: row.reason,
+      notes: row.notes,
+      status: row.status,
+      requestedBy: row.requestedBy?._id?.toString?.() || null,
+      requestedByName: row.requestedBy?.name || null,
+      decidedBy: row.decidedBy?.toString?.() || null,
+      decidedAt: row.decidedAt,
+      decisionNote: row.decisionNote,
+      thresholdAmount: config.billing.refundApprovalThresholdAmount,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    return { items: mapped, meta: { page, limit, total, pages: Math.ceil(total / limit) || 1 } };
+  }
+
+  /** Shared approve/reject body for a refund request — mirrors #decideDiscount. */
+  async #decideRefund(id, payload, actorId, req, { approve, scopedBranchId = null }) {
+    const verb = approve ? 'approve' : 'reject';
+    const note = String(payload?.decisionNote ?? payload?.reason ?? '').trim();
+    if (!note) throw ApiError.badRequest(`A reason is required to ${verb} a refund`);
+
+    const request = await RefundRequest.findById(id);
+    if (!request) throw ApiError.notFound('Refund request not found');
+    if (scopedBranchId && request.branchId?.toString() !== scopedBranchId.toString()) {
+      throw ApiError.notFound('Refund request not found');
+    }
+    if (request.status !== REFUND_APPROVAL_STATUS.PENDING_APPROVAL) {
+      throw ApiError.badRequest('Only pending refund requests can be decided');
+    }
+
+    if (approve) {
+      const result = await this.refund(
+        request.paymentId.toString(),
+        {
+          amount: request.amount,
+          method: request.method,
+          reason: request.reason,
+          notes: request.notes,
+          creditNoteExpiresAt: request.creditNoteExpiresAt,
+        },
+        actorId,
+        req
+      );
+      request.status = REFUND_APPROVAL_STATUS.APPROVED;
+      request.resultPaymentId = request.paymentId;
+      request.resultCreditNoteId = result.creditNote?.id || null;
+      request.decisionNote = note;
+      request.decidedBy = actorId;
+      request.decidedAt = new Date();
+      await request.save();
+
+      await this.auditService.record(AUDIT_ACTIONS.PAYMENT_REFUNDED, {
+        actorId,
+        metadata: { refundRequestId: id, amount: request.amount, decisionNote: note },
+        branchId: request.branchId,
+        resourceType: 'RefundRequest',
+        resourceId: id,
+        req,
+      });
+
+      return { refundRequest: request.toSafeObject(), ...result };
+    }
+
+    request.status = REFUND_APPROVAL_STATUS.REJECTED;
+    request.decisionNote = note;
+    request.decidedBy = actorId;
+    request.decidedAt = new Date();
+    await request.save();
+
+    await this.auditService.record(AUDIT_ACTIONS.PAYMENT_REFUNDED, {
+      actorId,
+      metadata: { refundRequestId: id, amount: request.amount, decisionNote: note, rejected: true },
+      branchId: request.branchId,
+      resourceType: 'RefundRequest',
+      resourceId: id,
+      req,
+    });
+
+    return { refundRequest: request.toSafeObject() };
+  }
+
+  async approveRefund(id, payload, actorId, req = null, scopedBranchId = null) {
+    return this.#decideRefund(id, payload, actorId, req, { approve: true, scopedBranchId });
+  }
+
+  async rejectRefund(id, payload, actorId, req = null, scopedBranchId = null) {
+    return this.#decideRefund(id, payload, actorId, req, { approve: false, scopedBranchId });
   }
 
   /**

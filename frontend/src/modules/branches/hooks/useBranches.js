@@ -39,7 +39,14 @@ export function useBranchMutations() {
       onSuccess: invalidate,
     }),
     activate: useMutation({ mutationFn: branchesApi.activate, onSuccess: invalidate }),
-    deactivate: useMutation({ mutationFn: branchesApi.deactivate, onSuccess: invalidate }),
+    deactivate: useMutation({
+      mutationFn: ({ id, reason }) => branchesApi.deactivate(id, reason),
+      onSuccess: invalidate,
+    }),
+    transfer: useMutation({
+      mutationFn: ({ id, toBranchId }) => branchesApi.transfer(id, toBranchId),
+      onSuccess: invalidate,
+    }),
     remove: useMutation({ mutationFn: branchesApi.remove, onSuccess: invalidate }),
   };
 }

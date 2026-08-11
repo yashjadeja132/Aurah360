@@ -30,6 +30,12 @@ export async function generateDispenseNumber() {
   return `DSP-${String(next).padStart(6, '0')}`;
 }
 
+/** PHARM-DIRECT — direct/retail sales get their own numbering series, distinct from dispenses. */
+export async function generateDirectSaleNumber() {
+  const next = await getNextSequence('direct_sale_number');
+  return `SAL-${String(next).padStart(6, '0')}`;
+}
+
 export default {
   generateItemCode,
   generateStockTxNumber,
@@ -37,4 +43,5 @@ export default {
   generatePoNumber,
   generateGrnNumber,
   generateDispenseNumber,
+  generateDirectSaleNumber,
 };

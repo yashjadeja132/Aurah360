@@ -4,6 +4,7 @@ import { DoorOpen, Cpu, BadgeCheck, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { SearchableCombobox } from '@/components/common/SearchableCombobox';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -69,7 +70,7 @@ export default function ResourcesPage() {
   );
 }
 
-function RoomsTab({ branches, branchId }) {
+export function RoomsTab({ branches, branchId }) {
   const { t } = useTranslation();
   const { data: rooms = [], isLoading } = useRooms(branchId ? { branchId } : {});
   const create = useCreateRoom();
@@ -138,7 +139,7 @@ function RoomsTab({ branches, branchId }) {
   );
 }
 
-function DevicesTab({ branches, branchId }) {
+export function DevicesTab({ branches, branchId }) {
   const { t } = useTranslation();
   const { data: devices = [], isLoading } = useDevices(branchId ? { branchId } : {});
   const create = useCreateDevice();
@@ -231,10 +232,15 @@ function SkillsTab({ branchId }) {
                 setForm({ userId: '', skillCode: '', name: '' });
               }}
             >
-              <Select value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))}>
-                <option value="">{t('settings.resources.skills.staffPlaceholder', 'Staff member')}</option>
-                {staff.map((s) => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
-              </Select>
+              <SearchableCombobox
+                value={form.userId}
+                onChange={(id) => setForm((f) => ({ ...f, userId: id }))}
+                options={staff}
+                filterKeys={['firstName', 'lastName']}
+                renderLabel={(s) => `${s.firstName} ${s.lastName}`}
+                placeholder={t('settings.resources.skills.staffPlaceholder', 'Staff member')}
+                emptyText={t('settings.resources.skills.noStaffMatch', 'No match')}
+              />
               <Input placeholder={t('settings.resources.skills.skillCodePlaceholder', 'Skill code (e.g. LASER_L2)')} value={form.skillCode} onChange={(e) => setForm((f) => ({ ...f, skillCode: e.target.value }))} />
               <Input placeholder={t('settings.resources.skills.displayNamePlaceholder', 'Display name')} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
               <Button type="submit" disabled={grant.isPending}><Plus className="h-4 w-4" /> {t('settings.resources.skills.grantAction', 'Grant')}</Button>

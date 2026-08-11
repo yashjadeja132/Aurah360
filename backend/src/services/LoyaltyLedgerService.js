@@ -204,6 +204,11 @@ class LoyaltyLedgerService {
     createdBy = null,
     organizationId = null,
     actorReq = null,
+    // LOY-006 — CREDIT_REVERSAL only: lets the caller pin the re-credited lot's expiry to the
+    // ORIGINAL earn lot's expiry (still open) instead of computing a fresh one from today, so a
+    // refunded redemption doesn't hand the patient a longer expiry than they originally had.
+    // undefined = compute normally; explicit null/Date = use exactly that.
+    earnLotExpiryDateOverride = undefined,
   }) {
     if (!LOYALTY_CREDIT_ENTRY_TYPES.includes(entryType)) {
       throw ApiError.badRequest(`entryType must be one of: ${LOYALTY_CREDIT_ENTRY_TYPES.join(', ')}`);
@@ -214,7 +219,8 @@ class LoyaltyLedgerService {
     const roundedPoints = Math.floor(points);
 
     const settings = await this.#getActiveSettings();
-    const earnLotExpiryDate = this.#computeExpiryDate(settings);
+    const earnLotExpiryDate =
+      earnLotExpiryDateOverride !== undefined ? earnLotExpiryDateOverride : this.#computeExpiryDate(settings);
 
     let entry;
     try {
@@ -378,10 +384,36 @@ class LoyaltyLedgerService {
     createdBy = null,
     organizationId = null,
     actorReq = null,
+    identityConfirmed = false,
+    otpVerified = false,
   }) {
     const settings = await this.assertProgramEnabled();
     if (!Number.isFinite(points) || points <= 0) {
       throw ApiError.badRequest('points must be a positive integer.');
+    }
+
+    /**
+     * LOY-005 — identity confirmation gate. NONE = no gate (default off means nothing changes for
+     * clinics that never configured it). IN_PERSON requires the caller to have ticked "identity
+     * checked" (front-desk visual/ID verification — no OTP infra needed). OTP additionally
+     * requires `otpVerified`; this method never sends or checks an actual OTP code — delivering
+     * and verifying the code is out of scope for this pass and is the responsibility of whatever
+     * flow sets `otpVerified` before calling here.
+     */
+    const confirmationMode = settings.redemptionIdentityConfirmation || 'NONE';
+    if (confirmationMode !== 'NONE' && !identityConfirmed) {
+      throw ApiError.badRequest(
+        'Patient identity must be confirmed before redeeming loyalty points.',
+        null,
+        'LOYALTY_IDENTITY_CONFIRMATION_REQUIRED'
+      );
+    }
+    if (confirmationMode === 'OTP' && !otpVerified) {
+      throw ApiError.badRequest(
+        'OTP verification is required before redeeming loyalty points.',
+        null,
+        'LOYALTY_OTP_VERIFICATION_REQUIRED'
+      );
     }
     if (points < settings.minimumPointsToRedeem) {
       throw ApiError.badRequest(

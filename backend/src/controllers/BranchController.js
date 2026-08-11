@@ -80,8 +80,14 @@ class BranchController {
 
   deactivate = asyncHandler(async (req, res) => {
     const scope = await resolveRecordScope(req, { branch: true, doctor: false });
-    const branch = await this.branchService.deactivate(req.params.id, req.auth.userId, req, scope);
-    return ApiResponse.success(res, { message: 'Branch deactivated', data: { branch } });
+    const result = await this.branchService.deactivate(
+      req.params.id,
+      req.body.reason,
+      req.auth.userId,
+      req,
+      scope
+    );
+    return ApiResponse.success(res, { message: 'Branch deactivated', data: result });
   });
 
   softDelete = asyncHandler(async (req, res) => {

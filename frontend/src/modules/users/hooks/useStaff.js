@@ -34,6 +34,30 @@ export function useRolesQuery() {
   });
 }
 
+/** §2.1 — the full permission catalogue, grouped by module, for the staff permission toggles. */
+export function usePermissionsCatalogue() {
+  return useQuery({
+    queryKey: ['roles', 'permissions'],
+    queryFn: async () => {
+      const res = await rolesApi.permissions();
+      return res.data.permissions || [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** §2.1 — per-role default permission bundle, sourced from the backend's rolePermissions.js. */
+export function useRoleTemplates() {
+  return useQuery({
+    queryKey: ['roles', 'templates'],
+    queryFn: async () => {
+      const res = await rolesApi.templates();
+      return res.data.templates || {};
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useCreateStaff() {
   const qc = useQueryClient();
   return useMutation({
@@ -45,7 +69,7 @@ export function useCreateStaff() {
 export function useUpdateStaff(id) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (payload) => usersApi.update(id, payload),
+    mutationFn: ({ payload, stepUpToken }) => usersApi.update(id, payload, stepUpToken),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['staff'] });
       qc.invalidateQueries({ queryKey: QUERY_KEYS.STAFF_DETAIL(id) });

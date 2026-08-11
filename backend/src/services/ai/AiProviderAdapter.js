@@ -25,7 +25,17 @@ const EMPTY_USAGE = Object.freeze({
 const ANTHROPIC_MAX_TOKENS = 16000;
 
 class AiProviderAdapter {
-  constructor({ provider, apiKey, apiBaseUrl, model, timeoutMs, anthropicApiKey, anthropicModel }) {
+  constructor({
+    provider,
+    apiKey,
+    apiBaseUrl,
+    model,
+    timeoutMs,
+    anthropicApiKey,
+    anthropicModel,
+    geminiApiKey,
+    geminiModel,
+  }) {
     this.provider = provider;
     this.apiKey = apiKey;
     this.apiBaseUrl = apiBaseUrl;
@@ -33,6 +43,8 @@ class AiProviderAdapter {
     this.timeoutMs = timeoutMs || 8000;
     this.anthropicApiKey = anthropicApiKey || '';
     this.anthropicModel = anthropicModel || 'claude-sonnet-5';
+    this.geminiApiKey = geminiApiKey || '';
+    this.geminiModel = geminiModel || 'gemini-flash-latest';
     this.#client = null;
   }
 
@@ -42,16 +54,26 @@ class AiProviderAdapter {
    * True when the configured provider can actually be reached. MOCK is always usable; the
    * real providers fall back to MOCK when their credentials are absent so a credential-less
    * deployment keeps working.
+   *
+   * GEMINI is a fallback, not a peer of ANTHROPIC/OPENAI_COMPATIBLE in AI_PROVIDER's enum: when
+   * the operator has configured AI_PROVIDER=ANTHROPIC but ANTHROPIC_API_KEY is missing/empty (a
+   * bare credential gap, not a deliberate provider choice), we reach for GEMINI_API_KEY before
+   * giving up to MOCK. If AI_PROVIDER itself is MOCK or OPENAI_COMPATIBLE, that's a deliberate
+   * choice and Gemini is never substituted for it.
    */
   effectiveProvider() {
     if (this.provider === 'ANTHROPIC' && this.anthropicApiKey) return 'ANTHROPIC';
+    if (this.provider === 'ANTHROPIC' && this.geminiApiKey) return 'GEMINI';
     if (this.provider === 'OPENAI_COMPATIBLE' && this.apiKey && this.apiBaseUrl) return 'OPENAI_COMPATIBLE';
     return 'MOCK';
   }
 
   /** The model string that will actually be used for the current effective provider. */
   effectiveModel() {
-    return this.effectiveProvider() === 'ANTHROPIC' ? this.anthropicModel : this.model;
+    const provider = this.effectiveProvider();
+    if (provider === 'ANTHROPIC') return this.anthropicModel;
+    if (provider === 'GEMINI') return this.geminiModel;
+    return this.model;
   }
 
   /**
@@ -63,6 +85,9 @@ class AiProviderAdapter {
     const provider = this.effectiveProvider();
     if (provider === 'ANTHROPIC') {
       return this.#anthropicComplete({ systemPrompt, userPrompt, jsonSchema });
+    }
+    if (provider === 'GEMINI') {
+      return this.#geminiComplete({ systemPrompt, userPrompt, schemaHint });
     }
     if (provider === 'OPENAI_COMPATIBLE') {
       return this.#openAiComplete({ systemPrompt, userPrompt, schemaHint });
@@ -99,8 +124,13 @@ class AiProviderAdapter {
     }
 
     const outputConfig = { effort: 'high' };
-    // `format` is the current structured-outputs field (`output_format` is deprecated).
-    if (jsonSchema) outputConfig.format = jsonSchema;
+    // `format` is the current structured-outputs field (`output_format` is deprecated). The SDK's
+    // JSONOutputFormat accepts only { type: 'json_schema', schema }  — our schema *files* also
+    // carry a top-level `name`/`description` for our own internal documentation/registry use,
+    // which the API rejects as unrecognised extra fields if passed through wholesale.
+    if (jsonSchema) {
+      outputConfig.format = { type: 'json_schema', schema: jsonSchema.schema || jsonSchema };
+    }
 
     const message = await this.#client.messages.create({
       model: this.anthropicModel,
@@ -171,6 +201,88 @@ class AiProviderAdapter {
       degraded: false,
       reason: null,
       usage: AiProviderAdapter.normaliseAnthropicUsage(usage),
+    };
+  }
+
+  // --- Gemini (fallback when ANTHROPIC_API_KEY is unset) ---------------------
+  async #geminiComplete({ systemPrompt, userPrompt, schemaHint }) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': this.geminiApiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [
+                {
+                  text: `${systemPrompt}\nRespond with valid JSON only, no markdown fencing, matching this shape: ${schemaHint}`,
+                },
+              ],
+            },
+            contents: [{ parts: [{ text: userPrompt }] }],
+            generationConfig: { responseMimeType: 'application/json' },
+          }),
+        }
+      );
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`AI provider returned ${res.status}${errText ? `: ${errText}` : ''}`);
+      }
+      const json = await res.json();
+      const candidate = json.candidates?.[0];
+      const text = (candidate?.content?.parts || []).map((p) => p.text || '').join('');
+
+      // Fail open on a safety block/finish reason other than a clean stop — never throw into
+      // the consultation flow, mirroring the Anthropic refusal/max_tokens handling above.
+      const finishReason = candidate?.finishReason;
+      if (finishReason && finishReason !== 'STOP') {
+        return {
+          output: null,
+          raw: { finishReason, usage: json.usageMetadata || {} },
+          model: this.geminiModel,
+          degraded: true,
+          reason:
+            finishReason === 'MAX_TOKENS'
+              ? 'The AI response was truncated before it was complete. Continue the consultation manually.'
+              : 'The AI provider declined this request. Continue the consultation manually.',
+          usage: AiProviderAdapter.normaliseGeminiUsage(json.usageMetadata),
+        };
+      }
+
+      let output;
+      try {
+        output = JSON.parse(text);
+      } catch {
+        throw new Error('INVALID_JSON_OUTPUT');
+      }
+
+      return {
+        output,
+        raw: { finishReason, usage: json.usageMetadata || {} },
+        model: this.geminiModel,
+        degraded: false,
+        reason: null,
+        usage: AiProviderAdapter.normaliseGeminiUsage(json.usageMetadata),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Gemini `usageMetadata` → provider-neutral shape. Gemini has no separate cache-read field. */
+  static normaliseGeminiUsage(usage = {}) {
+    return {
+      inputTokens: usage.promptTokenCount || 0,
+      outputTokens: usage.candidatesTokenCount || 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: usage.cachedContentTokenCount || 0,
     };
   }
 

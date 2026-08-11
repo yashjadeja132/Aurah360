@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { ConsultationStatusBadge } from './StatusBadges';
+import { APP_ROUTES } from '@/constants/routes';
 
 export function PatientSummarySidebar({ summary, loading }) {
   const { t } = useTranslation();
@@ -83,14 +85,25 @@ export function TimelinePanel({ summary, loading }) {
   const { t } = useTranslation();
   const timeline = summary?.timeline || [];
   const previous = summary?.previousConsultations || [];
+  const patientId = summary?.patient?.id;
 
   return (
     <aside className="space-y-4 p-4">
-      <div>
-        <h3 className="font-semibold">{t('consultations.patientPanels.timeline', 'Timeline')}</h3>
-        <p className="text-xs text-muted-foreground">
-          {t('consultations.patientPanels.timelineSubtitle', 'Patient events & visits')}
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h3 className="font-semibold">{t('consultations.patientPanels.timeline', 'Timeline')}</h3>
+          <p className="text-xs text-muted-foreground">
+            {t('consultations.patientPanels.timelineSubtitle', 'Patient events & visits')}
+          </p>
+        </div>
+        {patientId && (
+          <Link
+            to={`${APP_ROUTES.TREATMENT_SAFETY}?patientId=${patientId}`}
+            className="whitespace-nowrap text-xs font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {t('consultations.patientPanels.treatmentHistory', 'Treatment & safety history →')}
+          </Link>
+        )}
       </div>
 
       {loading && <p className="text-sm text-muted-foreground">{t('common.loading', 'Loading…')}</p>}

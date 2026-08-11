@@ -4,12 +4,57 @@ import {
   TREATMENT_SESSION_STATUS_LIST,
 } from '../enums/treatmentSession.js';
 
+/**
+ * Device parameters vary by protocol/device type, so this stays flexible — but the commonly-used
+ * fields get real typed structure (for reporting/validation) instead of living in an untyped
+ * Mixed blob. Anything protocol-specific outside this common set still has a home in
+ * `customParameters` (Mixed), so no configurability is lost.
+ */
+const deviceSettingsSchema = new mongoose.Schema(
+  {
+    wavelength: { type: Number, default: null },
+    fluence: { type: Number, default: null },
+    pulseWidth: { type: Number, default: null },
+    spotSize: { type: Number, default: null },
+    coolingSetting: { type: String, default: null },
+    passes: { type: Number, default: null },
+    customParameters: { type: mongoose.Schema.Types.Mixed, default: {} },
+  },
+  { _id: false }
+);
+
 const deviceUsageSchema = new mongoose.Schema(
   {
     device: { type: String, default: null },
     machine: { type: String, default: null },
     laserHead: { type: String, default: null },
-    settings: { type: mongoose.Schema.Types.Mixed, default: {} },
+    settings: { type: deviceSettingsSchema, default: () => ({}) },
+  },
+  { _id: false }
+);
+
+/**
+ * Batch/lot-linked consumable actually used on this session (stock decrement target). Additive
+ * alongside the legacy free-text `consumables` field — kept for backward compat with existing
+ * data and callers that still send plain names.
+ */
+const consumableUsedSchema = new mongoose.Schema(
+  {
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', default: null },
+    batchNumber: { type: String, default: null },
+    quantity: { type: Number, default: 1, min: 0 },
+    productName: { type: String, default: null },
+  },
+  { _id: false }
+);
+
+/** Pause/resume audit trail (technician flow) — one entry per pause; resumedAt filled on resume. */
+const pauseHistorySchema = new mongoose.Schema(
+  {
+    pausedAt: { type: Date, required: true },
+    resumedAt: { type: Date, default: null },
+    reason: { type: String, required: true },
+    actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { _id: false }
 );
@@ -153,6 +198,10 @@ const treatmentSessionSchema = new mongoose.Schema(
     photosAfter: { type: [photoRefSchema], default: [] },
     complications: { type: String, default: null },
     consumables: { type: [String], default: [] },
+    /** Batch-linked consumables (additive — see consumableUsedSchema above). */
+    consumablesUsed: { type: [consumableUsedSchema], default: [] },
+    /** Pause/resume events (additive — technician flow pause requires a mandatory reason). */
+    pauseHistory: { type: [pauseHistorySchema], default: [] },
     outcome: { type: String, default: null },
     notes: { type: String, default: null },
     followUp: { type: followUpSchema, default: () => ({}) },
@@ -211,7 +260,15 @@ treatmentSessionSchema.methods.toSafeObject = function toSafeObject(extra = {}) 
       device: this.deviceUsage?.device ?? null,
       machine: this.deviceUsage?.machine ?? null,
       laserHead: this.deviceUsage?.laserHead ?? null,
-      settings: this.deviceUsage?.settings || {},
+      settings: {
+        wavelength: this.deviceUsage?.settings?.wavelength ?? null,
+        fluence: this.deviceUsage?.settings?.fluence ?? null,
+        pulseWidth: this.deviceUsage?.settings?.pulseWidth ?? null,
+        spotSize: this.deviceUsage?.settings?.spotSize ?? null,
+        coolingSetting: this.deviceUsage?.settings?.coolingSetting ?? null,
+        passes: this.deviceUsage?.settings?.passes ?? null,
+        customParameters: this.deviceUsage?.settings?.customParameters || {},
+      },
     },
     contraindicationScreening: this.contraindicationScreening
       ? {
@@ -231,6 +288,18 @@ treatmentSessionSchema.methods.toSafeObject = function toSafeObject(extra = {}) 
     photosAfter: (this.photosAfter || []).map(mapPhoto),
     complications: this.complications,
     consumables: this.consumables || [],
+    consumablesUsed: (this.consumablesUsed || []).map((c) => ({
+      inventoryItemId: c.inventoryItemId ? c.inventoryItemId.toString() : null,
+      batchNumber: c.batchNumber ?? null,
+      quantity: c.quantity ?? null,
+      productName: c.productName ?? null,
+    })),
+    pauseHistory: (this.pauseHistory || []).map((p) => ({
+      pausedAt: p.pausedAt,
+      resumedAt: p.resumedAt ?? null,
+      reason: p.reason,
+      actorId: p.actorId ? p.actorId.toString() : null,
+    })),
     outcome: this.outcome,
     notes: this.notes,
     followUp: {

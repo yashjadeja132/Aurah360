@@ -17,6 +17,7 @@ import { useReportDashboard } from '@/modules/reports/hooks/useReports';
 import {
   useConsultationWorkspace,
   usePatientConsultationSummary,
+  useLabOrderReviewQueue,
 } from '@/modules/consultations/hooks/useConsultations';
 import { usePlanProgress } from '@/modules/treatmentSessions/hooks/useTreatmentSessions';
 /**
@@ -84,6 +85,82 @@ export function useMyDayAppointments(doctorId) {
   }, [doctorId, query.data]);
 
   return { ...query, isDisabled: !doctorId, grouped };
+}
+
+/**
+ * §0 My Day status columns. The appointment model has more granular statuses than the
+ * 4 columns the flow doc calls for, so several map onto the same bucket:
+ *  - Waiting: CHECKED_IN, WAITING (patient is on-site, not yet with the doctor)
+ *  - In Consultation: IN_CONSULTATION
+ *  - Awaiting Treatment: AWAITING_TREATMENT, TREATMENT (order placed through in-progress)
+ *  - Completed: COMPLETED, AWAITING_BILLING (clinically done from the doctor's POV)
+ * Anything before check-in (SCHEDULED/CONFIRMED/REQUESTED/PENDING_APPROVAL) hasn't
+ * arrived yet, so it isn't "on the floor" and is excluded from these 4 columns —
+ * it still shows up in the existing "Today" list below.
+ */
+export const MY_DAY_COLUMNS = ['waiting', 'inConsultation', 'awaitingTreatment', 'completed'];
+
+const COLUMN_BY_STATUS = {
+  CHECKED_IN: 'waiting',
+  WAITING: 'waiting',
+  IN_CONSULTATION: 'inConsultation',
+  AWAITING_TREATMENT: 'awaitingTreatment',
+  TREATMENT: 'awaitingTreatment',
+  COMPLETED: 'completed',
+  AWAITING_BILLING: 'completed',
+};
+
+/** A patient waiting longer than this is flagged as late/urgent on the "Waiting" column. */
+export const WAITING_URGENT_MINUTES = 20;
+
+/**
+ * Elapsed time in the current status. There is no per-transition timestamp field
+ * (no `checkedInAt`/`consultationStartedAt` on the model) — `updatedAt` is bumped on
+ * every status write, so "time since updatedAt" is the closest honest proxy without a
+ * schema change. Scoped down deliberately: see aurah_flow_doctor.md §0 notes.
+ */
+export function elapsedMinutes(appointment) {
+  const since = appointment?.updatedAt ? new Date(appointment.updatedAt).getTime() : null;
+  if (!since || Number.isNaN(since)) return null;
+  return Math.max(0, Math.round((Date.now() - since) / 60000));
+}
+
+export function formatElapsed(minutes) {
+  if (minutes == null) return '—';
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${m}m`;
+}
+
+/** Buckets today's appointments into the 4 My Day columns + flags late "Waiting" patients. */
+export function useMyDayColumns(todayRows) {
+  return useMemo(() => {
+    const columns = { waiting: [], inConsultation: [], awaitingTreatment: [], completed: [] };
+    let urgentCount = 0;
+    for (const row of todayRows) {
+      const col = COLUMN_BY_STATUS[row.status];
+      if (!col) continue;
+      const minutes = elapsedMinutes(row);
+      const urgent = col === 'waiting' && minutes != null && minutes >= WAITING_URGENT_MINUTES;
+      if (urgent) urgentCount += 1;
+      columns[col].push({ ...row, elapsedMinutes: minutes, urgent });
+    }
+    return { columns, urgentCount };
+  }, [todayRows]);
+}
+
+/** §1 — appointments awaiting this doctor's approve/propose/reject decision. */
+export function useRequestedApprovals(doctorId) {
+  const params = { doctorId, status: 'PENDING_APPROVAL', limit: 50 };
+  const query = useAppointmentList(params, Boolean(doctorId));
+  return { ...query, items: query.data?.items || [] };
+}
+
+/** §0 cue — count of report-review backlog, reusing the existing review-queue endpoint. */
+export function useReportReviewBacklogCount() {
+  const query = useLabOrderReviewQueue({ status: 'RESULT_RECEIVED', page: 1, limit: 1 });
+  return { ...query, count: query.data?.meta?.total ?? 0 };
 }
 
 /**
