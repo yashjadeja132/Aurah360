@@ -30,6 +30,21 @@ const offerSchema = new mongoose.Schema(
     terms: { type: localizedTextSchema, default: () => ({}) },
     bookingCta: { type: String, default: 'Book now' },
     isActive: { type: Boolean, default: true, index: true },
+    /**
+     * Approval workflow (CRM-001 §12.5) — a newly-created offer is not yet publishable; it must
+     * be reviewed by someone holding CRM_OFFERS_MANAGE (Manager/Admin/Owner) before it can appear
+     * on the patient-facing offer board. `listOffers`'s patient-facing (activeOnly) filter
+     * requires APPROVED regardless of isActive/consent/audience.
+     */
+    approvalStatus: {
+      type: String,
+      enum: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'],
+      default: 'PENDING_APPROVAL',
+      index: true,
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    approvedAt: { type: Date, default: null },
+    rejectionReason: { type: String, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, collection: 'offers' }
@@ -51,7 +66,15 @@ offerSchema.methods.toSafeObject = function toSafeObject() {
     terms: this.terms,
     bookingCta: this.bookingCta,
     isActive: this.isActive,
-    isCurrentlyValid: this.isActive && this.validFrom <= new Date() && this.validTo >= new Date(),
+    approvalStatus: this.approvalStatus,
+    approvedBy: this.approvedBy ? this.approvedBy.toString() : null,
+    approvedAt: this.approvedAt,
+    rejectionReason: this.rejectionReason,
+    isCurrentlyValid:
+      this.isActive &&
+      this.approvalStatus === 'APPROVED' &&
+      this.validFrom <= new Date() &&
+      this.validTo >= new Date(),
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   };

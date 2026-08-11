@@ -1,9 +1,14 @@
 import { eventBus } from '../events/eventBus.js';
 import NotificationService from '../services/NotificationService.js';
+import ConsentService from '../services/ConsentService.js';
 import User from '../models/User.model.js';
+import Patient from '../models/Patient.model.js';
+import Notification from '../models/Notification.model.js';
+import PatientFeedback from '../models/PatientFeedback.model.js';
 import { ROLES } from '../constants/roles.js';
 import { LOYALTY_EVENTS } from '../enums/loyalty.js';
 import { NOTIFICATION_CHANNEL } from '../enums/notification.js';
+import { CONSENT_PURPOSE, CONSENT_STATE } from '../enums/privacy.js';
 import logger from '../libs/logger.js';
 
 /**
@@ -176,8 +181,62 @@ async function handleLoyaltyClawbackPending(service, payload = {}) {
   });
 }
 
+/**
+ * CRM-001 — auto-request NPS/feedback after a visit is marked Completed. Fires off
+ * AppointmentLifecycleService.complete()'s 'AppointmentCompleted' emit, same event the loyalty
+ * E1 VISIT_COMPLETED handler subscribes to (loyalty/eventSubscriptions.js).
+ *
+ * Consent — NPS/feedback requests are a service-adjacent communication about the visit the
+ * patient just had, not an outbound marketing push, so they are NOT gated on marketingConsent
+ * (same "service messages aren't suppressed by marketing opt-out" rule NotificationService
+ * already applies via TRANSACTIONAL_TEMPLATE_CODES/FEEDBACK_REQUEST). What DOES gate it is an
+ * explicit SERVICE_MESSAGES withdrawal — a patient who has explicitly opted out of service
+ * messages (privacy consent ledger, ConsentService) must not get this either. Absent any
+ * explicit consent record either way, the request proceeds (default-allowed, matching every
+ * other transactional notification in this codebase).
+ *
+ * Idempotency — skipped if a feedback request notification, or an actual PatientFeedback
+ * submission, already exists for this appointmentId.
+ */
+const consentService = new ConsentService();
+
+async function handleAppointmentCompletedFeedbackRequest(service, payload = {}) {
+  const { appointmentId, patientId } = payload;
+  if (!appointmentId || !patientId) return;
+
+  const [existingRequest, existingFeedback] = await Promise.all([
+    Notification.findOne({ eventName: 'FeedbackRequested', 'variables.appointmentId': appointmentId })
+      .select('_id')
+      .lean(),
+    PatientFeedback.findOne({ appointmentId }).select('_id').lean(),
+  ]);
+  if (existingRequest || existingFeedback) return;
+
+  const states = await consentService.currentStates(patientId);
+  const serviceMessagesWithdrawn = states.some(
+    (s) => s.purpose === CONSENT_PURPOSE.SERVICE_MESSAGES && s.state === CONSENT_STATE.WITHDRAWN
+  );
+  if (serviceMessagesWithdrawn) return;
+
+  const patient = await Patient.findById(patientId).select('firstName lastName').lean();
+  const patientName = patient ? [patient.firstName, patient.lastName].filter(Boolean).join(' ') : '';
+
+  await service.sendFeedbackRequest({ patientId, appointmentId, patientName });
+}
+
 export function registerNotificationEventListeners() {
   const service = new NotificationService();
+
+  eventBus.on('AppointmentCompleted', async (payload) => {
+    try {
+      await handleAppointmentCompletedFeedbackRequest(service, payload);
+    } catch (err) {
+      logger.warn('Notification event handler failed', {
+        eventName: 'AppointmentCompleted:FeedbackRequest',
+        message: err.message,
+      });
+    }
+  });
 
   eventBus.on(LOYALTY_EVENTS.ADJUSTMENT_PENDING_APPROVAL, async (payload) => {
     try {

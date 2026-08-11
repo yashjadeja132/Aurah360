@@ -8,10 +8,19 @@ export const CONSULTATION_STATUS = Object.freeze({
 
 export const CONSULTATION_STATUS_LIST = Object.freeze(Object.values(CONSULTATION_STATUS));
 
+/**
+ * Doubles as the photo's "purpose" in the capture-guard UI (nurse flow gap fix): PROGRESS and
+ * CONSENT_DOCUMENTATION were added to the pre-existing BEFORE/AFTER/BODY_MAP/OTHER set rather
+ * than inventing a second parallel field, since photoType was already the closest existing
+ * taxonomy and this is an additive enum change (no migration needed — Mongoose enum validation
+ * only rejects values, it never touches rows already in a value that stays valid).
+ */
 export const PHOTO_TYPE = Object.freeze({
   BEFORE: 'BEFORE',
   AFTER: 'AFTER',
   BODY_MAP: 'BODY_MAP',
+  PROGRESS: 'PROGRESS',
+  CONSENT_DOCUMENTATION: 'CONSENT_DOCUMENTATION',
   OTHER: 'OTHER',
 });
 

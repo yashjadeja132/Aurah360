@@ -11,7 +11,7 @@ import {
   SKIN_TYPE_LIST,
   DURATION_UNIT_LIST,
 } from '../enums/consultation.js';
-import { PATIENT_VISIBILITY_LIST } from '../enums/patient.js';
+import { PATIENT_VISIBILITY_LIST, PHOTO_LATERALITY_LIST } from '../enums/patient.js';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
@@ -139,6 +139,12 @@ export const photoMetaSchema = z.object({
   photoType: z.enum(PHOTO_TYPE_LIST).optional(),
   title: z.string().max(200).optional().nullable(),
   bodyRegion: z.string().max(100).optional().nullable(),
+  // Nurse flow gap fix — the service already destructures `laterality` (see
+  // ConsultationClinicalService#uploadPhoto) and the model already has the field
+  // (ClinicalPhoto.model.js), but this schema never declared it, so `validate()` stripped it
+  // from every multipart body before the service ever saw it. Declaring it here is what actually
+  // lets the laterality selector added to ClinicalPhotosPanel.jsx reach storage.
+  laterality: z.enum(PHOTO_LATERALITY_LIST).optional(),
   consentVerified: z
     .preprocess((v) => v === true || v === 'true' || v === '1', z.boolean())
     .optional(),

@@ -10,7 +10,24 @@
     "codeSentTo": "Code sent to {{mobile}}",
     "verify": "Verify & continue",
     "resend": "Resend code",
-    "notRegistered": "This number isn't registered for app access yet — please contact your clinic."
+    "notRegistered": "This number isn't registered for app access yet — please contact your clinic.",
+    "skip": "Skip for now",
+    "continue": "Continue",
+    "privacyTitle": "Your privacy",
+    "privacySummary": "We use your details only to manage your appointments, treatments and billing at this clinic. We never sell your data. You can request a copy, correction or deletion of your data at any time from Settings.",
+    "privacyReadMore": "Read full privacy notice",
+    "privacyReadLess": "Show less",
+    "privacyFull": "This clinic collects your name, contact details, and clinical records solely to provide and manage your care, appointments and billing. Your data is stored securely and shared only with clinic staff involved in your treatment, or as required by law. You have the right to access, correct, or request deletion of your data, withdraw consent, or opt out of marketing communications at any time via Settings → Privacy & support. For questions, contact your clinic directly.",
+    "privacyAcknowledge": "I have read and understood this",
+    "preferencesTitle": "A few quick preferences",
+    "preferencesSubtitle": "You can always change these later in Settings.",
+    "chooseLanguage": "Choose your language",
+    "enableNotifications": "Enable notifications",
+    "enableNotificationsHint": "Get reminders for appointments and updates from your clinic.",
+    "notificationsEnabled": "Notifications enabled",
+    "notificationsDenied": "Notifications are off — you can turn them on later from your phone settings.",
+    "appLockOptional": "App lock (optional)",
+    "appLockHint": "Add a PIN so only you can open the app on this phone."
   },
   "nav": {
     "home": "Home",
@@ -60,7 +77,15 @@
     "evening": "Evening",
     "chooseDoctorFirst": "Choose a doctor to see available times",
     "title": "Appointments",
-    "subtitle": "Upcoming visits, booking & rescheduling"
+    "subtitle": "Upcoming visits, booking & rescheduling",
+    "requestTime": "Can't find a good time? Request a specific time",
+    "requestTimeTitle": "Request a specific time",
+    "requestTimeHint": "Tell us when you'd like to come in and the clinic will confirm, propose another time, or let you know if it isn't possible.",
+    "requestedDate": "Preferred date",
+    "requestedTime": "Preferred time",
+    "notes": "Notes (optional)",
+    "submitRequest": "Submit request",
+    "requestSubmitted": "Your request has been sent to the clinic and is pending approval."
   },
   "documents": {
     "title": "Documents",
@@ -111,7 +136,9 @@
     "wrongPin": "That PIN doesn't match. Try again.",
     "mismatch": "PINs don't match. Try again.",
     "tooShort": "PIN must be at least 4 digits.",
-    "tooManyAttempts": "Too many attempts. Try again in {{seconds}}s."
+    "tooManyAttempts": "Too many attempts. Try again in {{seconds}}s.",
+    "setupPrompt": "Set up app lock",
+    "skipForNow": "Skip for now"
   },
   "treatments": {
     "title": "Treatments",

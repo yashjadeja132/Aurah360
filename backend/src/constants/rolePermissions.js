@@ -368,6 +368,25 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.HANDOFF_ACKNOWLEDGE,
     PERMISSIONS.PATCH_TEST_VIEW,
     PERMISSIONS.PATCH_TEST_RECORD,
+    // Nurse-facing "Tasks" prep checklist (role-flow audit fix): the nurse needs to SEE the
+    // same-day treatment sessions awaiting prep (GET /treatment-sessions, GET /:id/preflight)
+    // and to WRITE the prep-checklist fields the preflight gates read — contraindication
+    // screening answers, staged consumables, device/room readiness (PATCH /:id). Deliberately
+    // NOT granted: TREATMENT_SESSION_COMPLETE or TREATMENT_HARD_STOP_OVERRIDE — starting the
+    // procedure and overriding a hard stop stay Technician/supervisor acts.
+    //
+    // CAVEAT (flagged, not fixed here — out of scope for this pass): permission.middleware's
+    // requirePermission() is an OR across the whole list it's given, and the treatment-session
+    // router passes `...edit, ...complete` (etc.) per route, so a caller holding ONLY
+    // TREATMENT_SESSION_EDIT already satisfies /start, /pause, /resume, /cancel, /skip,
+    // /reschedule and /photos at the route-guard layer — this grant is broader at the API layer
+    // than the nurse's UI (NursePrepTasksPage) exposes. The nurse UI intentionally never renders
+    // those actions, but a direct API call is not blocked by permission alone today. A real fix
+    // needs per-route permission granularity (e.g. a TREATMENT_SESSION_PREP permission distinct
+    // from EDIT) — tracked as follow-up, not done in this pass to avoid destabilizing the
+    // existing Technician/Doctor flows that already depend on TREATMENT_SESSION_EDIT semantics.
+    PERMISSIONS.TREATMENT_SESSION_VIEW,
+    PERMISSIONS.TREATMENT_SESSION_EDIT,
   ],
 
   [ROLES.TECHNICIAN]: [
@@ -387,6 +406,10 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.PATCH_TEST_RECORD,
     PERMISSIONS.ADVERSE_EVENT_VIEW,
     PERMISSIONS.ADVERSE_EVENT_CREATE,
+    // The adverse-event form's optional attachment upload reuses the general patient-document
+    // upload endpoint (AdverseEventRegisterPanel.jsx -> usePatientMutations().uploadDocument),
+    // so a technician without this grant would have the attachment silently fail on submit.
+    PERMISSIONS.PATIENTS_DOCUMENTS,
   ],
 
   [ROLES.CASHIER]: [

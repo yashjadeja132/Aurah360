@@ -4,17 +4,44 @@ import { useTranslation } from 'react-i18next';
 import { Screen } from '../components/Screen';
 import { Button } from '../components/Button';
 import { useAppLock } from '../context/AppLockContext';
+import { useOnboarding } from '../context/OnboardingContext';
 import { colors } from '../theme/colors';
 
 const MIN_PIN_LENGTH = 4;
 
-/** Set up a new local app-lock PIN: enter it, then confirm by re-entering. */
-export default function PinSetupScreen({ navigation }) {
+/**
+ * Set up a new local app-lock PIN: enter it, then confirm by re-entering.
+ *
+ * Reachable two ways:
+ *  - From Settings (standalone) — `navigation.goBack()` returns to Settings as before.
+ *  - From the first-run onboarding sequence (`route.params.fromOnboarding === true`) — this is
+ *    the last onboarding step (spec: "...{Optional biometric/app lock} → account linked to
+ *    MRN → Home"), so saving *or* skipping here must mark onboarding complete and land on Home
+ *    (MainTabs), not go "back" into the OTP screens.
+ */
+export default function PinSetupScreen({ navigation, route }) {
   const { t } = useTranslation();
   const { setPin } = useAppLock();
+  const { completeOnboarding } = useOnboarding();
   const [pin, setPinValue] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [saving, setSaving] = useState(false);
+  const fromOnboarding = Boolean(route?.params?.fromOnboarding);
+
+  const finishOnboarding = async () => {
+    await completeOnboarding();
+    // AuthContext's `patient` is already set from the OTP verify step, so RootNavigator will
+    // swap straight to MainTabs (Home) as soon as `needsOnboarding` flips false — nothing else
+    // to navigate to explicitly.
+  };
+
+  const onSkip = async () => {
+    if (fromOnboarding) {
+      await finishOnboarding();
+    } else {
+      navigation.goBack();
+    }
+  };
 
   const onSave = async () => {
     if (pin.length < MIN_PIN_LENGTH) {
@@ -28,7 +55,11 @@ export default function PinSetupScreen({ navigation }) {
     setSaving(true);
     try {
       await setPin(pin);
-      navigation.goBack();
+      if (fromOnboarding) {
+        await finishOnboarding();
+      } else {
+        navigation.goBack();
+      }
     } finally {
       setSaving(false);
     }
@@ -74,6 +105,12 @@ export default function PinSetupScreen({ navigation }) {
         loading={saving}
         disabled={pin.length < MIN_PIN_LENGTH || confirmPin.length < MIN_PIN_LENGTH}
       />
+
+      {fromOnboarding && (
+        <Text style={styles.skip} onPress={onSkip} accessibilityRole="button">
+          {t('pin.skipForNow')}
+        </Text>
+      )}
     </Screen>
   );
 }
@@ -96,4 +133,5 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     textAlign: 'center',
   },
+  skip: { marginTop: 16, textAlign: 'center', color: colors.primary, fontWeight: '600' },
 });

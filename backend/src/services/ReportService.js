@@ -831,6 +831,40 @@ class ReportService {
   }
 
   /**
+   * SEC-001 — same scoping as `getReportRun`: a non-global-scope requester only ever sees their
+   * own queued report runs, never every user's. Used by the "my report runs" status page so a
+   * patient-portal-adjacent staff member queuing a large export has somewhere to come back and
+   * check on it / download it once ready, without walking run ids directly.
+   */
+  async listReportRuns(requester = null, { limit = 50 } = {}) {
+    const query = { deletedAt: null };
+    if (requester && !hasGlobalScope(requester)) {
+      query.requestedBy = requester.userId;
+    }
+
+    const runs = await ReportRun.find(query)
+      .sort({ createdAt: -1 })
+      .limit(Math.min(Number(limit) || 50, 100))
+      .lean();
+
+    const now = new Date();
+    return runs.map((run) => ({
+      id: run._id.toString(),
+      reportType: run.reportType,
+      format: run.format,
+      status: run.status,
+      rowCount: run.rowCount,
+      failedReason: run.failedReason,
+      requestedAt: run.createdAt,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      expiresAt: run.expiresAt,
+      isExpired: Boolean(run.expiresAt && run.expiresAt < now),
+      hasExport: Boolean(run.exportPayload) && !(run.expiresAt && run.expiresAt < now),
+    }));
+  }
+
+  /**
    * SEC-001 — a report run is readable ONLY by the person who requested it, or by a global-scope
    * role (OWNER/ADMIN).
    *

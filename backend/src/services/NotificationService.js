@@ -492,6 +492,26 @@ class NotificationService {
     });
   }
 
+  /**
+   * CRM-001 — post-visit NPS/feedback request. Consent-aware and idempotent per appointment: see
+   * notifications/eventSubscriptions.js#handleAppointmentCompletedFeedbackRequest for both checks
+   * (this method itself only queues — it assumes the caller already decided to send).
+   */
+  async sendFeedbackRequest({ patientId, appointmentId, patientName }) {
+    return this.queueEvent({
+      eventName: 'FeedbackRequested',
+      variables: {
+        subject: 'How was your visit?',
+        message: 'Hi {{patientName}}, thanks for visiting us. We would love to hear your feedback — please rate your experience.',
+        summary: 'Feedback request',
+        patientName: patientName || '',
+        appointmentId: appointmentId || null,
+      },
+      patientId: patientId || null,
+      channels: DEFAULT_EVENT_CHANNELS.FeedbackRequested,
+    });
+  }
+
   #appointmentVars(appointment) {
     return {
       appointmentNumber: appointment.appointmentNumber || '',

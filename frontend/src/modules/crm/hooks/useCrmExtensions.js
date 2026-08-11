@@ -38,6 +38,30 @@ export function useUpdateOffer() {
   });
 }
 
+export function useApproveOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => crmExtensionsApi.approveOffer(id),
+    onSuccess: () => {
+      toast.success('Offer approved');
+      qc.invalidateQueries({ queryKey: ['crm-extensions', 'offers'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not approve offer')),
+  });
+}
+
+export function useRejectOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }) => crmExtensionsApi.rejectOffer(id, { reason }),
+    onSuccess: () => {
+      toast.success('Offer rejected');
+      qc.invalidateQueries({ queryKey: ['crm-extensions', 'offers'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not reject offer')),
+  });
+}
+
 // --- Recall worklist ---
 export function useRecallWorklist(params = {}) {
   return useQuery({
@@ -85,5 +109,25 @@ export function useResolveFeedback() {
       toast.success('Marked resolved');
       qc.invalidateQueries({ queryKey: ['crm-extensions', 'feedback'] });
     },
+  });
+}
+
+// --- Escalation inbox (free-text patient replies) ---
+export function useEscalationTickets(params = {}) {
+  return useQuery({
+    queryKey: ['crm-extensions', 'escalation-tickets', params],
+    queryFn: async () => (await crmExtensionsApi.listEscalationTickets(params)).data.tickets || [],
+  });
+}
+
+export function useMarkEscalationTicketHandled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => crmExtensionsApi.markEscalationTicketHandled(id),
+    onSuccess: () => {
+      toast.success('Marked handled');
+      qc.invalidateQueries({ queryKey: ['crm-extensions', 'escalation-tickets'] });
+    },
+    onError: (e) => toast.error(errMsg(e, 'Could not mark handled')),
   });
 }

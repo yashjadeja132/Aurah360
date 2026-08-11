@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { StepUpModal } from '@/modules/auth/components/StepUpModal';
+import { APP_ROUTES } from '@/constants/routes';
 import { EXPORT_FORMATS } from '../constants';
 import { reportsApi } from '../api/reportsApi';
 
@@ -93,6 +95,16 @@ export function ExportDialog({ reportType, filters = {}, open, onClose }) {
             </label>
           ))}
         </div>
+        <div className="mt-4 flex justify-between">
+          <Link
+            to={APP_ROUTES.REPORTS_RUNS}
+            className="text-sm font-medium text-primary hover:underline"
+            onClick={onClose}
+          >
+            {t('reports.exportDialog.viewMyRuns', 'View my report runs')}
+          </Link>
+        </div>
+
         <div className="mt-5 flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
             {t('reports.exportDialog.cancel', 'Cancel')}

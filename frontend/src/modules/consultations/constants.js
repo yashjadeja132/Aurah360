@@ -14,11 +14,44 @@ export const CONSULTATION_STATUS_LABELS = Object.freeze({
   LOCKED: 'Locked',
 });
 
+/**
+ * Also doubles as the capture "purpose" list in ClinicalPhotosPanel's pre-camera guard —
+ * PROGRESS and CONSENT_DOCUMENTATION were added to the existing photoType enum (see
+ * backend/src/enums/consultation.js) rather than introducing a second, parallel "purpose" field.
+ */
 export const PHOTO_TYPE_OPTIONS = Object.freeze([
-  { value: 'BEFORE', label: 'Before' },
-  { value: 'AFTER', label: 'After' },
+  { value: 'BEFORE', label: 'Before treatment' },
+  { value: 'AFTER', label: 'After treatment' },
+  { value: 'PROGRESS', label: 'Progress' },
+  { value: 'CONSENT_DOCUMENTATION', label: 'Consent documentation' },
   { value: 'BODY_MAP', label: 'Body map' },
   { value: 'OTHER', label: 'Other' },
+]);
+
+/** Mirrors backend/src/enums/patient.js PHOTO_LATERALITY. */
+export const PHOTO_LATERALITY_OPTIONS = Object.freeze([
+  { value: 'NOT_APPLICABLE', label: 'N/A' },
+  { value: 'LEFT', label: 'Left' },
+  { value: 'RIGHT', label: 'Right' },
+  { value: 'BILATERAL', label: 'Bilateral' },
+  { value: 'CENTRAL', label: 'Central' },
+]);
+
+/**
+ * Client-side ADVISORY ONLY — a soft warning banner so the nurse sees a hint before hitting the
+ * server-side hard block. This is intentionally NOT a reimplementation of the real matcher
+ * (backend/src/helpers/bodyRegion.helper.js#findRestrictedBodyRegionTerm, driven by
+ * RESTRICTED_BODY_REGION_TERMS), which is normalised/token-based and is — and must stay — the
+ * only authority: duplicating that logic here would drift and could be bypassed by editing the
+ * client bundle. If this list and the server list ever disagree, the server wins and the upload
+ * is refused with `RESTRICTED_BODY_AREA` regardless of what this banner said.
+ */
+export const RESTRICTED_BODY_REGION_HINTS = Object.freeze([
+  'genital',
+  'perianal',
+  'areola',
+  'breast',
+  'buttock',
 ]);
 
 export const FOLLOW_UP_UNITS = Object.freeze([

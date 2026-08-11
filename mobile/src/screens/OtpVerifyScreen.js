@@ -17,7 +17,10 @@ export default function OtpVerifyScreen({ route }) {
     setLoading(true);
     try {
       await verifyOtp(mobile, code);
-      // Navigation switches to the authenticated stack automatically once `patient` is set.
+      // Navigation switches automatically once `patient` is set: RootNavigator (App.js) routes
+      // to the first-run onboarding sequence (privacy notice → preferences → optional PIN) if
+      // 'onboardingComplete' hasn't been set on this device yet, or straight to MainTabs/Home
+      // for a returning device — see OnboardingContext.
     } catch (err) {
       Alert.alert(t('app.name'), err?.response?.data?.message || t('onboarding.notRegistered'));
     } finally {

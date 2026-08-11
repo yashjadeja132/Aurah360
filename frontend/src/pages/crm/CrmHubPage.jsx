@@ -13,6 +13,7 @@ import { CrmFollowUpsPanel } from '@/modules/crm/components/CrmFollowUpsPanel';
 import { CrmRecallPanel } from '@/modules/crm/components/CrmRecallPanel';
 import { CrmOffersPanel } from '@/modules/crm/components/CrmOffersPanel';
 import { CrmFeedbackPanel } from '@/modules/crm/components/CrmFeedbackPanel';
+import { CrmEscalationInboxPanel } from '@/modules/crm/components/CrmEscalationInboxPanel';
 import { NotificationDeliveryLogPanel } from '@/modules/notifications/components/NotificationDeliveryLogPanel';
 
 /**
@@ -29,6 +30,9 @@ const OFFERS_PERMS = [
   PERMISSIONS.CRM_ALL,
 ];
 const FEEDBACK_PERMS = [PERMISSIONS.CRM_FEEDBACK_VIEW, PERMISSIONS.CRM_ALL];
+// Escalation inbox reuses the feedback/NPS escalation permission — same "someone reviews
+// inbound patient signals" authority as CrmFeedbackPanel above.
+const ESCALATIONS_PERMS = [PERMISSIONS.CRM_FEEDBACK_VIEW, PERMISSIONS.CRM_ALL];
 // Spec §3 "Reminders" — delivery status (sent/delivered/read/failed) + retry, reusing the
 // notifications module's own log panel rather than duplicating it inside CRM.
 const REMINDERS_PERMS = [
@@ -45,6 +49,7 @@ export const CRM_HUB_PERMISSIONS = [
     ...RECALL_PERMS,
     ...OFFERS_PERMS,
     ...FEEDBACK_PERMS,
+    ...ESCALATIONS_PERMS,
     ...REMINDERS_PERMS,
   ]),
 ];
@@ -66,6 +71,7 @@ export default function CrmHubPage() {
   const canViewRecalls = hasAnyPermission(perms, RECALL_PERMS);
   const canViewOffers = hasAnyPermission(perms, OFFERS_PERMS);
   const canViewFeedback = hasAnyPermission(perms, FEEDBACK_PERMS);
+  const canViewEscalations = hasAnyPermission(perms, ESCALATIONS_PERMS);
   const canViewReminders = hasAnyPermission(perms, REMINDERS_PERMS);
 
   const TABS = useMemo(
@@ -82,8 +88,19 @@ export default function CrmHubPage() {
       ...(canViewReminders ? [{ id: 'reminders', label: t('crm.hub.tabs.reminders', 'Reminders') }] : []),
       ...(canViewOffers ? [{ id: 'offers', label: t('crm.hub.tabs.offers', 'Offers') }] : []),
       ...(canViewFeedback ? [{ id: 'feedback', label: t('crm.hub.tabs.feedback', 'Feedback') }] : []),
+      ...(canViewEscalations
+        ? [{ id: 'escalations', label: t('crm.hub.tabs.escalations', 'Escalation inbox') }]
+        : []),
     ],
-    [t, canViewCore, canViewRecalls, canViewReminders, canViewOffers, canViewFeedback]
+    [
+      t,
+      canViewCore,
+      canViewRecalls,
+      canViewReminders,
+      canViewOffers,
+      canViewFeedback,
+      canViewEscalations,
+    ]
   );
 
   const requested = searchParams.get('tab');
@@ -166,6 +183,11 @@ export default function CrmHubPage() {
         {tab === 'feedback' && (
           <PermissionGuard permissions={FEEDBACK_PERMS}>
             <CrmFeedbackPanel />
+          </PermissionGuard>
+        )}
+        {tab === 'escalations' && (
+          <PermissionGuard permissions={ESCALATIONS_PERMS}>
+            <CrmEscalationInboxPanel />
           </PermissionGuard>
         )}
       </section>

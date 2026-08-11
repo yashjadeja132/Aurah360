@@ -48,6 +48,16 @@ export function useDeleteScheduledReport() {
   });
 }
 
+/** "My report runs" status list — polls every 10s so a QUEUED/RUNNING async export flips to
+ *  COMPLETED (or FAILED) on this page without the user having to manually refresh. */
+export function useReportRuns() {
+  return useQuery({
+    queryKey: QUERY_KEYS.REPORTS_RUNS(),
+    queryFn: () => reportsApi.listRuns().then((r) => r.data),
+    refetchInterval: 10_000,
+  });
+}
+
 export function useSavedFilters(scope) {
   return useQuery({
     queryKey: QUERY_KEYS.REPORTS_SAVED_FILTERS(scope),

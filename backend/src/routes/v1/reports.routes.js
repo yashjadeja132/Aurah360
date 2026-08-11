@@ -79,6 +79,9 @@ router.post(
   controller.queueExport
 );
 
+// "My report runs" status list — must be registered before the /runs/:id param route.
+router.get('/runs', requirePermission(...view), controller.listRuns);
+
 router.get(
   '/runs/:id',
   requirePermission(...view),

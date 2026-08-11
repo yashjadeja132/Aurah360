@@ -91,6 +91,12 @@ class ReportController {
     return ApiResponse.success(res, { statusCode: 202, message: 'Report queued', data });
   });
 
+  /** "My report runs" status list — scoped to the caller in the service (SEC-001). */
+  listRuns = asyncHandler(async (req, res) => {
+    const data = await this.service.listReportRuns(req.auth, { limit: req.query.limit });
+    return ApiResponse.success(res, { data });
+  });
+
   getRun = asyncHandler(async (req, res) => {
     const data = await this.service.getReportRun(req.params.id, req.auth);
     return ApiResponse.success(res, { data });

@@ -9,6 +9,7 @@ import { DashboardsPanel } from '@/modules/reports/components/panels/DashboardsP
 import { ReportsCatalogPanel } from '@/modules/reports/components/panels/ReportsCatalogPanel';
 import { AnalyticsPanel } from '@/modules/reports/components/panels/AnalyticsPanel';
 import { ScheduledReportsPanel } from '@/modules/reports/components/panels/ScheduledReportsPanel';
+import { MyReportRunsPanel } from '@/modules/reports/components/panels/MyReportRunsPanel';
 
 /**
  * Single Reports & Analytics screen (client feedback: "too many pages").
@@ -39,6 +40,7 @@ export default function ReportsWorkspacePage() {
     ...(canSchedule
       ? [{ id: 'scheduled', label: t('reports.workspace.tabs.scheduled', 'Scheduled') }]
       : []),
+    { id: 'runs', label: t('reports.workspace.tabs.runs', 'My Runs') },
   ];
 
   const requested = searchParams.get('tab');
@@ -82,6 +84,7 @@ export default function ReportsWorkspacePage() {
       {tab === 'reports' && <ReportsCatalogPanel />}
       {tab === 'analytics' && <AnalyticsPanel />}
       {tab === 'scheduled' && canSchedule && <ScheduledReportsPanel />}
+      {tab === 'runs' && <MyReportRunsPanel />}
     </section>
   );
 }

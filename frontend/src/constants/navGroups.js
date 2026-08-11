@@ -82,6 +82,9 @@ export const navGroups = [
       { to: APP_ROUTES.TREATMENT_DASHBOARD, labelKey: 'nav.treatments', label: 'Treatments', icon: Activity, roles: [...MANAGERS, ...CLINICAL, ROLES.TECHNICIAN], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL, PERMISSIONS.TREATMENT_PLAN_VIEW, PERMISSIONS.TREATMENT_PLAN_ALL, PERMISSIONS.ADVERSE_EVENT_VIEW, PERMISSIONS.ADVERSE_EVENT_CREATE, PERMISSIONS.PATCH_TEST_VIEW] },
       { to: APP_ROUTES.TREATMENT_PLAN_APPROVAL_QUEUE, labelKey: 'nav.treatmentPlanApprovals', label: 'Approve treatment plans', icon: Stethoscope, roles: [...ADMINS, ROLES.DOCTOR], permissions: [PERMISSIONS.TREATMENT_PLAN_APPROVE, PERMISSIONS.TREATMENT_PLAN_ALL] },
       { to: APP_ROUTES.TECHNICIAN_WORKLIST, labelKey: 'nav.technicianWorklist', label: 'My worklist', icon: HardHat, roles: [...ADMINS, ROLES.TECHNICIAN], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL] },
+      // Nurse-facing "Tasks" — treatment prep checklist (role-flow audit fix). NURSE-only entry;
+      // Technician/Doctor/Manager already reach the same checklist via "My worklist"/Treatments.
+      { to: APP_ROUTES.NURSE_PREP_TASKS, labelKey: 'nav.nursePrepTasks', label: 'Tasks', icon: ClipboardList, roles: [ROLES.NURSE], permissions: [PERMISSIONS.TREATMENT_SESSION_VIEW, PERMISSIONS.TREATMENT_SESSION_ALL] },
     ],
   },
   {

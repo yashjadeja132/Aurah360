@@ -203,6 +203,21 @@ const treatmentSessionSchema = new mongoose.Schema(
     /** Pause/resume events (additive — technician flow pause requires a mandatory reason). */
     pauseHistory: { type: [pauseHistorySchema], default: [] },
     outcome: { type: String, default: null },
+    /** Spec 4 — how the actual session diverged from the planned protocol/parameters, if at all. */
+    variationFromPlan: { type: String, default: null },
+    /**
+     * Spec 4 — which protocol-defined aftercare instruction was given, referenced by the id of
+     * the matching entry in `protocolId.items` (not a separate aftercare-content collection —
+     * TreatmentProtocol.items already carries `postInstructions` per procedure, so this points at
+     * "which protocol item's aftercare was handed out" rather than duplicating that text here).
+     * No `ref` is set because the id resolves to a subdocument of TreatmentProtocol, not a
+     * top-level collection populate() can traverse.
+     */
+    aftercareTemplateId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    /** Free-text deviation from (or addition to) the referenced aftercare template. */
+    aftercareNotes: { type: String, default: null },
+    /** 0-10 scale — matches ConsultationVitals.painScale for consistency across the app. */
+    painScore: { type: Number, min: 0, max: 10, default: null },
     notes: { type: String, default: null },
     followUp: { type: followUpSchema, default: () => ({}) },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -301,6 +316,10 @@ treatmentSessionSchema.methods.toSafeObject = function toSafeObject(extra = {}) 
       actorId: p.actorId ? p.actorId.toString() : null,
     })),
     outcome: this.outcome,
+    variationFromPlan: this.variationFromPlan,
+    aftercareTemplateId: this.aftercareTemplateId ? this.aftercareTemplateId.toString() : null,
+    aftercareNotes: this.aftercareNotes,
+    painScore: this.painScore,
     notes: this.notes,
     followUp: {
       nextSessionDate: this.followUp?.nextSessionDate ?? null,

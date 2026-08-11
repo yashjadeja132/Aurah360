@@ -114,7 +114,10 @@ class CrmExtensionsService {
   async listOffers(query = {}) {
     const filter = {};
     if (query.activeOnly === 'true') {
+      // Patient-facing (offer board) callers always pass activeOnly — a DRAFT/PENDING/REJECTED
+      // offer must never appear there even if isActive/validity would otherwise let it through.
       filter.isActive = true;
+      filter.approvalStatus = 'APPROVED';
       filter.validFrom = { $lte: new Date() };
       filter.validTo = { $gte: new Date() };
     }
@@ -145,6 +148,44 @@ class CrmExtensionsService {
     }
 
     return offers;
+  }
+
+  /** Approve an offer for the patient-facing board — requires CRM_OFFERS_MANAGE. */
+  async approveOffer(id, actorId, req = null, { branchId = null } = {}) {
+    const filter = branchId ? { _id: id, branchIds: [branchId] } : { _id: id };
+    const offer = await Offer.findOne(filter);
+    if (!offer) throw ApiError.notFound('Offer not found');
+    offer.approvalStatus = 'APPROVED';
+    offer.approvedBy = actorId;
+    offer.approvedAt = new Date();
+    offer.rejectionReason = null;
+    await offer.save();
+
+    await this.auditService.record(AUDIT_ACTIONS.OFFER_APPROVED, {
+      actorId,
+      metadata: { offerId: id },
+      req,
+    });
+    return offer.toSafeObject();
+  }
+
+  /** Reject an offer — it stays off the patient-facing board until re-submitted/approved. */
+  async rejectOffer(id, { reason } = {}, actorId, req = null, { branchId = null } = {}) {
+    const filter = branchId ? { _id: id, branchIds: [branchId] } : { _id: id };
+    const offer = await Offer.findOne(filter);
+    if (!offer) throw ApiError.notFound('Offer not found');
+    offer.approvalStatus = 'REJECTED';
+    offer.approvedBy = null;
+    offer.approvedAt = null;
+    offer.rejectionReason = reason || null;
+    await offer.save();
+
+    await this.auditService.record(AUDIT_ACTIONS.OFFER_REJECTED, {
+      actorId,
+      metadata: { offerId: id, reason: reason || null },
+      req,
+    });
+    return offer.toSafeObject();
   }
 
   // --- Feedback / NPS / complaint escalation -------------------------------------------------------------

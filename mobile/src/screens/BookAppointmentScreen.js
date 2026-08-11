@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { CalendarDays, Stethoscope, Clock, CheckCircle2 } from 'lucide-react-native';
+import { CalendarDays, Stethoscope, Clock, CheckCircle2, CalendarPlus } from 'lucide-react-native';
 import { Screen } from '../components/Screen';
 import { Card, CardTitle, CardSubtitle, IconBadge, EmptyState } from '../components/Card';
 import { Button } from '../components/Button';
@@ -54,6 +54,18 @@ export default function BookAppointmentScreen({ navigation }) {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [booking, setBooking] = useState(false);
+
+  // "Can't find a good time? Request a specific time" — a custom-time request that goes to
+  // the clinic as Pending Approval instead of an instantly-bookable slot (spec: "Custom/
+  // unavailable time → [Request] → Pending Approval → doctor/branch accepts/proposes
+  // alternative/rejects → patient notified"). Deliberately not tied to the slot grid above —
+  // no date/time picker library is installed here, so it's a plain text entry, same pattern as
+  // other free-text inputs in this app (e.g. SettingsScreen's privacy request details field).
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [requestDate, setRequestDate] = useState('');
+  const [requestTime, setRequestTime] = useState('');
+  const [requestNotes, setRequestNotes] = useState('');
+  const [submittingRequest, setSubmittingRequest] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -130,6 +142,41 @@ export default function BookAppointmentScreen({ navigation }) {
       Alert.alert(t('app.name'), err?.response?.data?.message || 'Could not book this appointment.');
     } finally {
       setBooking(false);
+    }
+  };
+
+  const onSubmitCustomRequest = async () => {
+    if (!selectedDoctor || !requestDate.trim() || !requestTime.trim()) return;
+    setSubmittingRequest(true);
+    try {
+      const payload = {
+        doctorId: selectedDoctor.id,
+        appointmentDate: requestDate.trim(),
+        startTime: requestTime.trim(),
+        endTime: requestTime.trim(),
+        notes: requestNotes.trim() || undefined,
+        // APT-003 — tells AppointmentService.create() to hold this as Pending Approval instead
+        // of validating/claiming it against the computed open-slot grid (see
+        // backend/src/services/AppointmentService.js and patientPortal.validator.js).
+        requiresApproval: true,
+      };
+      if (selectedDoctor.branchId) payload.branchId = selectedDoctor.branchId;
+      if (isViewingDependent) {
+        await patientApi.bookDependentAppointment(activeProfile.id, payload);
+      } else {
+        await patientApi.bookAppointment(payload);
+      }
+      Alert.alert(t('app.name'), t('appointments.requestSubmitted'), [
+        { text: t('common.confirm'), onPress: () => navigation.navigate('AppointmentsList') },
+      ]);
+      setShowRequestForm(false);
+      setRequestDate('');
+      setRequestTime('');
+      setRequestNotes('');
+    } catch (err) {
+      Alert.alert(t('app.name'), err?.response?.data?.message || 'Could not submit this request.');
+    } finally {
+      setSubmittingRequest(false);
     }
   };
 
@@ -222,6 +269,64 @@ export default function BookAppointmentScreen({ navigation }) {
         </>
       )}
 
+      {selectedDoctor && (
+        <Card style={styles.requestCard}>
+          <Pressable
+            onPress={() => setShowRequestForm((v) => !v)}
+            style={styles.requestToggle}
+            accessibilityRole="button"
+          >
+            <IconBadge tone="soft" size={34}><CalendarPlus /></IconBadge>
+            <Text style={styles.requestToggleText}>{t('appointments.requestTime')}</Text>
+          </Pressable>
+
+          {showRequestForm && (
+            <View style={{ gap: 10, marginTop: 12 }}>
+              <Text style={styles.requestHint}>{t('appointments.requestTimeHint')}</Text>
+
+              <Text style={styles.label}>{t('appointments.requestedDate')}</Text>
+              <TextInput
+                style={styles.requestInput}
+                value={requestDate}
+                onChangeText={setRequestDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.mutedForeground}
+                accessibilityLabel={t('appointments.requestedDate')}
+              />
+
+              <Text style={styles.label}>{t('appointments.requestedTime')}</Text>
+              <TextInput
+                style={styles.requestInput}
+                value={requestTime}
+                onChangeText={setRequestTime}
+                placeholder="HH:MM"
+                placeholderTextColor={colors.mutedForeground}
+                accessibilityLabel={t('appointments.requestedTime')}
+              />
+
+              <Text style={styles.label}>{t('appointments.notes')}</Text>
+              <TextInput
+                style={[styles.requestInput, styles.requestNotesInput]}
+                value={requestNotes}
+                onChangeText={setRequestNotes}
+                placeholder=""
+                placeholderTextColor={colors.mutedForeground}
+                multiline
+                numberOfLines={3}
+                accessibilityLabel={t('appointments.notes')}
+              />
+
+              <Button
+                title={t('appointments.submitRequest')}
+                onPress={onSubmitCustomRequest}
+                loading={submittingRequest}
+                disabled={!requestDate.trim() || !requestTime.trim()}
+              />
+            </View>
+          )}
+        </Card>
+      )}
+
       {selectedSlot && (
         <Card style={styles.summaryCard}>
           <View style={styles.summaryRow}>
@@ -273,4 +378,20 @@ const styles = StyleSheet.create({
   slotTextActive: { color: colors.primaryForeground },
   summaryCard: { gap: 14 },
   summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  requestCard: { gap: 4 },
+  requestToggle: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  requestToggleText: { fontSize: 14, fontWeight: '700', color: colors.primary, flex: 1 },
+  requestHint: { fontSize: 13, color: colors.mutedForeground, lineHeight: 18 },
+  label: { fontSize: 12.5, fontWeight: '600', color: colors.foreground },
+  requestInput: {
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    color: colors.foreground,
+  },
+  requestNotesInput: { height: 80, paddingTop: 10, textAlignVertical: 'top' },
 });

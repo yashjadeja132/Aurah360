@@ -11,8 +11,10 @@ import i18next, { initI18n } from './src/i18n';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { DependentsProvider } from './src/context/DependentsContext';
 import { AppLockProvider, useAppLock } from './src/context/AppLockContext';
+import { OnboardingProvider, useOnboarding } from './src/context/OnboardingContext';
 import { NotificationsBadgeProvider } from './src/context/NotificationsBadgeContext';
 import { AuthStack } from './src/navigation/AuthStack';
+import { OnboardingStack } from './src/navigation/OnboardingStack';
 import { MainTabs } from './src/navigation/MainTabs';
 import PinLockScreen from './src/screens/PinLockScreen';
 import { SplashScreen } from './src/components/SplashScreen';
@@ -20,8 +22,9 @@ import { SplashScreen } from './src/components/SplashScreen';
 function RootNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
   const { isLocked } = useAppLock();
+  const { isReady: onboardingReady, needsOnboarding } = useOnboarding();
 
-  if (isLoading) {
+  if (isLoading || (isAuthenticated && !onboardingReady)) {
     return <SplashScreen />;
   }
 
@@ -31,6 +34,16 @@ function RootNavigator() {
     return (
       <NavigationContainer>
         <PinLockScreen />
+      </NavigationContainer>
+    );
+  }
+
+  // First-run onboarding (privacy notice → language/notifications/app-lock preferences) runs
+  // once per install, right after OTP verification succeeds, before the account reaches Home.
+  if (isAuthenticated && needsOnboarding) {
+    return (
+      <NavigationContainer>
+        <OnboardingStack />
       </NavigationContainer>
     );
   }
@@ -54,7 +67,9 @@ export default function App() {
           <DependentsProvider>
             <NotificationsBadgeProvider>
               <AppLockProvider>
-                <RootNavigator />
+                <OnboardingProvider>
+                  <RootNavigator />
+                </OnboardingProvider>
               </AppLockProvider>
             </NotificationsBadgeProvider>
           </DependentsProvider>

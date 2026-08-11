@@ -8,7 +8,13 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
-import { useOffers, useCreateOffer, useUpdateOffer } from '@/modules/crm/hooks/useCrmExtensions';
+import {
+  useOffers,
+  useCreateOffer,
+  useUpdateOffer,
+  useApproveOffer,
+  useRejectOffer,
+} from '@/modules/crm/hooks/useCrmExtensions';
 import { useLoyaltyTiers } from '@/modules/loyalty/hooks/useLoyalty';
 import { PERMISSIONS } from '@/constants/rbac';
 // 'Today' must come from the LOCAL calendar day: a UTC slice returns YESTERDAY between 00:00
@@ -34,6 +40,14 @@ export function CrmOffersPanel() {
   const tiers = tiersData?.items || [];
   const create = useCreateOffer();
   const update = useUpdateOffer();
+  const approve = useApproveOffer();
+  const reject = useRejectOffer();
+
+  const approvalBadgeVariant = (status) => {
+    if (status === 'APPROVED') return 'success';
+    if (status === 'REJECTED') return 'destructive';
+    return 'secondary';
+  };
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -170,16 +184,41 @@ export function CrmOffersPanel() {
               <p className="text-xs text-muted-foreground">
                 {new Date(offer.validFrom).toLocaleDateString()} – {new Date(offer.validTo).toLocaleDateString()}
               </p>
+              <div className="flex items-center gap-2">
+                <Badge variant={approvalBadgeVariant(offer.approvalStatus)}>
+                  {t(`crm.offers.approvalStatus.${offer.approvalStatus}`, offer.approvalStatus)}
+                </Badge>
+                {offer.approvalStatus === 'REJECTED' && offer.rejectionReason && (
+                  <span className="text-xs text-muted-foreground">{offer.rejectionReason}</span>
+                )}
+              </div>
               <PermissionGuard permissions={[PERMISSIONS.CRM_OFFERS_MANAGE, PERMISSIONS.CRM_ALL]}>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => update.mutate({ id: offer.id, payload: { isActive: !offer.isActive } })}
-                >
-                  {offer.isActive
-                    ? t('crm.offers.deactivate', 'Deactivate')
-                    : t('crm.offers.reactivate', 'Reactivate')}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {offer.approvalStatus !== 'APPROVED' && (
+                    <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(offer.id)}>
+                      {t('crm.offers.approve', 'Approve')}
+                    </Button>
+                  )}
+                  {offer.approvalStatus !== 'REJECTED' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={reject.isPending}
+                      onClick={() => reject.mutate({ id: offer.id, reason: 'Rejected from offer board' })}
+                    >
+                      {t('crm.offers.reject', 'Reject')}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => update.mutate({ id: offer.id, payload: { isActive: !offer.isActive } })}
+                  >
+                    {offer.isActive
+                      ? t('crm.offers.deactivate', 'Deactivate')
+                      : t('crm.offers.reactivate', 'Reactivate')}
+                  </Button>
+                </div>
               </PermissionGuard>
             </CardContent>
           </Card>

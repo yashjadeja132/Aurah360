@@ -15,6 +15,7 @@ import {
   DoctorMyDayPage,
   NurseTodayPage,
   NurseIntakePage,
+  NursePrepTasksPage,
   StaffListPage,
   StaffCreatePage,
   StaffDetailPage,
@@ -113,6 +114,7 @@ import {
   AnalyticsDashboardPage,
   ReportViewerPage,
   ScheduledReportsPage,
+  MyReportRunsPage,
   AnalyticsHomePage,
   ExecutiveDashboardPage,
   CategoryReportPage,
@@ -455,6 +457,14 @@ export const router = createBrowserRouter([
             // (CONSULTATION_VIEW/ALL); NURSE holds CONSULTATION_VIEW/EDIT/CREATE.
             path: APP_ROUTES.NURSE_INTAKE,
             element: <ConsultationPermission><NurseIntakePage /></ConsultationPermission>,
+          },
+          {
+            // Nurse-facing "Tasks" — treatment prep checklist (role-flow audit fix). Gated the
+            // same as TechnicianWorklistPage/the Treatments hub (TreatmentSessionPermission),
+            // now reachable by NURSE because the role grant adds treatment_session.view/edit
+            // (see backend/src/constants/rolePermissions.js).
+            path: APP_ROUTES.NURSE_PREP_TASKS,
+            element: <TreatmentSessionPermission><NursePrepTasksPage /></TreatmentSessionPermission>,
           },
           {
             path: APP_ROUTES.STAFF,
@@ -1139,6 +1149,14 @@ export const router = createBrowserRouter([
             element: (
               <ReportsPermission>
                 <ScheduledReportsPage />
+              </ReportsPermission>
+            ),
+          },
+          {
+            path: APP_ROUTES.REPORTS_RUNS,
+            element: (
+              <ReportsPermission>
+                <MyReportRunsPage />
               </ReportsPermission>
             ),
           },

@@ -104,6 +104,7 @@ export const QUERY_KEYS = Object.freeze({
   REPORTS_ANALYTICS: (params) => ['reports', 'analytics', params],
   REPORTS_GENERATE: (type, params) => ['reports', 'generate', type, params],
   REPORTS_SCHEDULED: () => ['reports', 'scheduled'],
+  REPORTS_RUNS: () => ['reports', 'runs'],
   REPORTS_SAVED_FILTERS: (scope) => ['reports', 'saved-filters', scope],
   ANALYTICS_DASHBOARD: (params) => ['analytics', 'executive', params],
   ANALYTICS_REPORT: (category, params) => ['analytics', 'report', category, params],

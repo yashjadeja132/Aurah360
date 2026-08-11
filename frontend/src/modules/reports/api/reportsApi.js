@@ -31,6 +31,10 @@ export const reportsApi = {
     const config = stepUpToken ? { headers: { 'x-step-up-token': stepUpToken } } : undefined;
     return api.post(`/reports/export/${type}/queue`, payload, config).then((r) => r.data);
   },
+  /** "My report runs" status list — GET /reports/runs, scoped server-side to the caller. */
+  listRuns(params) {
+    return api.get('/reports/runs', { params }).then((r) => r.data);
+  },
   getRun(id) {
     return api.get(`/reports/runs/${id}`).then((r) => r.data);
   },

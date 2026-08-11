@@ -22,6 +22,7 @@ import {
   useUploadSessionPhoto,
 } from '@/modules/treatmentSessions/hooks/useTreatmentSessions';
 import { useInventoryItems } from '@/modules/inventory/hooks/useInventory';
+import { useProtocols } from '@/modules/treatmentPlans/hooks/useTreatmentPlans';
 import { SessionPreflightPanel } from '@/modules/treatmentSessions/components/SessionPreflightPanel';
 import { SESSION_STATUS_LABELS } from '@/modules/treatmentSessions/constants';
 import { APP_ROUTES, treatmentSessionPrintPath } from '@/constants/routes';
@@ -57,10 +58,27 @@ export default function SessionExecutionPage() {
   const { data: invData } = useInventoryItems({ itemType: 'CONSUMABLE', limit: 100 });
   const invItems = invData?.items || [];
 
+  // Aftercare template picker draws from the session's own protocol items — each protocol item
+  // already carries `postInstructions` (the protocol-defined aftercare text), so this references
+  // "which item's aftercare was given" instead of duplicating that text into a parallel field.
+  const { data: protocolsData } = useProtocols({ limit: 100 });
+  const sessionProtocol = (protocolsData?.items || protocolsData || []).find(
+    (p) => p.id === session?.protocolId
+  );
+  const aftercareOptions = sessionProtocol?.items || [];
+
   const [outcome, setOutcome] = useState('');
   const [device, setDevice] = useState('');
   const [nextDate, setNextDate] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
+
+  // Spec 4 — outcome-form fields: how the session diverged from plan, which protocol-defined
+  // aftercare was given (+ any deviation notes), and a pain score/observation (0-10, matching
+  // ConsultationVitals.painScale).
+  const [variationFromPlan, setVariationFromPlan] = useState('');
+  const [aftercareTemplateId, setAftercareTemplateId] = useState('');
+  const [aftercareNotes, setAftercareNotes] = useState('');
+  const [painScore, setPainScore] = useState('');
 
   const [showPauseDialog, setShowPauseDialog] = useState(false);
   const [pauseReason, setPauseReason] = useState('');
@@ -267,6 +285,10 @@ export default function SessionExecutionPage() {
               onClick={() =>
                 complete.mutate({
                   outcome: outcome || t('treatmentSessions.execution.completedSuccessfully', 'Completed successfully'),
+                  variationFromPlan: variationFromPlan || undefined,
+                  aftercareTemplateId: aftercareTemplateId || undefined,
+                  aftercareNotes: aftercareNotes || undefined,
+                  painScore: painScore === '' ? undefined : Number(painScore),
                   deviceUsage: buildDeviceUsage(),
                   consumablesUsed: buildConsumablesUsed(),
                   consumables: freeTextConsumables
@@ -353,6 +375,47 @@ export default function SessionExecutionPage() {
         <div>
           <Label>{t('treatmentSessions.execution.nextSessionDate', 'Next session date')}</Label>
           <Input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} />
+        </div>
+        <div>
+          <Label>{t('treatmentSessions.execution.variationFromPlan', 'Variation from plan (if any)')}</Label>
+          <Input
+            value={variationFromPlan}
+            onChange={(e) => setVariationFromPlan(e.target.value)}
+            placeholder={t('treatmentSessions.execution.variationFromPlanPlaceholder', 'e.g. reduced passes due to sensitivity')}
+          />
+        </div>
+        <div>
+          <Label>{t('treatmentSessions.execution.painScore', 'Pain score (0–10)')}</Label>
+          <Input
+            type="number"
+            min={0}
+            max={10}
+            value={painScore}
+            onChange={(e) => setPainScore(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>{t('treatmentSessions.execution.aftercareTemplate', 'Aftercare given (template)')}</Label>
+          <Select
+            value={aftercareTemplateId}
+            onChange={(e) => setAftercareTemplateId(e.target.value)}
+          >
+            <option value="">{t('treatmentSessions.execution.aftercareTemplateNone', 'None / not protocol-specified')}</option>
+            {aftercareOptions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.procedureName}
+                {item.postInstructions ? ` — ${item.postInstructions.slice(0, 40)}${item.postInstructions.length > 40 ? '…' : ''}` : ''}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label>{t('treatmentSessions.execution.aftercareNotes', 'Aftercare notes (deviation from template)')}</Label>
+          <Input
+            value={aftercareNotes}
+            onChange={(e) => setAftercareNotes(e.target.value)}
+            placeholder={t('treatmentSessions.execution.aftercareNotesPlaceholder', 'Optional — anything different from the template')}
+          />
         </div>
         <div className="flex items-end gap-2">
           <div className="flex-1">

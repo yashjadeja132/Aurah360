@@ -16,15 +16,17 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
-import { usePatientList } from '@/modules/patients/hooks/usePatients';
+import { usePatientList, usePatientMutations } from '@/modules/patients/hooks/usePatients';
 import { useBranchList } from '@/modules/branches/hooks/useBranches';
 import { useAuth } from '@/contexts/AuthContext';
+import { DoctorPicker } from '@/modules/appointments/components/bookingPickers';
 import {
   useAdverseEvents,
   useReportAdverseEvent,
   useCloseAdverseEvent,
 } from '../hooks/useTreatmentSafety';
 import { PERMISSIONS, ROLES } from '@/constants/rbac';
+import { toast } from 'sonner';
 
 // Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES. TreatmentSafetyService
 // rejects reportAdverseEvent when payload.branchId differs from the reporter's own branch
@@ -91,6 +93,11 @@ export function AdverseEventRegisterPanel({ patientId: filterPatientId } = {}) {
   );
   const report = useReportAdverseEvent();
   const close = useCloseAdverseEvent();
+  // Attachments are uploaded via the same patient-document upload mechanism used elsewhere
+  // (PatientDocumentsPanel) — the file is uploaded first to get a documentId, which is then
+  // referenced on the adverse event's `attachments` list.
+  const { uploadDocument } = usePatientMutations();
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   const [form, setForm] = useState({
     patientId: filterPatientId || '',
@@ -98,13 +105,48 @@ export function AdverseEventRegisterPanel({ patientId: filterPatientId } = {}) {
     severity: 'MILD',
     onsetAt: new Date().toISOString().slice(0, 16),
     description: '',
+    treatmentGiven: '',
+    escalatedTo: '',
+    attachments: [],
   });
+
+  const onAttachFile = async (file) => {
+    if (!file) return;
+    if (!form.patientId) {
+      toast.error(t('treatments.safety.reportForm.selectPatientFirst', 'Select a patient before attaching files'));
+      return;
+    }
+    setUploadingAttachment(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('category', 'OTHER');
+      formData.append('clinicalDate', new Date().toISOString().slice(0, 10));
+      formData.append('source', 'INTERNAL_BRANCH');
+      const res = await uploadDocument.mutateAsync({ id: form.patientId, formData });
+      const documentId = res?.data?.document?.id || res?.document?.id;
+      if (documentId) {
+        setForm((f) => ({ ...f, attachments: [...f.attachments, { documentId, note: file.name }] }));
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || t('treatments.safety.reportForm.attachmentFailed', 'Attachment upload failed'));
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const removeAttachment = (idx) =>
+    setForm((f) => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }));
 
   const onSubmit = async (e) => {
     e.preventDefault();
     if (!form.patientId || !form.branchId || !form.description) return;
-    await report.mutateAsync(form);
-    setForm({ ...form, description: '' });
+    await report.mutateAsync({
+      ...form,
+      escalatedTo: form.escalatedTo || undefined,
+      treatmentGiven: form.treatmentGiven || undefined,
+    });
+    setForm({ ...form, description: '', treatmentGiven: '', escalatedTo: '', attachments: [] });
   };
 
   return (
@@ -185,6 +227,53 @@ export function AdverseEventRegisterPanel({ patientId: filterPatientId } = {}) {
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
+              <textarea
+                className="flex min-h-[2.5rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-2 lg:col-span-2"
+                placeholder={t('treatments.safety.reportForm.treatmentGivenPlaceholder', 'Treatment given')}
+                rows={2}
+                value={form.treatmentGiven}
+                onChange={(e) => setForm((f) => ({ ...f, treatmentGiven: e.target.value }))}
+              />
+              <div className="sm:col-span-2 lg:col-span-2">
+                <DoctorPicker
+                  value={form.escalatedTo}
+                  onChange={(id) => setForm((f) => ({ ...f, escalatedTo: id }))}
+                  branchId={isGlobalScope ? form.branchId : ownBranchId}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t(
+                    'treatments.safety.reportForm.escalationHint',
+                    'Escalation target / responsible clinician'
+                  )}
+                </p>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-4 space-y-2">
+                <Input
+                  type="file"
+                  disabled={uploadingAttachment}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    onAttachFile(file);
+                    e.target.value = '';
+                  }}
+                />
+                {form.attachments.length > 0 && (
+                  <ul className="flex flex-wrap gap-2">
+                    {form.attachments.map((a, idx) => (
+                      <li key={idx} className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+                        {a.note || t('treatments.safety.reportForm.attachment', 'Attachment')}
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => removeAttachment(idx)}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <Button type="submit" disabled={report.isPending}>
                 <Plus className="h-4 w-4" /> {t('treatments.safety.reportForm.submit', 'Report')}
               </Button>

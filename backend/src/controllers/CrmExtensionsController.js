@@ -76,6 +76,18 @@ class CrmExtensionsController {
     return ApiResponse.success(res, { message: 'Offers retrieved', data: { offers } });
   });
 
+  approveOffer = asyncHandler(async (req, res) => {
+    const scope = await resolveRecordScope(req, { branch: true, doctor: false });
+    const offer = await this.service.approveOffer(req.params.id, req.auth.userId, req, scope);
+    return ApiResponse.success(res, { message: 'Offer approved', data: { offer } });
+  });
+
+  rejectOffer = asyncHandler(async (req, res) => {
+    const scope = await resolveRecordScope(req, { branch: true, doctor: false });
+    const offer = await this.service.rejectOffer(req.params.id, req.body, req.auth.userId, req, scope);
+    return ApiResponse.success(res, { message: 'Offer rejected', data: { offer } });
+  });
+
   submitFeedback = asyncHandler(async (req, res) => {
     const feedback = await this.service.submitFeedback(req.body, req.auth?.userId || null, req);
     return ApiResponse.created(res, { message: 'Feedback submitted', data: { feedback } });

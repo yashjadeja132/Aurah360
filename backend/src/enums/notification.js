@@ -36,6 +36,7 @@ export const TEMPLATE_CODE = Object.freeze({
   PATIENT_CHECKED_IN: 'PATIENT_CHECKED_IN',
   CONSULTATION_SIGNED: 'CONSULTATION_SIGNED',
   TREATMENT_PLAN_ACCEPTED: 'TREATMENT_PLAN_ACCEPTED',
+  FEEDBACK_REQUEST: 'FEEDBACK_REQUEST',
 });
 
 export const TEMPLATE_CODE_LIST = Object.freeze(Object.values(TEMPLATE_CODE));
@@ -58,6 +59,7 @@ export const EVENT_TEMPLATE_MAP = Object.freeze({
   LeadConverted: TEMPLATE_CODE.LEAD_CONVERTED,
   FollowUpDue: TEMPLATE_CODE.LEAD_FOLLOW_UP,
   BirthdayWishes: TEMPLATE_CODE.BIRTHDAY_WISHES,
+  FeedbackRequested: TEMPLATE_CODE.FEEDBACK_REQUEST,
 });
 
 export const DEFAULT_EVENT_CHANNELS = Object.freeze({
@@ -77,6 +79,7 @@ export const DEFAULT_EVENT_CHANNELS = Object.freeze({
   LeadConverted: [NOTIFICATION_CHANNEL.IN_APP, NOTIFICATION_CHANNEL.EMAIL],
   FollowUpDue: [NOTIFICATION_CHANNEL.IN_APP, NOTIFICATION_CHANNEL.SMS],
   BirthdayWishes: [NOTIFICATION_CHANNEL.WHATSAPP, NOTIFICATION_CHANNEL.SMS, NOTIFICATION_CHANNEL.IN_APP],
+  FeedbackRequested: [NOTIFICATION_CHANNEL.IN_APP, NOTIFICATION_CHANNEL.WHATSAPP, NOTIFICATION_CHANNEL.SMS],
 });
 
 export const NOTIFICATION_EVENTS = Object.freeze({
@@ -108,6 +111,10 @@ export const TRANSACTIONAL_TEMPLATE_CODES = Object.freeze([
   TEMPLATE_CODE.PATIENT_CHECKED_IN,
   TEMPLATE_CODE.CONSULTATION_SIGNED,
   TEMPLATE_CODE.TREATMENT_PLAN_ACCEPTED,
+  // A post-visit feedback/NPS request is service-adjacent, not marketing — it's about the visit
+  // the patient just had, not an outbound campaign — so it is never suppressed by
+  // marketingConsent being false, same as the other post-visit templates above.
+  TEMPLATE_CODE.FEEDBACK_REQUEST,
 ]);
 
 export const MARKETING_TEMPLATE_CODES = Object.freeze([

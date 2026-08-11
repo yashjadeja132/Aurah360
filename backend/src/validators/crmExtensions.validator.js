@@ -57,6 +57,10 @@ export const resolveFeedbackSchema = z.object({
   resolutionNotes: z.string().max(2000).optional().nullable(),
 });
 
+export const rejectOfferSchema = z.object({
+  reason: z.string().max(1000).optional().nullable(),
+});
+
 export const idParamSchema = z.object({ id: objectId });
 
 export default {
@@ -64,6 +68,7 @@ export default {
   recallOutcomeSchema,
   createOfferSchema,
   updateOfferSchema,
+  rejectOfferSchema,
   submitFeedbackSchema,
   escalateFeedbackSchema,
   resolveFeedbackSchema,

@@ -64,6 +64,11 @@ export const bookAppointmentSchema = z.object({
   appointmentType: z.string().optional(),
   notes: z.string().optional(),
   reason: z.string().optional(),
+  // APT-003 — lets a patient submit a custom/unavailable time as a request instead of a
+  // pre-validated open slot; AppointmentService.create() already holds this as Pending
+  // Approval (skipping slot-claim validation) for the web receptionist flow — this just lets
+  // the same flag reach it from the patient portal booking endpoint.
+  requiresApproval: z.boolean().optional(),
 });
 
 export const cancelSchema = z.object({

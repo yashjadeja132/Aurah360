@@ -121,6 +121,13 @@ export const completeSessionSchema = z.object({
   duration: z.coerce.number().int().min(0).optional(),
   complications: z.string().max(2000).optional().nullable(),
   outcome: z.string().max(2000).optional().nullable(),
+  /** Spec 4 — how the session actually differed from the planned protocol/parameters, if any. */
+  variationFromPlan: z.string().max(2000).optional().nullable(),
+  /** Which protocol item's aftercare (postInstructions) was handed out — see model comment. */
+  aftercareTemplateId: z.preprocess(emptyToNull, objectId.nullable().optional()),
+  aftercareNotes: z.string().max(2000).optional().nullable(),
+  /** 0-10 scale — matches ConsultationVitals.painScale. */
+  painScore: z.coerce.number().min(0).max(10).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   consumables: z.array(z.string()).optional(),
   consumablesUsed: z.array(consumableUsedSchema).optional(),

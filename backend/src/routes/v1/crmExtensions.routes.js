@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import CrmExtensionsController from '../../controllers/CrmExtensionsController.js';
+import EscalationTicketController from '../../controllers/EscalationTicketController.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import { requirePermission } from '../../middlewares/permission.middleware.js';
@@ -9,6 +10,7 @@ import {
   recallOutcomeSchema,
   createOfferSchema,
   updateOfferSchema,
+  rejectOfferSchema,
   escalateFeedbackSchema,
   resolveFeedbackSchema,
   idParamSchema,
@@ -16,6 +18,7 @@ import {
 
 const router = Router();
 const controller = new CrmExtensionsController();
+const escalationController = new EscalationTicketController();
 
 router.use(authenticate);
 
@@ -54,6 +57,18 @@ router.get(
   requirePermission(PERMISSIONS.CRM_OFFERS_VIEW, PERMISSIONS.CRM_OFFERS_MANAGE, PERMISSIONS.CRM_ALL),
   controller.listOffers
 );
+router.post(
+  '/offers/:id/approve',
+  requirePermission(PERMISSIONS.CRM_OFFERS_MANAGE, PERMISSIONS.CRM_ALL),
+  validate({ params: idParamSchema }),
+  controller.approveOffer
+);
+router.post(
+  '/offers/:id/reject',
+  requirePermission(PERMISSIONS.CRM_OFFERS_MANAGE, PERMISSIONS.CRM_ALL),
+  validate({ params: idParamSchema, body: rejectOfferSchema }),
+  controller.rejectOffer
+);
 
 router.get(
   '/feedback',
@@ -71,6 +86,18 @@ router.post(
   requirePermission(PERMISSIONS.CRM_FEEDBACK_VIEW, PERMISSIONS.CRM_ALL),
   validate({ params: idParamSchema, body: resolveFeedbackSchema }),
   controller.resolveFeedback
+);
+
+router.get(
+  '/escalation-tickets',
+  requirePermission(PERMISSIONS.CRM_FEEDBACK_VIEW, PERMISSIONS.CRM_ALL),
+  escalationController.listTickets
+);
+router.post(
+  '/escalation-tickets/:id/handle',
+  requirePermission(PERMISSIONS.CRM_FEEDBACK_VIEW, PERMISSIONS.CRM_ALL),
+  validate({ params: idParamSchema }),
+  escalationController.markHandled
 );
 
 export default router;

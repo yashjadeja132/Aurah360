@@ -2,10 +2,12 @@ import crypto from 'crypto';
 import ApiResponse from '../libs/ApiResponse.js';
 import asyncHandler from '../libs/asyncHandler.js';
 import NotificationService from '../services/NotificationService.js';
+import EscalationTicketService from '../services/EscalationTicketService.js';
 import config from '../config/index.js';
 import logger from '../libs/logger.js';
 
 const notificationService = new NotificationService();
+const escalationTicketService = new EscalationTicketService();
 
 /** NTF-005/007 — signature-verified, deduplicated provider delivery webhooks. */
 class NotificationWebhookController {
@@ -48,6 +50,32 @@ class NotificationWebhookController {
             occurredAt: s.timestamp ? new Date(Number(s.timestamp) * 1000) : new Date(),
           });
         }
+
+        // Inbound patient replies — Meta's WhatsApp Cloud webhook carries these in a separate
+        // `messages` array alongside `statuses` (never combined into one). A free-text reply here
+        // is never auto-handled; it goes straight to the human escalation inbox (CRM-001).
+        // recordDeliveryEvent above only ever sees provider STATUS callbacks, not this — that's
+        // the gap this loop closes. Ingestion failure for one message must not fail the others
+        // or fail the webhook (Meta retries on non-2xx, which would just duplicate-ingest).
+        const messages = change.value?.messages || [];
+        for (const m of messages) {
+          try {
+            const body = m.text?.body;
+            if (!body) continue; // media/interactive/etc — free-text only, per scope.
+            await escalationTicketService.createFromInboundMessage({
+              channel: 'WHATSAPP',
+              fromNumber: m.from,
+              messageBody: body,
+              receivedAt: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
+              providerMessageId: m.id,
+            });
+          } catch (err) {
+            logger.error('WhatsApp inbound message escalation-ticket ingestion failed', {
+              error: err.message,
+              messageId: m.id,
+            });
+          }
+        }
       }
     }
     return ApiResponse.success(res, { message: 'Webhook processed' });
@@ -66,6 +94,13 @@ class NotificationWebhookController {
    * shape as the WhatsApp HMAC check above: missing config -> log+401 rather than
    * silently accepting unsigned requests.
    */
+  // FOLLOW-UP (not implemented here): BulkSenders/generic HTTP-DLT gateways and Exotel voice
+  // callbacks are documented ONLY for delivery-status callbacks in this repo's config — no
+  // confirmed inbound-reply payload shape exists to implement against without guessing at an
+  // unverified provider contract. WhatsApp (Meta Cloud API) is the one channel with a
+  // documented, structured inbound-message payload (`messages[]`), so escalation-ticket
+  // ingestion is scoped to it for now. Wiring SMS/voice inbound replies is a follow-up once the
+  // actual provider payload is confirmed.
   sms = asyncHandler(async (req, res) => {
     const expected = config.notificationProviders?.sms?.webhookSecret;
     const provided = req.query?.token || req.headers['x-webhook-token'];

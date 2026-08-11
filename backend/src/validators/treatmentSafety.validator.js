@@ -16,6 +16,13 @@ export const reviewPatchTestSchema = z.object({
   validUntil: z.coerce.date().optional().nullable(),
 });
 
+/** Attachment references an already-uploaded patient document or clinical photo (§10.3/§16.10). */
+const attachmentSchema = z.object({
+  documentId: objectId.optional().nullable(),
+  photoId: objectId.optional().nullable(),
+  note: z.string().max(500).optional().nullable(),
+});
+
 export const reportAdverseEventSchema = z.object({
   patientId: objectId,
   treatmentSessionId: objectId.optional().nullable(),
@@ -26,7 +33,9 @@ export const reportAdverseEventSchema = z.object({
   description: z.string().min(1).max(4000),
   treatmentGiven: z.string().max(2000).optional().nullable(),
   responsibleClinicianId: objectId.optional().nullable(),
+  escalatedTo: objectId.optional().nullable(),
   followUpPlan: z.string().max(2000).optional().nullable(),
+  attachments: z.array(attachmentSchema).optional(),
 });
 
 export const updateAdverseEventSchema = z.object({
@@ -34,6 +43,7 @@ export const updateAdverseEventSchema = z.object({
   escalatedTo: objectId.optional().nullable(),
   followUpPlan: z.string().max(2000).optional().nullable(),
   treatmentGiven: z.string().max(2000).optional().nullable(),
+  attachments: z.array(attachmentSchema).optional(),
 });
 
 export const closeAdverseEventSchema = z.object({

@@ -9,6 +9,7 @@ export const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'
 export const DoctorMyDayPage = lazy(() => import('@/pages/doctor/DoctorMyDayPage'));
 export const NurseTodayPage = lazy(() => import('@/pages/nurse/NurseTodayPage'));
 export const NurseIntakePage = lazy(() => import('@/pages/nurse/NurseIntakePage'));
+export const NursePrepTasksPage = lazy(() => import('@/pages/nurse/NursePrepTasksPage'));
 export const StaffListPage = lazy(() => import('@/pages/users/StaffListPage'));
 export const StaffCreatePage = lazy(() => import('@/pages/users/StaffCreatePage'));
 export const StaffDetailPage = lazy(() => import('@/pages/users/StaffDetailPage'));
@@ -120,6 +121,7 @@ export const RoleDashboardPage = lazy(() => import('@/pages/reports/RoleDashboar
 export const AnalyticsDashboardPage = lazy(() => import('@/pages/reports/AnalyticsDashboardPage'));
 export const ReportViewerPage = lazy(() => import('@/pages/reports/ReportViewerPage'));
 export const ScheduledReportsPage = lazy(() => import('@/pages/reports/ScheduledReportsPage'));
+export const MyReportRunsPage = lazy(() => import('@/pages/reports/MyReportRunsPage'));
 export const AnalyticsHomePage = lazy(() => import('@/pages/analytics/AnalyticsHomePage'));
 export const ExecutiveDashboardPage = lazy(() => import('@/pages/analytics/ExecutiveDashboardPage'));
 export const CategoryReportPage = lazy(() => import('@/pages/analytics/CategoryReportPage'));

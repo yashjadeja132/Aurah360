@@ -7,19 +7,41 @@ import { Select } from '@/components/ui/select';
 import { PermissionGuard } from '@/components/common/PermissionGuard';
 import { PERMISSIONS } from '@/constants/rbac';
 import { APP_CONFIG } from '@/constants/config';
-import { PHOTO_TYPE_OPTIONS } from '../constants';
+import { PHOTO_TYPE_OPTIONS, PHOTO_LATERALITY_OPTIONS, RESTRICTED_BODY_REGION_HINTS } from '../constants';
 import { useReleasePhoto, useUploadPhoto } from '../hooks/useConsultations';
 
+/**
+ * Nurse flow gap fix — guard sequence BEFORE the capture control unlocks:
+ * patient+visit confirmed -> laterality -> purpose -> consent valid.
+ * `consultationId` being present IS "patient+visit confirmed" — this panel only ever mounts
+ * inside ConsultationWorkspacePage/PatientPhotosPanel once a consultation row exists, so there is
+ * no separate confirmation step to add here; the guard below still refuses to proceed without it
+ * defensively (e.g. panel reused somewhere that hasn't resolved an id yet).
+ */
 export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
   const { t } = useTranslation();
   const upload = useUploadPhoto(consultationId);
   const release = useReleasePhoto(consultationId);
   const [photoType, setPhotoType] = useState('BEFORE');
+  const [laterality, setLaterality] = useState('');
   const [title, setTitle] = useState('');
   const [bodyRegion, setBodyRegion] = useState('');
   const [consentVerified, setConsentVerified] = useState(false);
   const [file, setFile] = useState(null);
   const [compare, setCompare] = useState({ before: '', after: '' });
+
+  const visitConfirmed = Boolean(consultationId);
+  const purposeSelected = Boolean(photoType);
+  const lateralitySelected = Boolean(laterality);
+  // The capture control (file picker — camera capture is a deferred follow-up, see module notes)
+  // stays locked until every guard step is satisfied, in the spec's order.
+  const captureUnlocked = visitConfirmed && lateralitySelected && purposeSelected && consentVerified;
+
+  const restrictedHint = useMemo(() => {
+    const normalized = bodyRegion.trim().toLowerCase();
+    if (!normalized) return false;
+    return RESTRICTED_BODY_REGION_HINTS.some((term) => normalized.includes(term));
+  }, [bodyRegion]);
 
   const photoTypeLabel = (value) =>
     t(`consultations.photos.types.${value}`, PHOTO_TYPE_OPTIONS.find((o) => o.value === value)?.label || value);
@@ -41,13 +63,17 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
 
   const onUpload = async (e) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file || !captureUnlocked) return;
     const fd = new FormData();
     fd.append('file', file);
     fd.append('photoType', photoType);
+    fd.append('laterality', laterality);
     if (title) fd.append('title', title);
     if (bodyRegion) fd.append('bodyRegion', bodyRegion);
     fd.append('consentVerified', consentVerified ? 'true' : 'false');
+    // Restricted-area capture is a HARD BLOCK enforced server-side
+    // (ClinicalPhotoPolicyService#assertBodyRegionAllowed) — this call still fires and the
+    // server refuses it with RESTRICTED_BODY_AREA; the client hint above is advisory only.
     await upload.mutateAsync(fd);
     setFile(null);
     setTitle('');
@@ -67,9 +93,29 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
             is unchanged — this is purely about not presenting the capture control as available
             until the gate in front of it has actually been cleared.
           */}
+          {!visitConfirmed && (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-xs text-destructive">
+              {t(
+                'consultations.photos.noVisitHint',
+                'No patient/visit context — capture is unavailable until a consultation is open.'
+              )}
+            </p>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label>{t('consultations.photos.type', 'Type')}</Label>
+              <Label>{t('consultations.photos.laterality', 'Body side (laterality)')}</Label>
+              <Select value={laterality} onChange={(e) => setLaterality(e.target.value)}>
+                <option value="">{t('consultations.photos.selectLaterality', 'Select side…')}</option>
+                {PHOTO_LATERALITY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {t(`consultations.photos.lateralityOptions.${o.value}`, o.label)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>{t('consultations.photos.purpose', 'Purpose')}</Label>
               <Select value={photoType} onChange={(e) => setPhotoType(e.target.value)}>
                 {PHOTO_TYPE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -78,10 +124,18 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
                 ))}
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label>{t('consultations.photos.bodyRegion', 'Body region')}</Label>
-              <Input value={bodyRegion} onChange={(e) => setBodyRegion(e.target.value)} />
-            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>{t('consultations.photos.bodyRegion', 'Body region')}</Label>
+            <Input value={bodyRegion} onChange={(e) => setBodyRegion(e.target.value)} />
+            {restrictedHint && (
+              <p className="text-xs text-destructive">
+                {t(
+                  'consultations.photos.restrictedHint',
+                  'This body area may be blocked by clinic policy — the server will refuse the upload unless a doctor-authorized exception applies.'
+                )}
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <Label>{t('consultations.photos.titleField', 'Title')}</Label>
@@ -101,18 +155,18 @@ export function ClinicalPhotosPanel({ consultationId, photos = [], readOnly }) {
             {t('consultations.photos.consentVerified', 'Photography consent verified')}
           </label>
 
-          {consentVerified ? (
+          {captureUnlocked ? (
             <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           ) : (
             <p className="rounded-md border border-dashed bg-muted/40 p-3 text-xs text-muted-foreground">
               {t(
                 'consultations.photos.consentGateHint',
-                'Confirm photography consent above to unlock the file picker and camera.'
+                'Confirm patient/visit, body side, purpose and photography consent above to unlock the file picker and camera.'
               )}
             </p>
           )}
 
-          <Button type="submit" disabled={!consentVerified || !file || upload.isPending}>
+          <Button type="submit" disabled={!captureUnlocked || !file || upload.isPending}>
             {t('common.upload', 'Upload')}
           </Button>
         </form>

@@ -8,6 +8,8 @@ export const APP_ROUTES = Object.freeze({
   // the page starts/finds the consultation itself, same idempotent start() the doctor's own
   // "Start from appointment" uses).
   NURSE_INTAKE: '/nurse/intake/:appointmentId',
+  // Nurse-facing "Tasks" — treatment prep checklist (role-flow audit fix).
+  NURSE_PREP_TASKS: '/nurse/tasks',
   STAFF: '/staff',
   STAFF_CREATE: '/staff/new',
   STAFF_DETAIL: '/staff/:id',
@@ -96,6 +98,7 @@ export const APP_ROUTES = Object.freeze({
   REPORTS: '/reports',
   REPORTS_ANALYTICS: '/reports/analytics',
   REPORTS_SCHEDULED: '/reports/scheduled',
+  REPORTS_RUNS: '/reports/runs',
   REPORTS_DASHBOARDS: '/reports/dashboards',
   REPORTS_DASHBOARD: '/reports/dashboards/:type',
   REPORTS_VIEWER: '/reports/view',

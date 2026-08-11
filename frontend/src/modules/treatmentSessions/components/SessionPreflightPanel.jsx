@@ -16,7 +16,7 @@ import { PREFLIGHT_GATE_LABELS } from '../constants';
  * "Begin procedure" stays disabled until every blocking gate passes; users holding
  * treatment.hard_stop_override additionally get an override-with-reason affordance.
  */
-export function SessionPreflightPanel({ sessionId, session, onStart, isStarting }) {
+export function SessionPreflightPanel({ sessionId, session, onStart, isStarting, showActions = true }) {
   const { t } = useTranslation();
   const [overrideReason, setOverrideReason] = useState('');
   const [showOverride, setShowOverride] = useState(false);
@@ -102,26 +102,49 @@ export function SessionPreflightPanel({ sessionId, session, onStart, isStarting 
         })}
       </ul>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          disabled={!preflight.canStart || isStarting}
-          onClick={() => onStart()}
-        >
-          {t('treatmentSessions.preflight.begin', 'Begin procedure')}
-        </Button>
-        {!preflight.canStart && (
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'treatmentSessions.preflight.blockedHint',
-              'Clear every blocking check above before the procedure can begin.'
-            )}
-          </p>
-        )}
-      </div>
+      {/*
+        `showActions=false` — nurse-facing prep-checklist reuse (Tasks page): the nurse reviews
+        and clears these same gates but does not hold treatment_session.complete /
+        treatment.hard_stop_override, so "Begin procedure" and the override affordance (which
+        call POST /:id/start, a Technician act) are hidden rather than rendered-and-403ing. The
+        gate list itself is unchanged — same component, same data, same order.
+      */}
+      {showActions && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={!preflight.canStart || isStarting}
+            onClick={() => onStart()}
+          >
+            {t('treatmentSessions.preflight.begin', 'Begin procedure')}
+          </Button>
+          {!preflight.canStart && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'treatmentSessions.preflight.blockedHint',
+                'Clear every blocking check above before the procedure can begin.'
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!showActions && (
+        <p className="text-xs text-muted-foreground">
+          {preflight.canStart
+            ? t(
+                'treatmentSessions.preflight.readyForTechnician',
+                'All prep checks are clear — this session is ready in the technician worklist.'
+              )
+            : t(
+                'treatmentSessions.preflight.blockedHint',
+                'Clear every blocking check above before the procedure can begin.'
+              )}
+        </p>
+      )}
 
       {/* Audited hard-stop override — only for holders of treatment.hard_stop_override.
           canOverride comes from the server (it evaluates the same permission start() checks). */}
-      {!preflight.canStart && preflight.canOverride && preflight.requiresOverride && (
+      {showActions && !preflight.canStart && preflight.canOverride && preflight.requiresOverride && (
         <div className="space-y-2 rounded-lg border border-dashed border-destructive/50 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-destructive">
             <ShieldAlert className="h-4 w-4" />
@@ -167,7 +190,7 @@ export function SessionPreflightPanel({ sessionId, session, onStart, isStarting 
           )}
         </div>
       )}
-      {!preflight.canStart && !preflight.canOverride && preflight.requiresOverride && (
+      {showActions && !preflight.canStart && !preflight.canOverride && preflight.requiresOverride && (
         <p className="text-xs text-muted-foreground">
           {t(
             'treatmentSessions.preflight.overrideNoPermission',
