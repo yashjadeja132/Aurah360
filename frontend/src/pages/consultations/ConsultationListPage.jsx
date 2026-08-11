@@ -23,19 +23,19 @@ export default function ConsultationListPage() {
   const navigate = useNavigate();
   const { data: doctorsData } = useDoctorList({ limit: 50 });
   const doctors = doctorsData?.items || [];
+  // '' = All doctors (default). A specific id narrows to that doctor.
   const [doctorId, setDoctorId] = useState('');
-  const effectiveDoctorId = doctorId || doctors[0]?.id || '';
 
   const today = todayKey();
   const { data: apptData } = useAppointmentList({
-    doctorId: effectiveDoctorId || undefined,
+    doctorId: doctorId || undefined,
     from: today,
     to: today,
     limit: 50,
   });
   const appointments = apptData?.items || [];
 
-  const { data: consultations = [], isLoading } = useDoctorConsultations(effectiveDoctorId);
+  const { data: consultations = [], isLoading } = useDoctorConsultations(doctorId);
   const start = useStartConsultation();
 
   const eligible = useMemo(
@@ -66,8 +66,8 @@ export default function ConsultationListPage() {
       </div>
 
       <div className="max-w-sm">
-        <Select value={effectiveDoctorId} onChange={(e) => setDoctorId(e.target.value)}>
-          <option value="">{t('consultations.list.selectDoctor', 'Select doctor')}</option>
+        <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
+          <option value="">{t('consultations.list.allDoctors', 'All doctors')}</option>
           {doctors.map((d) => (
             <option key={d.id} value={d.id}>
               {d.doctorCode} — {d.user?.fullName || t('consultations.list.doctorFallback', 'Doctor')}

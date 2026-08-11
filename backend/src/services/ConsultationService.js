@@ -315,6 +315,15 @@ class ConsultationService {
     );
   }
 
+  /** Recent consultations across ALL doctors (OWNER/ADMIN branch-wide view). */
+  async listRecent({ status = null, limit = 50, branchId = null } = {}) {
+    const filter = { deletedAt: null };
+    if (status) filter.status = status;
+    if (branchId) filter.branchId = branchId;
+    const rows = await this.consultationRepository.findMany(filter, { sort: { startedAt: -1 }, limit });
+    return Promise.all(rows.map(async (r) => this.#map(await this.consultationRepository.findByIdPopulated(r._id))));
+  }
+
   async listByDoctor(doctorId, { status = null, limit = 50, branchId = null } = {}) {
     const filter = { doctorId, deletedAt: null };
     if (status) filter.status = status;

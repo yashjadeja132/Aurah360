@@ -62,10 +62,10 @@ export function useDoctorConsultations(doctorId, params = {}) {
   return useQuery({
     queryKey: QUERY_KEYS.CONSULTATION_DOCTOR_LIST(doctorId, params),
     queryFn: async () => {
-      const res = await consultationsApi.listByDoctor({ doctorId, ...params });
+      const res = await consultationsApi.listByDoctor({ doctorId: doctorId || undefined, ...params });
       return res.data || [];
     },
-    enabled: Boolean(doctorId),
+    enabled: doctorId !== undefined,
   });
 }
 

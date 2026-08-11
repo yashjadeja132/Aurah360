@@ -3,7 +3,7 @@ import asyncHandler from '../libs/asyncHandler.js';
 import ConsultationService from '../services/ConsultationService.js';
 import ConsultationClinicalService from '../services/ConsultationClinicalService.js';
 import ApiError from '../libs/ApiError.js';
-import { scopedListQuery, resolveRecordScope } from '../helpers/scope.helper.js';
+import { scopedListQuery, resolveRecordScope, hasGlobalScope } from '../helpers/scope.helper.js';
 
 /**
  * SEC-030 — `listByDoctor` and `labOrderReviewQueue` are BROWSE lists and are row-scoped to the
@@ -56,7 +56,16 @@ class ConsultationController {
 
   listByDoctor = asyncHandler(async (req, res) => {
     const scoped = await scopedListQuery(req, { branch: true, doctor: true });
-    if (!scoped.doctorId) throw ApiError.badRequest('doctorId is required');
+    // OWNER/ADMIN can omit doctorId to see every doctor's consultations (branch-scoped).
+    if (!scoped.doctorId) {
+      if (!hasGlobalScope(req.auth)) throw ApiError.badRequest('doctorId is required');
+      const all = await this.consultationService.listRecent({
+        status: scoped.status,
+        limit: scoped.limit,
+        branchId: scoped.branchId || null,
+      });
+      return ApiResponse.success(res, { data: all });
+    }
     const items = await this.consultationService.listByDoctor(scoped.doctorId, {
       status: scoped.status,
       limit: scoped.limit,
