@@ -43,14 +43,32 @@ class DoctorRepository extends BaseRepository {
       filter.specialization = new RegExp(options.specialization, 'i');
     }
 
+    const searchFields = ['doctorCode', 'licenseNumber', 'registrationNumber', 'specialization', 'qualification'];
+    // A doctor's actual name lives on the populated `userId` document, not on this collection,
+    // so a plain text-field regex here can never match "Dr. Sharma". The caller (DoctorService)
+    // resolves the search term against User first and hands back the matching doctor ids —
+    // fold those in as an extra $or branch alongside the normal field search, rather than letting
+    // paginateModel's own search handling silently overwrite it.
+    let searchParam = options.search;
+    if (options.nameMatchedIds?.length) {
+      const orClauses = [{ _id: { $in: options.nameMatchedIds } }];
+      const term = (options.search || '').trim();
+      if (term) {
+        const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        orClauses.push(...searchFields.map((field) => ({ [field]: regex })));
+      }
+      filter.$or = orClauses;
+      searchParam = undefined; // already folded into filter.$or above
+    }
+
     return paginateModel(this.model, {
       filter,
       page: options.page,
       limit: options.limit,
       sortBy: options.sortBy,
       sortOrder: options.sortOrder,
-      search: options.search,
-      searchFields: ['doctorCode', 'licenseNumber', 'registrationNumber', 'specialization', 'qualification'],
+      search: searchParam,
+      searchFields,
       allowedSort: [
         'createdAt',
         'updatedAt',

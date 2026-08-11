@@ -12,6 +12,8 @@ import NotificationService from './NotificationService.js';
 import AuditService from './AuditService.js';
 import ResourceService from './ResourceService.js';
 import AppointmentWaitlist from '../models/AppointmentWaitlist.model.js';
+import User from '../models/User.model.js';
+import { ROLES } from '../constants/roles.js';
 import { generateAppointmentNumber } from '../helpers/appointmentNumber.helper.js';
 import { timeToMinutes } from '../helpers/schedule.engine.js';
 import { AUDIT_ACTIONS } from '../enums/auditAction.js';
@@ -408,7 +410,51 @@ class AppointmentService {
   async list(query = {}) {
     const page = Number(query.page) || PAGINATION.DEFAULT_PAGE;
     const limit = Math.min(Number(query.limit) || PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
-    const result = await this.appointmentRepository.paginate({ ...query, page, limit });
+
+    // Command palette / free-text search: "patient name" and "doctor name" have no field on the
+    // appointment collection itself, so resolve them to id lists first — scoped to the same
+    // branch as the appointment query, so this can never surface an appointment (via a matched
+    // patient/doctor) outside the caller's own branch scope.
+    let patientIds;
+    let doctorIds;
+    if (query.search) {
+      const [patientMatches, doctorUserMatches] = await Promise.all([
+        this.patientRepository.paginate({
+          page: 1,
+          limit: 25,
+          search: query.search,
+          primaryBranchId: query.branchId || undefined,
+        }),
+        User.find({
+          role: ROLES.DOCTOR,
+          deletedAt: null,
+          $or: [
+            { firstName: { $regex: query.search, $options: 'i' } },
+            { lastName: { $regex: query.search, $options: 'i' } },
+          ],
+        })
+          .select('_id')
+          .lean(),
+      ]);
+      patientIds = (patientMatches.items || []).map((p) => p._id);
+      if (doctorUserMatches.length) {
+        const doctors = await this.doctorRepository.model
+          .find({ userId: { $in: doctorUserMatches.map((u) => u._id) }, deletedAt: null })
+          .select('_id')
+          .lean();
+        doctorIds = doctors.map((d) => d._id);
+      } else {
+        doctorIds = [];
+      }
+    }
+
+    const result = await this.appointmentRepository.paginate({
+      ...query,
+      page,
+      limit,
+      patientIds,
+      doctorIds,
+    });
     const items = await Promise.all(
       result.items.map(async (row) =>
         this.#map(await this.appointmentRepository.findByIdPopulated(row._id))

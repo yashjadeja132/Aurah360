@@ -138,6 +138,12 @@ class InvoiceRepository extends BaseRepository {
     status = null,
     paymentStatus = null,
     search = null,
+    // Command palette / search-by-patient-name support: the invoice model itself has no
+    // patient name snapshot, so the caller (BillingService) resolves matching patient ids
+    // via PatientRepository's own scoped search first and hands them in here. We OR that set
+    // against the invoiceNumber regex rather than filtering by it directly, so a search still
+    // matches on invoice number alone even when it matches no patient name.
+    patientIds = null,
     limit = 50,
     skip = 0,
   } = {}) {
@@ -147,7 +153,11 @@ class InvoiceRepository extends BaseRepository {
     if (status) filter.status = status;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
     if (search) {
-      filter.invoiceNumber = { $regex: search, $options: 'i' };
+      const or = [{ invoiceNumber: { $regex: search, $options: 'i' } }];
+      if (patientIds && patientIds.length) {
+        or.push({ patientId: { $in: patientIds.map(toObjectId) } });
+      }
+      filter.$or = or;
     }
     const [items, total] = await Promise.all([
       this.model.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).exec(),

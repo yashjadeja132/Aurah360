@@ -1,4 +1,5 @@
 import ApiError from '../libs/ApiError.js';
+import User from '../models/User.model.js';
 import DoctorRepository from '../repositories/DoctorRepository.js';
 import UserRepository from '../repositories/UserRepository.js';
 import BranchRepository from '../repositories/BranchRepository.js';
@@ -207,7 +208,7 @@ class DoctorService {
       doctor.branches?.[0]?._id || doctor.branches?.[0] || null
     );
 
-    return this.#mapDoctor(doctor, null, availability);
+    return this.#mapDoctor(doctor, doctor.userId || null, availability);
   }
 
   async list(query = {}) {
@@ -218,10 +219,36 @@ class DoctorService {
     if (query.isActive === 'true') isActive = true;
     if (query.isActive === 'false') isActive = false;
 
+    // Command palette / free-text search: a doctor's actual name lives on the populated
+    // `userId` document, not on this collection's own fields (doctorCode/specialization/etc),
+    // so "Dr. Sharma" would otherwise match nothing. Resolve it against User first — same
+    // pattern already used in AppointmentService's search-by-doctor-name resolution.
+    let nameMatchedIds;
+    if (query.search) {
+      const matchedUsers = await User.find({
+        role: ROLES.DOCTOR,
+        deletedAt: null,
+        $or: [
+          { firstName: { $regex: query.search, $options: 'i' } },
+          { lastName: { $regex: query.search, $options: 'i' } },
+        ],
+      })
+        .select('_id')
+        .lean();
+      if (matchedUsers.length) {
+        const doctors = await this.doctorRepository.model
+          .find({ userId: { $in: matchedUsers.map((u) => u._id) }, deletedAt: null })
+          .select('_id')
+          .lean();
+        nameMatchedIds = doctors.map((d) => d._id);
+      }
+    }
+
     const result = await this.doctorRepository.paginate({
       page,
       limit,
       search: query.search,
+      nameMatchedIds,
       status: query.status,
       isActive,
       branchId: query.branchId,
@@ -240,7 +267,11 @@ class DoctorService {
         new Date(),
         branchId
       );
-      items.push(this.#mapDoctor(populated || doc, null, availability));
+      // `populated.userId` is already the full user doc (see findByIdPopulated's populate list
+      // above) — pass it through as `user` so `toSafeObject`'s `user.fullName` is actually set.
+      // This was previously always `null` here, so every list consumer expecting
+      // `doctor.user.fullName` (DoctorCard.jsx, and now the command palette) saw nothing.
+      items.push(this.#mapDoctor(populated || doc, populated?.userId || null, availability));
     }
 
     return {

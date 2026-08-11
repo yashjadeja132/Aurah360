@@ -417,12 +417,29 @@ class BillingService {
     const limit = Math.min(Number(query.limit) || 50, 100);
     const page = Math.max(Number(query.page) || 1, 1);
     const skip = (page - 1) * limit;
+
+    // Command palette / free-text search: the invoice model only carries invoiceNumber for
+    // regex matching, so a search for a patient's name is resolved to patient ids first, scoped
+    // to the same branch filter as the invoice query itself so this can never surface a patient
+    // (and therefore their invoices) outside the caller's branch scope.
+    let patientIds = null;
+    if (query.search) {
+      const patientMatches = await this.patientRepository.paginate({
+        page: 1,
+        limit: 25,
+        search: query.search,
+        primaryBranchId: query.branchId || undefined,
+      });
+      patientIds = (patientMatches.items || []).map((p) => p._id);
+    }
+
     const { items, total } = await this.invoiceRepository.list({
       branchId: query.branchId || null,
       patientId: query.patientId || null,
       status: query.status || null,
       paymentStatus: query.paymentStatus || null,
       search: query.search || null,
+      patientIds,
       limit,
       skip,
     });

@@ -132,13 +132,37 @@ class AppointmentRepository extends BaseRepository {
       if (options.to) filter.appointmentDate.$lte = endOfDay(options.to);
     }
 
+    // Command palette / free-text search: appointmentNumber/notes/reasonForVisit have no field
+    // to regex "patient name" or "doctor name" against directly. The caller (AppointmentService)
+    // resolves those to id lists first (via the same scoped patient/doctor lookups used
+    // elsewhere) and passes them in here. When either is present we build the full $or
+    // ourselves (text regex fields + id-list matches) instead of delegating to paginateModel's
+    // search option, so the result is "matches text OR matches a resolved patient/doctor" —
+    // not an accidental AND between the two.
+    const hasIdMatches = (options.patientIds && options.patientIds.length) || (options.doctorIds && options.doctorIds.length);
+    let search = options.search;
+    if (hasIdMatches && options.search?.trim()) {
+      const term = options.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(term, 'i');
+      const or = ['appointmentNumber', 'notes', 'reasonForVisit'].map((f) => ({ [f]: regex }));
+      if (options.patientIds?.length) or.push({ patientId: { $in: options.patientIds } });
+      if (options.doctorIds?.length) or.push({ doctorId: { $in: options.doctorIds } });
+      filter.$or = or;
+      search = undefined; // already folded into filter.$or above
+    } else if (hasIdMatches) {
+      const or = [];
+      if (options.patientIds?.length) or.push({ patientId: { $in: options.patientIds } });
+      if (options.doctorIds?.length) or.push({ doctorId: { $in: options.doctorIds } });
+      filter.$or = or;
+    }
+
     return paginateModel(this.model, {
       filter,
       page: options.page,
       limit: options.limit,
       sortBy: options.sortBy,
       sortOrder: options.sortOrder,
-      search: options.search,
+      search,
       searchFields: ['appointmentNumber', 'notes', 'reasonForVisit'],
       allowedSort: ['createdAt', 'appointmentDate', 'startTime', 'status', 'appointmentNumber'],
     });
