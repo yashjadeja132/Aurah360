@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useReportGenerate } from '@/modules/reports/hooks/useReports';
 import { useInvoices, useDuePayments, useDiscountApprovalQueue } from './useBilling';
+import { useCashCloses } from './useBillingOps';
 
 /** Local YYYY-MM-DD — the reports filter treats a bare date as a local-day boundary. */
 export function todayISO() {
@@ -40,6 +41,10 @@ export function useCashierDay({ branchId } = {}) {
   const day = todayISO();
   const payments = useReportGenerate('payments', { dateFrom: day, dateTo: day, ...scope });
 
+  // §0 — cash-session status: today's CashClose record for this branch, if one has been
+  // submitted yet. No record at all means the till is still OPEN (nobody has closed it today).
+  const cashCloses = useCashCloses({ ...scope, from: day, to: day });
+
   const collection = useMemo(() => {
     const rows = payments.data?.rows || [];
     const recorded = rows.filter((r) => r.status === 'RECORDED');
@@ -78,6 +83,11 @@ export function useCashierDay({ branchId } = {}) {
       isLoading: approvals.isLoading,
     },
     collection: { ...collection, isLoading: payments.isLoading, isError: payments.isError },
+    cashSession: {
+      status: cashCloses.data?.[0]?.status || 'OPEN',
+      variance: cashCloses.data?.[0]?.variance ?? null,
+      isLoading: cashCloses.isLoading,
+    },
   };
 }
 

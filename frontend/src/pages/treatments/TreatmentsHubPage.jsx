@@ -64,6 +64,10 @@ export default function TreatmentsHubPage() {
     ...(canViewSafety ? [{ id: 'safety', label: t('treatments.hub.tabs.safety', 'Safety') }] : []),
   ];
 
+  // Deep-linked from the session execution page's "Record adverse event" button — pre-fills the
+  // report form so the technician doesn't have to re-search for the patient.
+  const patientIdFromQuery = searchParams.get('patientId') || undefined;
+
   const requested = searchParams.get('tab');
   const fallback = TABS[0]?.id || null;
   const [tab, setTab] = useState(
@@ -142,7 +146,7 @@ export default function TreatmentsHubPage() {
                 <h2 className="font-display text-xl font-semibold">
                   {t('treatments.safety.register.sectionTitle', 'Adverse events')}
                 </h2>
-                <AdverseEventRegisterPanel />
+                <AdverseEventRegisterPanel patientId={patientIdFromQuery} />
               </div>
             </div>
           )}

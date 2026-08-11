@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { BadgePercent, IndianRupee, ReceiptText, Wallet } from 'lucide-react';
+import { BadgePercent, IndianRupee, Lock, ReceiptText, Wallet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
@@ -40,9 +40,21 @@ export default function CashierDashboardPage() {
   const [branchId, setBranchId] = useState('');
   const effectiveBranch = !isGlobalScope ? user?.branch || '' : branchId;
 
-  const { awaitingBilling, dues, duesAtDesk, approvals, collection } = useCashierDay({
+  const { awaitingBilling, dues, duesAtDesk, approvals, collection, cashSession } = useCashierDay({
     branchId: effectiveBranch || undefined,
   });
+
+  const CASH_SESSION_LABEL = {
+    OPEN: t('billing.cashier.cashSessionOpen', 'Open — not closed yet'),
+    DRAFT: t('billing.cashier.cashSessionOpen', 'Open — not closed yet'),
+    SUBMITTED: t('billing.cashier.cashSessionSubmitted', 'Submitted'),
+    APPROVED: t('billing.cashier.cashSessionApproved', 'Closed & approved'),
+    DISPUTED: t('billing.cashier.cashSessionDisputed', 'Disputed — reason required'),
+    PENDING_OWNER_APPROVAL: t('billing.cashier.cashSessionPendingOwner', 'Awaiting owner approval'),
+  };
+  const cashSessionTone = { DISPUTED: 'text-destructive', PENDING_OWNER_APPROVAL: 'text-warning' }[
+    cashSession.status
+  ];
 
   return (
     <section className="space-y-6">
@@ -75,7 +87,21 @@ export default function CashierDashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Tile
+          icon={Lock}
+          label={t('billing.cashier.cashSession', "Today's cash session")}
+          value={CASH_SESSION_LABEL[cashSession.status] || cashSession.status}
+          hint={
+            cashSession.variance != null && cashSession.variance !== 0
+              ? t('billing.cashier.cashSessionVarianceHint', 'Variance: {{amount}}', {
+                  amount: formatMoney(cashSession.variance),
+                })
+              : undefined
+          }
+          isLoading={cashSession.isLoading}
+          tone={cashSessionTone}
+        />
         <Tile
           icon={IndianRupee}
           label={t('billing.cashier.collectedToday', 'Collected today')}

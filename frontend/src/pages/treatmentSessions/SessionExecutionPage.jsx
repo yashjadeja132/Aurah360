@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, Plus, X } from 'lucide-react';
+import { ArrowLeft, Printer, Plus, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -154,12 +154,25 @@ export default function SessionExecutionPage() {
             {session.technician?.fullName || '—'}
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link to={treatmentSessionPrintPath(id)}>
-            <Printer className="h-4 w-4" />
-            {t('treatmentSessions.execution.print', 'Print')}
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {/* Adverse event reporting must be reachable from the session at all times — never
+              gated behind billing/completion state (spec §5). Deep-links into the Treatments
+              hub Safety tab, pre-filtered to this patient. */}
+          <PermissionGuard permissions={[PERMISSIONS.ADVERSE_EVENT_CREATE]}>
+            <Button asChild variant="destructive">
+              <Link to={`${APP_ROUTES.TREATMENT_DASHBOARD}?tab=safety&patientId=${session.patientId}`}>
+                <AlertTriangle className="h-4 w-4" />
+                {t('treatmentSessions.execution.recordAdverseEvent', 'Record adverse event')}
+              </Link>
+            </Button>
+          </PermissionGuard>
+          <Button asChild variant="outline">
+            <Link to={treatmentSessionPrintPath(id)}>
+              <Printer className="h-4 w-4" />
+              {t('treatmentSessions.execution.print', 'Print')}
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Large progress bar */}
