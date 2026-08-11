@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { ROLES } from '@/constants/rbac';
 import { usePatientDetail } from '@/modules/patients/hooks/usePatients';
@@ -21,6 +23,15 @@ import {
 // Mirrors backend/src/helpers/scope.helper.js#GLOBAL_SCOPE_ROLES — every other role is pinned
 // to their own single assigned branch (req.auth.branch server-side).
 const GLOBAL_SCOPE_ROLES = [ROLES.OWNER, ROLES.ADMIN];
+
+// Mirrors backend/src/enums/appointment.js#APPOINTMENT_TYPE.
+const APPOINTMENT_TYPE_OPTIONS = [
+  { value: 'CONSULTATION', label: 'Consultation' },
+  { value: 'FOLLOW_UP', label: 'Follow-up' },
+  { value: 'PROCEDURE', label: 'Procedure' },
+  { value: 'TREATMENT', label: 'Treatment' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 export function BookingWizard({ onCreated, initialPatientId = '' }) {
   const { t } = useTranslation();
@@ -61,6 +72,7 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
   const [branchId, setBranchId] = useState(ownBranchId);
   const [doctorId, setDoctorId] = useState('');
   const [serviceId, setServiceId] = useState('');
+  const [appointmentType, setAppointmentType] = useState('CONSULTATION');
   const [date, setDate] = useState(todayKey());
   const [slot, setSlot] = useState(null);
   const [patientId, setPatientId] = useState(initialPatientId);
@@ -117,7 +129,21 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
         <DoctorPicker value={doctorId} onChange={setDoctorId} branchId={branchId} />
       )}
 
-      {currentKey === 'service' && <ServicePicker value={serviceId} onChange={setServiceId} />}
+      {currentKey === 'service' && (
+        <div className="space-y-4">
+          <ServicePicker value={serviceId} onChange={setServiceId} />
+          <div className="space-y-2">
+            <Label>{t('appointments.wizard.appointmentType', 'Appointment type')}</Label>
+            <Select value={appointmentType} onChange={(e) => setAppointmentType(e.target.value)}>
+              {APPOINTMENT_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {t(`appointments.type.${o.value}`, o.label)}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      )}
 
       {currentKey === 'slot' && (
         <SlotPicker
@@ -181,6 +207,11 @@ export function BookingWizard({ onCreated, initialPatientId = '' }) {
                 slot,
                 reasonForVisit,
                 notes,
+                appointmentType,
+                // Guided wizard is used from the front desk's "Book" and "Book appointment"
+                // shortcuts — a receptionist scheduling ahead, not a walk-in — so `PHONE` best
+                // matches "booked at/by the desk, not a literal walk-in, not self-service online".
+                source: 'PHONE',
               })
             }
           >

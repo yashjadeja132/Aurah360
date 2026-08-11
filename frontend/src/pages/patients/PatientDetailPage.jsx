@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +27,10 @@ export default function PatientDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
-  const [tab, setTab] = useState('overview');
+  const [searchParams] = useSearchParams();
+  // Deep-link support (e.g. `?tab=documents` from the reception desk's "Upload report" shortcut) —
+  // falls back to Overview for any unrecognised/absent value.
+  const [tab, setTab] = useState(searchParams.get('tab') || 'overview');
   const { data: patient, isLoading, isError } = usePatientDetail(id);
   const { remove, updateConsent } = usePatientMutations();
   const { user } = useAuth();

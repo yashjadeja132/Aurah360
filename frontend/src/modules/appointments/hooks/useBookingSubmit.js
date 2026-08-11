@@ -21,6 +21,12 @@ export function useBookingSubmit(onCreated) {
     slot,
     reasonForVisit,
     notes,
+    // `WALK_IN` is only correct for the literal walk-in dialog — the guided BookingWizard /
+    // QuickBookingPanel are the receptionist booking something at the front desk (in person or
+    // over the phone) rather than a patient physically walking up without an appointment, so
+    // `PHONE` is the more honest default for every OTHER caller of this shared submit path.
+    source = 'PHONE',
+    appointmentType = 'CONSULTATION',
   }) => {
     try {
       const res = await create.mutateAsync({
@@ -33,8 +39,8 @@ export function useBookingSubmit(onCreated) {
         endTime: slot.end,
         reasonForVisit: reasonForVisit || null,
         notes: notes || null,
-        source: 'WALK_IN',
-        appointmentType: 'CONSULTATION',
+        source,
+        appointmentType,
       });
       toast.success(
         t('appointments.wizard.toastBooked', 'Booked {{number}}', {

@@ -6,9 +6,13 @@ import {
   ClipboardList,
   Clock,
   ConciergeBell,
+  FileUp,
   ListOrdered,
+  LogIn,
+  PhoneCall,
   UserPlus,
   Users,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +35,8 @@ import { CheckInDialog } from '@/modules/reception/components/CheckInDialog';
 import { WalkInDialog } from '@/modules/reception/components/WalkInDialog';
 import { QueueBoard } from '@/modules/reception/components/QueueBoard';
 import { NeedsAttentionPanel } from '@/modules/reception/components/NeedsAttentionPanel';
+import { PatientShortcutDialog } from '@/modules/reception/components/PatientShortcutDialog';
+import { QuickAddPatientDialog } from '@/modules/patients/components/QuickAddPatientDialog';
 import { useQueueSocket } from '@/modules/reception/hooks/useQueueSocket';
 import { useUndoCheckIn } from '@/modules/reception/hooks/useReception';
 import {
@@ -94,6 +100,10 @@ export default function ReceptionDeskPage() {
   const [search, setSearch] = useState('');
   const [checkInAppt, setCheckInAppt] = useState(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
+  const [newPatientOpen, setNewPatientOpen] = useState(false);
+  // Spec §0 shortcut palette: the four shortcuts that need "find the patient first" (Check-in,
+  // Upload report, Record payment, Call patient) share one dialog, distinguished by `shortcut`.
+  const [shortcut, setShortcut] = useState(null);
 
   useQueueSocket({ branchId, enabled: Boolean(branchId) });
 
@@ -129,12 +139,15 @@ export default function ReceptionDeskPage() {
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {/*
+              Spec §0 shortcut palette, literally: New patient · Book appointment · Check-in ·
+              Upload report · Record payment · Call patient. "Queue board" and "Walk-in" below
+              are additional shortcuts this screen already had; kept alongside, not replaced.
+            */}
             <PermissionGuard permissions={[PERMISSIONS.PATIENTS_CREATE, PERMISSIONS.PATIENTS_ALL]}>
-              <Button asChild variant="outline">
-                <Link to={APP_ROUTES.PATIENT_CREATE}>
-                  <Users className="h-4 w-4" />
-                  {t('receptionDesk.actions.register', 'Register patient')}
-                </Link>
+              <Button variant="outline" onClick={() => setNewPatientOpen(true)}>
+                <Users className="h-4 w-4" />
+                {t('receptionDesk.actions.newPatient', 'New patient')}
               </Button>
             </PermissionGuard>
             <PermissionGuard
@@ -143,10 +156,32 @@ export default function ReceptionDeskPage() {
               <Button asChild variant="outline">
                 <Link to={APP_ROUTES.APPOINTMENT_BOOK}>
                   <CalendarPlus className="h-4 w-4" />
-                  {t('receptionDesk.actions.book', 'Book')}
+                  {t('receptionDesk.actions.book', 'Book appointment')}
                 </Link>
               </Button>
             </PermissionGuard>
+            <PermissionGuard permissions={[PERMISSIONS.RECEPTION_CHECKIN, PERMISSIONS.RECEPTION_ALL]}>
+              <Button variant="outline" onClick={() => setShortcut('checkin')} disabled={!branchId}>
+                <LogIn className="h-4 w-4" />
+                {t('receptionDesk.actions.checkIn', 'Check-in')}
+              </Button>
+            </PermissionGuard>
+            <PermissionGuard permissions={[PERMISSIONS.PATIENTS_DOCUMENTS, PERMISSIONS.PATIENTS_ALL]}>
+              <Button variant="outline" onClick={() => setShortcut('documents')}>
+                <FileUp className="h-4 w-4" />
+                {t('receptionDesk.actions.uploadReport', 'Upload report')}
+              </Button>
+            </PermissionGuard>
+            <PermissionGuard permissions={[PERMISSIONS.BILLING_PAYMENT, PERMISSIONS.BILLING_ALL]}>
+              <Button variant="outline" onClick={() => setShortcut('payment')}>
+                <Wallet className="h-4 w-4" />
+                {t('receptionDesk.actions.recordPayment', 'Record payment')}
+              </Button>
+            </PermissionGuard>
+            <Button variant="outline" onClick={() => setShortcut('call')}>
+              <PhoneCall className="h-4 w-4" />
+              {t('receptionDesk.actions.callPatient', 'Call patient')}
+            </Button>
             <Button asChild variant="outline">
               <Link to={APP_ROUTES.QUEUE}>
                 <ListOrdered className="h-4 w-4" />
@@ -377,6 +412,18 @@ export default function ReceptionDeskPage() {
         appointment={checkInAppt}
       />
       <WalkInDialog open={walkInOpen} onOpenChange={setWalkInOpen} branchId={branchId} />
+      <QuickAddPatientDialog
+        open={newPatientOpen}
+        onOpenChange={setNewPatientOpen}
+        defaultBranchId={branchId}
+      />
+      <PatientShortcutDialog
+        open={Boolean(shortcut)}
+        onOpenChange={(open) => !open && setShortcut(null)}
+        mode={shortcut}
+        branchId={branchId}
+        todaysAppointments={desk.appointments}
+      />
     </section>
   );
 }

@@ -114,6 +114,11 @@ export const ROLE_PERMISSIONS = Object.freeze({
     // the billing.* wildcard (see PERMISSIONS.BILLING_VOID_FINALIZED).
     PERMISSIONS.BILLING_VOID_FINALIZED,
     PERMISSIONS.BILLING_WRITE_OFF,
+    // INVENTORY_ADJUST_APPROVE was added for the stock-adjustment approval queue and the
+    // PHARMACIST self-approval fix's own comment documents the intent as "Manager/Owner/Admin
+    // only" — Admin was missing the actual grant, which left the approval queue unreachable for
+    // this role despite STOCK_ADJUST/INVENTORY_ALL already being held.
+    PERMISSIONS.INVENTORY_ADJUST_APPROVE,
   ],
 
   [ROLES.BRANCH_MANAGER]: [
