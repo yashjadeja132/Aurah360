@@ -43,7 +43,21 @@ export default function AppointmentListPage() {
   const { data, isLoading, isError, error } = useAppointmentList(params);
   const { data: doctorsData } = useDoctorList({ limit: 50 });
   const { data: branchesData } = useBranchList({ limit: 50 });
+  const branchName = useMemo(() => {
+    const map = {};
+    (branchesData?.items || branchesData?.branches || []).forEach((b) => { map[b.id || b._id] = b.displayName || b.name; });
+    return map;
+  }, [branchesData]);
   const clinicId = useClinicId();
+
+  // Quick status tabs (trueatoms-style) — set the status filter.
+  const TABS = [
+    { id: '', label: t('appointments.tabs.all', 'All') },
+    { id: 'CONFIRMED', label: t('appointments.tabs.upcoming', 'Upcoming') },
+    { id: 'COMPLETED', label: t('appointments.tabs.completed', 'Completed') },
+    { id: 'CANCELLED', label: t('appointments.tabs.cancelled', 'Cancelled') },
+    { id: 'NO_SHOW', label: t('appointments.tabs.missed', 'Missed') },
+  ];
   useEffect(() => {
     setFilters((p) => (p.branchId === clinicId ? p : { ...p, branchId: clinicId, page: 1 }));
   }, [clinicId]);
@@ -75,6 +89,21 @@ export default function AppointmentListPage() {
             </Button>
           </PermissionGuard>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1 rounded-lg border p-1">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id || 'all'}
+            type="button"
+            onClick={() => setFilters((p) => ({ ...p, status: tab.id, page: 1 }))}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+              filters.status === tab.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -128,7 +157,7 @@ export default function AppointmentListPage() {
         </p>
       )}
 
-      <AppointmentTable items={data?.items || []} isLoading={isLoading} />
+      <AppointmentTable items={data?.items || []} isLoading={isLoading} branchName={branchName} />
       <Pagination meta={data?.meta} onPageChange={(page) => setFilters((p) => ({ ...p, page }))} />
     </section>
   );

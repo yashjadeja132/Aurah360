@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ColorDot } from '@/components/common/ColorDot';
 import { appointmentDetailPath } from '@/constants/routes';
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_VARIANT } from '../constants';
 
-export function AppointmentTable({ items = [], isLoading }) {
+export function AppointmentTable({ items = [], isLoading, branchName = {} }) {
   const { t } = useTranslation();
 
   if (isLoading) {
@@ -38,6 +39,8 @@ export function AppointmentTable({ items = [], isLoading }) {
             <TableHead>{t('appointments.table.number', 'Number')}</TableHead>
             <TableHead>{t('appointments.table.patient', 'Patient')}</TableHead>
             <TableHead>{t('appointments.table.doctor', 'Doctor')}</TableHead>
+            <TableHead>{t('appointments.table.branch', 'Branch')}</TableHead>
+            <TableHead>{t('appointments.table.service', 'Service')}</TableHead>
             <TableHead>{t('appointments.table.when', 'When')}</TableHead>
             <TableHead>{t('appointments.table.status', 'Status')}</TableHead>
             <TableHead className="text-right">{t('appointments.table.actions', 'Actions')}</TableHead>
@@ -51,7 +54,16 @@ export function AppointmentTable({ items = [], isLoading }) {
                 <p className="font-medium">{a.patient?.fullName || '—'}</p>
                 <p className="text-xs text-muted-foreground">{a.patient?.mrn}</p>
               </TableCell>
-              <TableCell>{a.doctor?.name || a.doctor?.doctorCode || '—'}</TableCell>
+              <TableCell>{a.doctor?.name || a.doctor?.user?.fullName || a.doctor?.doctorCode || '—'}</TableCell>
+              <TableCell>
+                {a.branchId ? (
+                  <span className="flex items-center gap-1.5 text-sm">
+                    <ColorDot id={a.branchId} />
+                    {branchName[a.branchId] || a.branch?.displayName || a.branch?.name || '—'}
+                  </span>
+                ) : '—'}
+              </TableCell>
+              <TableCell className="text-sm">{a.service?.name || a.serviceName || '—'}</TableCell>
               <TableCell className="text-sm">
                 {a.appointmentDate ? new Date(a.appointmentDate).toLocaleDateString() : '—'}
                 <span className="text-muted-foreground"> · {a.startTime}</span>
