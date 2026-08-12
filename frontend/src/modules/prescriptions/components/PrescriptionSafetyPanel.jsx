@@ -7,11 +7,32 @@ import { Label } from '@/components/ui/label';
 /**
  * RX-SAFETY — renders the server's allergy/interaction evaluation.
  *
- * This panel is DISPLAY ONLY. The block lives on the server (POST /prescriptions/:id/finalize
- * returns 409 PRESCRIPTION_SAFETY_BLOCKED); hiding or patching this component cannot finalize a
- * blocked prescription. It exists so the block and its override are usable, and so the honest
- * "nothing was checked" state is visible rather than implied.
+ * DISPLAY ONLY. The block lives on the server (POST /prescriptions/:id/finalize returns 409
+ * PRESCRIPTION_SAFETY_BLOCKED); hiding this component cannot finalize a blocked prescription.
+ * The copy here is written for a clinician — raw codes and developer/API text are translated to
+ * plain guidance and stripped.
  */
+
+// Doctor-friendly label per advisory code.
+const FRIENDLY_LABEL = {
+  ALLERGY_HISTORY_NOT_CONFIRMED: 'Confirm the patient’s allergy history before dispensing',
+  INTERACTION_SOURCE_NOT_CONFIGURED: 'Review drug interactions manually',
+  NO_KNOWN_ALLERGY_UNCONFIRMED: 'Confirm “no known drug allergies”',
+};
+const FRIENDLY_DETAIL = {
+  ALLERGY_HISTORY_NOT_CONFIRMED: 'No allergy history is on file for this patient — please ask and record it.',
+  INTERACTION_SOURCE_NOT_CONFIGURED: 'Automatic interaction checking is not enabled — please review the combination yourself.',
+};
+
+// Strip any developer/API jargon from server-supplied text.
+function sanitize(text) {
+  if (!text) return '';
+  return String(text)
+    .split(/Add rules via|POST \/|GET \/|\/api\/v1|wire a licensed|An empty result/i)[0]
+    .replace(/\s+—\s*$/, '')
+    .trim();
+}
+
 export function PrescriptionSafetyPanel({
   safety,
   overrideReason,
@@ -25,24 +46,29 @@ export function PrescriptionSafetyPanel({
   const blockingAlerts = (safety.alerts || []).filter((a) => a.blocking);
   const advisoryAlerts = (safety.alerts || []).filter((a) => !a.blocking);
 
+  // Nothing is actually blocking → show a single calm reminder line, not an alarming panel.
+  if (!blocked) {
+    return (
+      <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+        <span>
+          {t(
+            'prescriptions.safety.reminder',
+            'No blocking issues. Please confirm the patient’s allergies and review interactions before dispensing.'
+          )}
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`space-y-3 rounded-lg border p-4 ${
-        blocked ? 'border-destructive/60 bg-destructive/5' : 'bg-muted/30'
-      }`}
-    >
+    <div className="space-y-3 rounded-lg border border-destructive/60 bg-destructive/5 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        {blocked ? (
-          <ShieldAlert className="h-4 w-4 text-destructive" />
-        ) : (
-          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-        )}
+        <ShieldAlert className="h-4 w-4 text-destructive" />
         <h2 className="text-sm font-semibold">
           {t('prescriptions.safety.title', 'Prescribing safety check')}
         </h2>
-        <Badge variant={blocked ? 'destructive' : safety.status === 'WARN' ? 'warning' : 'success'}>
-          {safety.status}
-        </Badge>
+        <Badge variant="destructive">{t('prescriptions.safety.blocked', 'Needs review')}</Badge>
       </div>
 
       {blockingAlerts.length > 0 && (
@@ -50,9 +76,7 @@ export function PrescriptionSafetyPanel({
           {blockingAlerts.map((a, i) => (
             <li key={`${a.type}-${i}`} className="flex gap-2 text-sm text-destructive">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                <strong>{a.type}</strong> — {a.detail}
-              </span>
+              <span>{FRIENDLY_DETAIL[a.type] || sanitize(a.detail) || FRIENDLY_LABEL[a.type] || a.type}</span>
             </li>
           ))}
         </ul>
@@ -63,30 +87,13 @@ export function PrescriptionSafetyPanel({
           {advisoryAlerts.map((a, i) => (
             <li key={`${a.type}-${i}`} className="flex gap-2 text-xs text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                <strong>{a.type}</strong> — {a.detail}
-              </span>
+              <span>{FRIENDLY_DETAIL[a.type] || FRIENDLY_LABEL[a.type] || sanitize(a.detail)}</span>
             </li>
           ))}
         </ul>
       )}
 
-      {/* Coverage disclosure — an empty result must never read as "checked, all clear". */}
-      <div className="space-y-1 border-t pt-2 text-xs text-muted-foreground">
-        <p>
-          {t('prescriptions.safety.allergyScope', 'Allergy check:')}{' '}
-          {safety.allergy?.historyStatus} · {safety.allergy?.limits}
-        </p>
-        <p>
-          {t('prescriptions.safety.interactionScope', 'Interaction check:')}{' '}
-          {safety.interaction?.checked
-            ? t('prescriptions.safety.interactionChecked', 'source')
-            : t('prescriptions.safety.interactionNotChecked', 'NOT PERFORMED —')}{' '}
-          {safety.interaction?.source} · {safety.interaction?.note}
-        </p>
-      </div>
-
-      {blocked && !readOnly && (
+      {!readOnly && (
         <div className="space-y-2 border-t pt-3">
           {safety.canOverride ? (
             <>
