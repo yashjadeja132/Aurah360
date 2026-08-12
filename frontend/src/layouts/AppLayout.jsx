@@ -140,7 +140,7 @@ function SidebarContent({ user, visibleGroups, onNavigate }) {
                 <NavLink
                   key={to}
                   to={to}
-                  end={to === APP_ROUTES.DASHBOARD}
+                  end={to === APP_ROUTES.DASHBOARD || to === APP_ROUTES.APPOINTMENTS}
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     cn(
